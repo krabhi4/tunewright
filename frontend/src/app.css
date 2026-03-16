@@ -1,0 +1,113 @@
+:root {
+	/* Backgrounds — layered depth, deep navy base */
+	--bg-base: #0f0f1a;
+	--bg-surface: #171728;
+	--bg-elevated: #1e1e36;
+	--bg-hover: #262648;
+	--bg-selected: rgba(99, 102, 241, 0.12);
+	--bg-selected-strong: rgba(99, 102, 241, 0.22);
+
+	/* Text */
+	--text-primary: #e0e0ee;
+	--text-secondary: #8888a8;
+	--text-muted: #555570;
+	--text-placeholder: #444460;
+
+	/* Accent — indigo */
+	--accent: #6366f1;
+	--accent-hover: #818cf8;
+	--accent-muted: rgba(99, 102, 241, 0.25);
+	--accent-subtle: rgba(99, 102, 241, 0.08);
+
+	/* Semantic */
+	--success: #34d399;
+	--warning: #fbbf24;
+	--error: #ef4444;
+	--modified: #818cf8;
+
+	/* Grid */
+	--grid-header-bg: #1a1a30;
+	--grid-border: #252542;
+	--grid-row-alt: rgba(255, 255, 255, 0.015);
+	--grid-row-hover: rgba(255, 255, 255, 0.04);
+
+	/* Typography */
+	--font-ui: 'Inter', -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
+	--font-mono: 'JetBrains Mono', 'Fira Code', 'SF Mono', monospace;
+
+	/* Sizing */
+	--toolbar-height: 44px;
+	--statusbar-height: 26px;
+	--sidebar-width: 272px;
+	--sidebar-min: 200px;
+	--sidebar-max: 400px;
+
+	/* Borders */
+	--border: #252542;
+	--border-subtle: #1e1e36;
+	--radius-sm: 3px;
+	--radius-md: 5px;
+}
+
+* {
+	margin: 0;
+	padding: 0;
+	box-sizing: border-box;
+}
+
+html, body {
+	height: 100%;
+	overflow: hidden;
+	font-family: var(--font-ui);
+	font-size: 13px;
+	line-height: 1.4;
+	color: var(--text-primary);
+	background: var(--bg-base);
+	-webkit-font-smoothing: antialiased;
+	-moz-osx-font-smoothing: grayscale;
+}
+
+/* Scrollbar styling */
+::-webkit-scrollbar {
+	width: 8px;
+	height: 8px;
+}
+
+::-webkit-scrollbar-track {
+	background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+	background: var(--border);
+	border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+	background: var(--text-muted);
+}
+
+/* Selection */
+::selection {
+	background: var(--accent-muted);
+	color: var(--text-primary);
+}
+
+/* Focus */
+:focus-visible {
+	outline: 1.5px solid var(--accent);
+	outline-offset: -1.5px;
+}
+
+/* Utility: monospace for data values */
+.mono {
+	font-family: var(--font-mono);
+	font-size: 12px;
+}
+
+.text-secondary {
+	color: var(--text-secondary);
+}
+
+.text-muted {
+	color: var(--text-muted);
+}

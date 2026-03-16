@@ -1,0 +1,14 @@
+services:
+  tagstudio:
+    build: .
+    image: tagstudio:latest
+    ports:
+      - "8080:8080"
+    volumes:
+      - /path/to/music:/data:rw
+    environment:
+      - TAGSTUDIO_AUTH_ENABLED=false
+      # - TAGSTUDIO_USERNAME=admin
+      # - TAGSTUDIO_PASSWORD=changeme
+      # - DISCOGS_API_TOKEN=your_token_here
+    restart: unless-stopped

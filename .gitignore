@@ -1,0 +1,22 @@
+# Rust
+/target/
+**/*.rs.bk
+
+# Node / Frontend
+frontend/node_modules/
+frontend/.svelte-kit/
+frontend/build/
+
+# Environment
+.env
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+
+# Superpowers brainstorm
+.superpowers/
