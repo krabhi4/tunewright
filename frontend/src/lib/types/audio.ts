@@ -30,6 +30,7 @@ export interface TagData {
 	duration_secs?: number;
 	format?: string;
 	tag_types?: string[];
+	has_cover?: boolean;
 }
 
 export interface FileListResult {

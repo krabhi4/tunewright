@@ -32,6 +32,18 @@ interface WriteTagsResponse {
 	results: WriteResult[];
 }
 
+/** Read full audio properties (duration, bitrate, sample rate). Slower. */
+export async function readProperties(
+	ids: string[],
+	paths: Record<string, string>
+): Promise<Record<string, TagData>> {
+	const res = await apiFetch<ReadTagsResponse>('/tags/read-properties', {
+		method: 'POST',
+		body: JSON.stringify({ ids, paths })
+	});
+	return res.tags;
+}
+
 export async function writeTags(changes: WriteEntry[]): Promise<WriteResult[]> {
 	const res = await apiFetch<WriteTagsResponse>('/tags/write', {
 		method: 'POST',

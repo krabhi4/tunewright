@@ -2,7 +2,7 @@ use axum::extract::{Query, State};
 use axum::Json;
 use serde::Deserialize;
 use tagstudio_core::scanner;
-use tagstudio_core::types::{DirNode, FileListResult};
+use tagstudio_core::types::{DirNode, FileListResult, TagStudioError};
 
 use crate::error::AppError;
 use crate::state::AppState;
@@ -26,13 +26,21 @@ pub async fn list_files(
     Query(params): Query<ListFilesQuery>,
 ) -> Result<Json<FileListResult>, AppError> {
     let path = if params.path.is_empty() {
-        "/"
+        "/".to_string()
     } else {
-        &params.path
+        params.path.clone()
     };
 
-    let result =
-        scanner::scan_directory(&state.data_root, path, params.offset, params.limit)?;
+    let data_root = state.data_root.clone();
+    let offset = params.offset;
+    let limit = params.limit;
+
+    let result = tokio::task::spawn_blocking(move || {
+        scanner::scan_directory(&data_root, &path, offset, limit)
+    })
+    .await
+    .map_err(|e| AppError(TagStudioError::TagReadError(format!("Task join error: {}", e))))?
+    ?;
 
     Ok(Json(result))
 }
@@ -44,13 +52,22 @@ pub struct DirTreeQuery {
 }
 
 fn default_depth() -> usize {
-    3
+    2
 }
 
 pub async fn dir_tree(
     State(state): State<AppState>,
     Query(params): Query<DirTreeQuery>,
 ) -> Result<Json<DirNode>, AppError> {
-    let tree = scanner::build_dir_tree(&state.data_root, params.depth)?;
+    let data_root = state.data_root.clone();
+    let depth = params.depth;
+
+    let tree = tokio::task::spawn_blocking(move || {
+        scanner::build_dir_tree(&data_root, depth)
+    })
+    .await
+    .map_err(|e| AppError(TagStudioError::TagReadError(format!("Task join error: {}", e))))?
+    ?;
+
     Ok(Json(tree))
 }

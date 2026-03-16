@@ -2,6 +2,7 @@
 	import Toolbar from '$lib/components/layout/Toolbar.svelte';
 	import StatusBar from '$lib/components/layout/StatusBar.svelte';
 	import FilterBar from '$lib/components/layout/FilterBar.svelte';
+	import PathBar from '$lib/components/layout/PathBar.svelte';
 	import TagPanel from '$lib/components/tagpanel/TagPanel.svelte';
 	import FileGrid from '$lib/components/grid/FileGrid.svelte';
 	import FolderPicker from '$lib/components/common/FolderPicker.svelte';
@@ -13,14 +14,18 @@
 		selectedCount,
 		loading,
 		loadDirectory,
-		currentPath
+		currentPath,
+		selectedFiles
 	} from '$lib/stores/files';
-	import { filterVisible } from '$lib/stores/ui';
-	import { sidebarWidth, sidebarCollapsed } from '$lib/stores/ui';
-	import { clearTags, fetchTagsForFiles, selectedTags, hasPendingEdits, saveAllEdits, pendingEdits } from '$lib/stores/tags';
+	import { filterVisible, sidebarWidth, sidebarCollapsed } from '$lib/stores/ui';
+	import {
+		clearTags,
+		fetchTagsForFiles,
+		hasPendingEdits,
+		saveAllEdits,
+		pendingEdits
+	} from '$lib/stores/tags';
 	import { selectedIds } from '$lib/stores/files';
-
-	import { selectedFiles } from '$lib/stores/files';
 
 	let folderPickerOpen = $state(false);
 	let renameModalOpen = $state(false);
@@ -62,8 +67,6 @@
 		$files.reduce((sum, f) => sum + (f.duration_secs ?? 0), 0)
 	);
 	let totalSize = $derived($files.reduce((sum, f) => sum + f.size, 0));
-
-	// Keyboard shortcuts
 	let modifiedCount = $derived($pendingEdits.size);
 
 	function handleKeydown(e: KeyboardEvent) {
@@ -102,6 +105,8 @@
 	hasPendingEdits={$hasPendingEdits}
 	hasSelection={$selectedCount > 0}
 />
+
+<PathBar />
 
 <FilterBar />
 

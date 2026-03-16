@@ -37,7 +37,7 @@ pub fn preview_renames(
             .to_string();
 
         // Read tags for this file
-        let tags = audio::read_tags(&full_path).unwrap_or_default();
+        let tags = audio::read_tags_fast(&full_path).unwrap_or_default();
         let new_stem = format_string::evaluate(format, &tags);
 
         let new_name = if new_stem.is_empty() {

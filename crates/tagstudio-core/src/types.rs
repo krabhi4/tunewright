@@ -95,6 +95,8 @@ pub struct TagData {
     pub format: Option<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub tag_types: Vec<String>,
+    #[serde(default)]
+    pub has_cover: bool,
 }
 
 /// Directory tree node for folder picker

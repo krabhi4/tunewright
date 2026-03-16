@@ -108,17 +108,16 @@ pub fn scan_directory(
             })
             .unwrap_or_default();
 
-        // Quick probe for duration and cover art presence
-        let (duration_secs, has_cover) = probe_file_quick(&path);
-
+        // Skip probing files here for speed — duration and cover art
+        // will be fetched lazily via the tags endpoint
         files.push(FileEntry {
             id,
             filename,
             relative_path: relative_str,
             format,
             size,
-            duration_secs,
-            has_cover,
+            duration_secs: None,
+            has_cover: false,
             modified_at,
         });
     }

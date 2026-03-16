@@ -1,35 +1,46 @@
 use crate::types::{TagData, TagStudioError, TagWriteChanges, WriteResult};
-use lofty::config::WriteOptions;
+use lofty::config::{ParseOptions, ParsingMode, WriteOptions};
 use lofty::file::{AudioFile, TaggedFileExt};
 use lofty::probe::Probe;
 use lofty::tag::{Accessor, Tag};
+use rayon::prelude::*;
 use std::collections::HashMap;
 use std::path::Path;
 
-/// Read full tag data from an audio file
-pub fn read_tags(path: &Path) -> Result<TagData, TagStudioError> {
+/// Fast parse options: tags only, no audio properties, no cover art data.
+/// This only reads the tag headers (first few KB of the file).
+fn fast_parse_options() -> ParseOptions {
+    ParseOptions::new()
+        .read_properties(false)
+        .read_cover_art(false)
+        .parsing_mode(ParsingMode::Relaxed)
+}
+
+/// Full parse options: everything including audio properties.
+/// Needed for duration, bitrate, sample rate.
+fn full_parse_options() -> ParseOptions {
+    ParseOptions::new()
+        .read_properties(true)
+        .read_cover_art(false) // still skip loading cover art bytes
+        .parsing_mode(ParsingMode::BestAttempt)
+}
+
+/// Read tags FAST — skips audio properties and cover art data.
+/// Returns tag text fields only (title, artist, album, etc.).
+/// Use this for populating the grid quickly.
+pub fn read_tags_fast(path: &Path) -> Result<TagData, TagStudioError> {
     let tagged = Probe::open(path)
         .map_err(|e| TagStudioError::TagReadError(format!("{}: {}", path.display(), e)))?
+        .options(fast_parse_options())
         .read()
         .map_err(|e| TagStudioError::TagReadError(format!("{}: {}", path.display(), e)))?;
 
-    // Get audio properties
-    let props = tagged.properties();
-    let duration = props.duration();
-    let duration_secs = if duration.as_secs() > 0 || duration.subsec_millis() > 0 {
-        Some(duration.as_secs_f64())
-    } else {
-        None
-    };
-
-    // Collect tag type names
     let tag_types: Vec<String> = tagged
         .tags()
         .iter()
         .map(|t| format!("{:?}", t.tag_type()))
         .collect();
 
-    // Merge all tags (prefer first non-empty value across tag types)
     let tags: Vec<&Tag> = tagged.tags().iter().collect();
 
     let title = first_string(&tags, |t| t.title());
@@ -43,12 +54,82 @@ pub fn read_tags(path: &Path) -> Result<TagData, TagStudioError> {
     let disc_number = tags.iter().find_map(|t| t.disk());
     let disc_total = tags.iter().find_map(|t| t.disk_total());
 
-    // Get album artist and composer from item keys
     let album_artist = first_item_value(&tags, "ALBUMARTIST")
         .or_else(|| first_item_value(&tags, "ALBUM ARTIST"))
         .or_else(|| first_item_value(&tags, "TPE2"));
     let composer = first_item_value(&tags, "COMPOSER")
         .or_else(|| first_item_value(&tags, "TCOM"));
+
+    // Check picture count without loading picture data
+    let has_cover = tags.iter().any(|t| !t.pictures().is_empty());
+
+    Ok(TagData {
+        title,
+        artist,
+        album,
+        album_artist,
+        year,
+        track_number,
+        track_total,
+        disc_number,
+        disc_total,
+        genre,
+        comment,
+        composer,
+        // Audio properties not available in fast mode
+        bitrate: None,
+        sample_rate: None,
+        channels: None,
+        duration_secs: None,
+        format: Some(format!("{:?}", tagged.file_type())),
+        tag_types,
+        has_cover,
+    })
+}
+
+/// Read tags with full audio properties (duration, bitrate, sample rate).
+/// Slower — use for detailed view or when user explicitly requests properties.
+pub fn read_tags_full(path: &Path) -> Result<TagData, TagStudioError> {
+    let tagged = Probe::open(path)
+        .map_err(|e| TagStudioError::TagReadError(format!("{}: {}", path.display(), e)))?
+        .options(full_parse_options())
+        .read()
+        .map_err(|e| TagStudioError::TagReadError(format!("{}: {}", path.display(), e)))?;
+
+    let props = tagged.properties();
+    let duration = props.duration();
+    let duration_secs = if duration.as_secs() > 0 || duration.subsec_millis() > 0 {
+        Some(duration.as_secs_f64())
+    } else {
+        None
+    };
+
+    let tag_types: Vec<String> = tagged
+        .tags()
+        .iter()
+        .map(|t| format!("{:?}", t.tag_type()))
+        .collect();
+
+    let tags: Vec<&Tag> = tagged.tags().iter().collect();
+
+    let title = first_string(&tags, |t| t.title());
+    let artist = first_string(&tags, |t| t.artist());
+    let album = first_string(&tags, |t| t.album());
+    let genre = first_string(&tags, |t| t.genre());
+    let comment = first_string(&tags, |t| t.comment());
+    let year = tags.iter().find_map(|t| t.year());
+    let track_number = tags.iter().find_map(|t| t.track());
+    let track_total = tags.iter().find_map(|t| t.track_total());
+    let disc_number = tags.iter().find_map(|t| t.disk());
+    let disc_total = tags.iter().find_map(|t| t.disk_total());
+
+    let album_artist = first_item_value(&tags, "ALBUMARTIST")
+        .or_else(|| first_item_value(&tags, "ALBUM ARTIST"))
+        .or_else(|| first_item_value(&tags, "TPE2"));
+    let composer = first_item_value(&tags, "COMPOSER")
+        .or_else(|| first_item_value(&tags, "TCOM"));
+
+    let has_cover = tags.iter().any(|t| !t.pictures().is_empty());
 
     Ok(TagData {
         title,
@@ -69,30 +150,49 @@ pub fn read_tags(path: &Path) -> Result<TagData, TagStudioError> {
         duration_secs,
         format: Some(format!("{:?}", tagged.file_type())),
         tag_types,
+        has_cover,
     })
 }
 
-/// Batch read tags for multiple files. Returns a map of relative_path -> TagData.
-/// Errors for individual files are silently skipped (logged).
+/// Parallel batch read tags (fast mode — tags only, no audio properties).
+/// Uses rayon to read multiple files concurrently across CPU cores.
 pub fn batch_read_tags(
     data_root: &Path,
     relative_paths: &[String],
 ) -> HashMap<String, TagData> {
-    let mut results = HashMap::new();
-
-    for rel_path in relative_paths {
-        let full_path = data_root.join(rel_path);
-        match read_tags(&full_path) {
-            Ok(tags) => {
-                results.insert(rel_path.clone(), tags);
+    relative_paths
+        .par_iter()
+        .filter_map(|rel_path| {
+            let full_path = data_root.join(rel_path);
+            match read_tags_fast(&full_path) {
+                Ok(tags) => Some((rel_path.clone(), tags)),
+                Err(e) => {
+                    tracing::warn!("Failed to read tags for {}: {}", rel_path, e);
+                    None
+                }
             }
-            Err(e) => {
-                tracing::warn!("Failed to read tags for {}: {}", rel_path, e);
-            }
-        }
-    }
+        })
+        .collect()
+}
 
-    results
+/// Parallel batch read tags with full audio properties.
+pub fn batch_read_tags_full(
+    data_root: &Path,
+    relative_paths: &[String],
+) -> HashMap<String, TagData> {
+    relative_paths
+        .par_iter()
+        .filter_map(|rel_path| {
+            let full_path = data_root.join(rel_path);
+            match read_tags_full(&full_path) {
+                Ok(tags) => Some((rel_path.clone(), tags)),
+                Err(e) => {
+                    tracing::warn!("Failed to read tags for {}: {}", rel_path, e);
+                    None
+                }
+            }
+        })
+        .collect()
 }
 
 /// Write tag changes to a single audio file
@@ -102,7 +202,6 @@ pub fn write_tags(path: &Path, changes: &TagWriteChanges) -> Result<(), TagStudi
         .read()
         .map_err(|e| TagStudioError::TagWriteError(format!("{}: {}", path.display(), e)))?;
 
-    // Get or create the primary tag
     let primary_type = tagged
         .primary_tag()
         .map(|t| t.tag_type())
@@ -116,7 +215,6 @@ pub fn write_tags(path: &Path, changes: &TagWriteChanges) -> Result<(), TagStudi
         }
     };
 
-    // Apply changes (only fields that are Some)
     if let Some(ref v) = changes.title {
         tag.set_title(v.clone());
     }
@@ -148,7 +246,6 @@ pub fn write_tags(path: &Path, changes: &TagWriteChanges) -> Result<(), TagStudi
         tag.set_disk_total(v);
     }
 
-    // Save the file
     tagged
         .save_to_path(path, WriteOptions::default())
         .map_err(|e| TagStudioError::TagWriteError(format!("{}: {}", path.display(), e)))?;
@@ -159,7 +256,7 @@ pub fn write_tags(path: &Path, changes: &TagWriteChanges) -> Result<(), TagStudi
 /// Batch write tags. Returns per-file results.
 pub fn batch_write_tags(
     data_root: &Path,
-    changes: &[(String, String, TagWriteChanges)], // (id, relative_path, changes)
+    changes: &[(String, String, TagWriteChanges)],
 ) -> Vec<WriteResult> {
     changes
         .iter()

@@ -8,7 +8,7 @@ COPY frontend/ ./
 RUN pnpm run build
 
 # Stage 2: Build Rust backend
-FROM rust:1.82-bookworm AS backend-builder
+FROM rust:1.86-bookworm AS backend-builder
 WORKDIR /app
 
 # Cache dependencies by building with stub sources first

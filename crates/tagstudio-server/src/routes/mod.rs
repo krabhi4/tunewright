@@ -24,6 +24,7 @@ pub fn create_router(state: AppState) -> Router {
         .route("/files", get(files::list_files))
         .route("/files/tree", get(files::dir_tree))
         .route("/tags/read", post(tags::read_tags))
+        .route("/tags/read-properties", post(tags::read_properties))
         .route("/tags/write", post(tags::write_tags))
         .route("/coverart", get(coverart::get_cover_art).delete(coverart::delete_cover_art))
         .route("/rename/preview", post(rename::preview))

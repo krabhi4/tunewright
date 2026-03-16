@@ -1,16 +1,17 @@
 <script lang="ts">
 	import { selectedCount, selectedFiles } from '$lib/stores/files';
-	import { selectedTags, KEEP_VALUE, setPendingEdit } from '$lib/stores/tags';
+	import { selectedTags, KEEP_VALUE, setPendingEdit, mergedTags } from '$lib/stores/tags';
 	import { getCoverArtUrl } from '$lib/api/coverart';
 
 	let coverArtError = $state(false);
 
-	// Get cover art URL for first selected file
+	// Get cover art URL for first selected file (check tags for has_cover)
 	let coverArtUrl = $derived.by(() => {
 		const files = $selectedFiles;
 		if (files.length === 0) return null;
 		const first = files[0];
-		if (!first.has_cover) return null;
+		const tags = $mergedTags.get(first.id);
+		if (!tags?.has_cover && !first.has_cover) return null;
 		coverArtError = false;
 		return getCoverArtUrl(first.relative_path, 250);
 	});

@@ -6,11 +6,12 @@ license.workspace = true
 
 [dependencies]
 lofty = "0.22"
-image = { version = "0.25", default-features = false, features = ["jpeg", "png"] }
+image = { version = ">=0.25.0, <0.25.10", default-features = false, features = ["jpeg", "png"] }
 serde = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }
 sha2 = "0.10"
 hex = "0.4"
+rayon = "1.10"
 tracing = { workspace = true }
 walkdir = "2"

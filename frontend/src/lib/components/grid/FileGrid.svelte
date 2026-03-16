@@ -1,8 +1,15 @@
 <script lang="ts">
 	import type { FileEntry } from '$lib/types/audio';
 	import { formatDuration, formatSize, formatFormatLabel } from '$lib/utils/format';
-	import { selectedIds, toggleSelection, selectRange } from '$lib/stores/files';
-	import { mergedTags, fetchTagsForFiles } from '$lib/stores/tags';
+	import {
+		selectedIds,
+		toggleSelection,
+		selectRange,
+		directories,
+		currentPath,
+		loadDirectory
+	} from '$lib/stores/files';
+	import { mergedTags, fetchTagsForFiles, queuePropertiesFetch, clearTags } from '$lib/stores/tags';
 	import { filterText } from '$lib/stores/ui';
 
 	interface Props {
@@ -42,19 +49,33 @@
 	function getCellValue(file: FileEntry, key: string): string {
 		const tags = $mergedTags.get(file.id);
 		switch (key) {
-			case 'filename': return file.filename;
-			case 'format': return formatFormatLabel(file.format);
-			case 'duration': return formatDuration(file.duration_secs);
-			case 'size': return formatSize(file.size);
-			case 'title': return tags?.title ?? '';
-			case 'artist': return tags?.artist ?? '';
-			case 'album': return tags?.album ?? '';
-			case 'year': return tags?.year != null ? String(tags.year) : '';
-			case 'track_number': return tags?.track_number != null ? String(tags.track_number) : '';
-			case 'genre': return tags?.genre ?? '';
-			default: return '';
+			case 'filename':
+				return file.filename;
+			case 'format':
+				return formatFormatLabel(file.format);
+			case 'duration':
+				return formatDuration(tags?.duration_secs ?? file.duration_secs);
+			case 'size':
+				return formatSize(file.size);
+			case 'title':
+				return tags?.title ?? '';
+			case 'artist':
+				return tags?.artist ?? '';
+			case 'album':
+				return tags?.album ?? '';
+			case 'year':
+				return tags?.year != null ? String(tags.year) : '';
+			case 'track_number':
+				return tags?.track_number != null ? String(tags.track_number) : '';
+			case 'genre':
+				return tags?.genre ?? '';
+			default:
+				return '';
 		}
 	}
+
+	// Directories to show at the top of the grid
+	let dirEntries = $derived($directories);
 
 	// Filtered + sorted files
 	let processedFiles = $derived.by(() => {
@@ -89,19 +110,43 @@
 		return result;
 	});
 
+	// Total rows = directories + files
+	let totalRows = $derived(dirEntries.length + processedFiles.length);
+
 	// Virtual scroll calculations
 	let visibleStart = $derived(Math.max(0, Math.floor(scrollTop / ROW_HEIGHT) - 2));
 	let visibleCount = $derived(Math.ceil(containerHeight / ROW_HEIGHT) + 4);
-	let visibleEnd = $derived(Math.min(processedFiles.length, visibleStart + visibleCount));
-	let visibleFiles = $derived(processedFiles.slice(visibleStart, visibleEnd));
-	let totalHeight = $derived(processedFiles.length * ROW_HEIGHT);
+	let visibleEnd = $derived(Math.min(totalRows, visibleStart + visibleCount));
+	let totalHeight = $derived(totalRows * ROW_HEIGHT);
 	let offsetY = $derived(visibleStart * ROW_HEIGHT);
 
-	// Fetch tags for visible files
+	// Which visible rows are directories vs files
+	type RowItem = { type: 'dir'; name: string } | { type: 'file'; file: FileEntry };
+
+	let visibleRows = $derived.by(() => {
+		const rows: RowItem[] = [];
+		for (let i = visibleStart; i < visibleEnd; i++) {
+			if (i < dirEntries.length) {
+				rows.push({ type: 'dir', name: dirEntries[i] });
+			} else {
+				const fileIdx = i - dirEntries.length;
+				if (fileIdx < processedFiles.length) {
+					rows.push({ type: 'file', file: processedFiles[fileIdx] });
+				}
+			}
+		}
+		return rows;
+	});
+
+	// Fetch fast tags for visible file rows, then queue properties backfill
 	$effect(() => {
-		const ids = visibleFiles.map((f) => f.id);
-		if (ids.length > 0) {
-			fetchTagsForFiles(ids);
+		const fileIds = visibleRows
+			.filter((r): r is { type: 'file'; file: FileEntry } => r.type === 'file')
+			.map((r) => r.file.id);
+		if (fileIds.length > 0) {
+			fetchTagsForFiles(fileIds).then(() => {
+				queuePropertiesFetch(fileIds);
+			});
 		}
 	});
 
@@ -125,6 +170,13 @@
 			toggleSelection(file.id, e.ctrlKey || e.metaKey);
 		}
 		lastClickedId = file.id;
+	}
+
+	function navigateToDir(dirName: string) {
+		const base = $currentPath === '/' ? '' : $currentPath;
+		const newPath = base + '/' + dirName;
+		clearTags();
+		loadDirectory(newPath);
 	}
 
 	function handleResize() {
@@ -167,39 +219,58 @@
 	<div class="grid-body" bind:this={containerEl} onscroll={handleScroll}>
 		<div style="height: {totalHeight}px; position: relative;">
 			<div style="transform: translateY({offsetY}px);">
-				{#each visibleFiles as file, i (file.id)}
-					{@const isSelected = $selectedIds.has(file.id)}
-					{@const isOdd = (visibleStart + i) % 2 === 1}
-					<button
-						class="grid-row"
-						class:selected={isSelected}
-						class:odd={isOdd}
-						style="height: {ROW_HEIGHT}px"
-						onclick={(e) => handleRowClick(file, e)}
-					>
-						<div class="cell check-col">
-							<input
-								type="checkbox"
-								class="row-check"
-								checked={isSelected}
-								onclick={(e) => e.stopPropagation()}
-								onchange={() => toggleSelection(file.id, true)}
-							/>
-						</div>
-						{#each columns as col}
-							{@const val = getCellValue(file, col.key)}
-							<div
-								class="cell"
-								class:mono={col.mono}
-								class:tag-cell={col.tag}
-								style="width: {col.width}px; {col.align === 'right' ? 'text-align: right; justify-content: flex-end;' : ''}"
-								title={val}
-							>
-								{val}
+				{#each visibleRows as row, i}
+					{#if row.type === 'dir'}
+						<button
+							class="grid-row dir-row"
+							style="height: {ROW_HEIGHT}px"
+							ondblclick={() => navigateToDir(row.name)}
+						>
+							<div class="cell check-col"></div>
+							<div class="cell dir-cell" style="width: {columns[0].width}px">
+								<span class="dir-icon">&#128193;</span>
+								{row.name}
 							</div>
-						{/each}
-						<div class="cell cell-fill"></div>
-					</button>
+							{#each columns.slice(1) as col}
+								<div class="cell" style="width: {col.width}px"></div>
+							{/each}
+							<div class="cell cell-fill"></div>
+						</button>
+					{:else}
+						{@const file = row.file}
+						{@const isSelected = $selectedIds.has(file.id)}
+						{@const isOdd = (visibleStart + i) % 2 === 1}
+						<button
+							class="grid-row"
+							class:selected={isSelected}
+							class:odd={isOdd}
+							style="height: {ROW_HEIGHT}px"
+							onclick={(e) => handleRowClick(file, e)}
+						>
+							<div class="cell check-col">
+								<input
+									type="checkbox"
+									class="row-check"
+									checked={isSelected}
+									onclick={(e) => e.stopPropagation()}
+									onchange={() => toggleSelection(file.id, true)}
+								/>
+							</div>
+							{#each columns as col}
+								{@const val = getCellValue(file, col.key)}
+								<div
+									class="cell"
+									class:mono={col.mono}
+									class:tag-cell={col.tag}
+									style="width: {col.width}px; {col.align === 'right' ? 'text-align: right; justify-content: flex-end;' : ''}"
+									title={val}
+								>
+									{val}
+								</div>
+							{/each}
+							<div class="cell cell-fill"></div>
+						</button>
+					{/if}
 				{/each}
 			</div>
 		</div>
@@ -316,6 +387,26 @@
 
 	.grid-row.selected:hover {
 		background: var(--bg-selected-strong);
+	}
+
+	.grid-row.dir-row {
+		background: var(--accent-subtle);
+	}
+
+	.grid-row.dir-row:hover {
+		background: var(--bg-hover);
+	}
+
+	.dir-cell {
+		font-weight: 500;
+		display: flex;
+		align-items: center;
+		gap: 6px;
+	}
+
+	.dir-icon {
+		font-size: 14px;
+		flex-shrink: 0;
 	}
 
 	.cell {

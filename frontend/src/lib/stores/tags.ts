@@ -1,6 +1,6 @@
 import { writable, derived, get } from 'svelte/store';
 import type { TagData } from '$lib/types/audio';
-import { readTags, writeTags } from '$lib/api/tags';
+import { readTags, readProperties, writeTags } from '$lib/api/tags';
 import { files, selectedIds } from './files';
 
 // Tags loaded from server, keyed by file ID
@@ -103,6 +103,53 @@ export async function fetchTagsForFiles(ids: string[]) {
 	}
 }
 
+// Track which files have had properties loaded
+const propertiesLoaded = new Set<string>();
+
+// Fetch audio properties (duration, bitrate) for files that already have fast tags.
+// Called as a background backfill after the grid is populated.
+let propertiesTimer: ReturnType<typeof setTimeout> | null = null;
+let pendingPropertyIds: string[] = [];
+
+export function queuePropertiesFetch(ids: string[]) {
+	const needed = ids.filter((id) => !propertiesLoaded.has(id));
+	if (needed.length === 0) return;
+	pendingPropertyIds = [...new Set([...pendingPropertyIds, ...needed])];
+
+	if (propertiesTimer) clearTimeout(propertiesTimer);
+	propertiesTimer = setTimeout(() => {
+		const batch = pendingPropertyIds.splice(0, 50); // fetch 50 at a time
+		if (batch.length > 0) fetchPropertiesForFiles(batch);
+	}, 200); // 200ms debounce
+}
+
+async function fetchPropertiesForFiles(ids: string[]) {
+	const $files = get(files);
+
+	const paths: Record<string, string> = {};
+	for (const id of ids) {
+		const file = $files.find((f) => f.id === id);
+		if (file) paths[id] = file.relative_path;
+	}
+	if (Object.keys(paths).length === 0) return;
+
+	try {
+		const tags = await readProperties(ids, paths);
+		loadedTags.update((map) => {
+			const next = new Map(map);
+			for (const [id, data] of Object.entries(tags)) {
+				const existing = next.get(id);
+				// Merge: keep existing tag fields, add audio properties
+				next.set(id, { ...existing, ...data });
+				propertiesLoaded.add(id);
+			}
+			return next;
+		});
+	} catch (err) {
+		console.error('Failed to fetch properties:', err);
+	}
+}
+
 // Set a pending edit for a field on all currently selected files
 export function setPendingEdit(field: string, value: string | number | undefined) {
 	const $selected = get(selectedIds);
@@ -178,4 +225,6 @@ export function discardEdits() {
 export function clearTags() {
 	loadedTags.set(new Map());
 	pendingEdits.set(new Map());
+	propertiesLoaded.clear();
+	pendingPropertyIds = [];
 }
