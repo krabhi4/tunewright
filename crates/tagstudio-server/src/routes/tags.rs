@@ -120,12 +120,9 @@ pub async fn read_properties(
 
         for id in &body.ids {
             if let Some(rel_path) = body.paths.get(id) {
-                match scanner::resolve_safe_path(&data_root, rel_path) {
-                    Ok(_) => {
-                        valid_paths.push(rel_path.clone());
-                        id_to_path.insert(id.clone(), rel_path.clone());
-                    }
-                    Err(_) => {}
+                if scanner::resolve_safe_path(&data_root, rel_path).is_ok() {
+                    valid_paths.push(rel_path.clone());
+                    id_to_path.insert(id.clone(), rel_path.clone());
                 }
             }
         }

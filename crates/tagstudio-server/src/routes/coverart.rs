@@ -32,7 +32,7 @@ pub async fn get_cover_art(
     let max_size = if params.size == 0 { 0 } else { params.size };
 
     let result = picture::extract_cover_art_thumbnail(&safe_path, max_size)
-        .map_err(|e| AppError(e))?;
+        .map_err(AppError)?;
 
     match result {
         Some((data, mime)) => {
@@ -58,7 +58,7 @@ pub async fn delete_cover_art(
 ) -> Result<Json<serde_json::Value>, AppError> {
     let safe_path = scanner::resolve_safe_path(&state.data_root, &params.path)?;
 
-    picture::remove_cover_art(&safe_path).map_err(|e| AppError(e))?;
+    picture::remove_cover_art(&safe_path).map_err(AppError)?;
 
     Ok(Json(serde_json::json!({ "status": "ok" })))
 }
@@ -111,7 +111,7 @@ pub async fn upload_cover_art(
     })
     .await
     .map_err(|e| multipart_err(&e.to_string()))?
-    .map_err(|e| AppError(e))?;
+    .map_err(AppError)?;
 
     Ok(Json(serde_json::json!({ "status": "ok" })))
 }
