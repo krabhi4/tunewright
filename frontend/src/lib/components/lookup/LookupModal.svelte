@@ -6,6 +6,7 @@
 	import { setPendingEdit, pendingEdits, mergedTags, saveAllEdits } from '$lib/stores/tags';
 	import { executeRenames } from '$lib/api/rename';
 	import { embedCoverArtFromUrl } from '$lib/api/coverart';
+	import { bumpCoverArt } from '$lib/stores/ui';
 	import { selectedIds, files } from '$lib/stores/files';
 	import { get } from 'svelte/store';
 	import { selectedTags } from '$lib/stores/tags';
@@ -260,6 +261,7 @@
 				if (coverPaths.length > 0) {
 					try {
 						await embedCoverArtFromUrl(selectedRelease.cover_art_url, coverPaths);
+						bumpCoverArt();
 					} catch (err) {
 						console.error('Cover art embed failed:', err);
 					}
@@ -351,6 +353,16 @@
 			<div class="results-list">
 				{#each searchResults as result (result.id)}
 					<button class="result-row" onclick={() => selectRelease(result)}>
+						{#if result.cover_art_url}
+							<img
+								src={result.cover_art_url}
+								alt=""
+								class="result-thumb"
+								onerror={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }}
+							/>
+						{:else}
+							<div class="result-thumb result-thumb--empty"></div>
+						{/if}
 						<div class="result-info">
 							<span class="result-title">{result.title}</span>
 							<span class="result-artist">{result.artist}</span>
@@ -519,10 +531,10 @@
 
 	.result-row {
 		display: flex;
-		justify-content: space-between;
 		align-items: center;
+		gap: 8px;
 		width: 100%;
-		padding: 8px;
+		padding: 6px 8px;
 		background: none;
 		border: none;
 		border-bottom: 1px solid var(--grid-border);
@@ -536,10 +548,24 @@
 		background: var(--bg-hover);
 	}
 
+	.result-thumb {
+		width: 36px;
+		height: 36px;
+		object-fit: cover;
+		border-radius: var(--radius-sm);
+		flex-shrink: 0;
+	}
+
+	.result-thumb--empty {
+		background: var(--bg-base);
+	}
+
 	.result-info {
 		display: flex;
 		flex-direction: column;
 		gap: 2px;
+		flex: 1;
+		min-width: 0;
 	}
 
 	.result-title {

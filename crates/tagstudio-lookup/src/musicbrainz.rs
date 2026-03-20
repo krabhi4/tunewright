@@ -1,9 +1,52 @@
 use crate::types::{LookupSource, ReleaseDetail, ReleaseSearchResult, TrackInfo};
 use reqwest::Client;
 use serde::Deserialize;
+use std::collections::HashMap;
 
 const MB_BASE: &str = "https://musicbrainz.org/ws/2";
 const USER_AGENT: &str = "TagStudio/0.1.0 (https://github.com/tagstudio)";
+
+// CoverArtArchive JSON API types
+#[derive(Debug, Deserialize)]
+struct CaaResponse {
+    images: Vec<CaaImage>,
+}
+
+#[derive(Debug, Deserialize)]
+struct CaaImage {
+    front: bool,
+    image: String,
+    thumbnails: HashMap<String, String>,
+}
+
+/// Fetch the front cover art URL from CoverArtArchive JSON API
+async fn fetch_cover_art_url(client: &Client, mbid: &str) -> Option<String> {
+    let url = format!("https://coverartarchive.org/release/{}", mbid);
+    let resp = client
+        .get(&url)
+        .header("User-Agent", USER_AGENT)
+        .header("Accept", "application/json")
+        .send()
+        .await
+        .ok()?;
+
+    if !resp.status().is_success() {
+        return None;
+    }
+
+    let caa: CaaResponse = resp.json().await.ok()?;
+    let front = caa.images.iter().find(|img| img.front)?;
+
+    // Prefer 500px thumbnail, fall back to 250, then full image
+    front
+        .thumbnails
+        .get("500")
+        .or_else(|| front.thumbnails.get("large"))
+        .or_else(|| front.thumbnails.get("250"))
+        .or_else(|| front.thumbnails.get("small"))
+        .cloned()
+        .or_else(|| Some(front.image.clone()))
+}
 
 #[derive(Debug, Deserialize)]
 struct MbSearchResponse {
@@ -160,6 +203,9 @@ pub async fn get_release(
         })
         .collect();
 
+    // Fetch actual cover art URL from CoverArtArchive JSON API
+    let cover_art_url = fetch_cover_art_url(client, mbid).await;
+
     Ok(ReleaseDetail {
         id: detail.id.clone(),
         title: detail.title,
@@ -168,9 +214,6 @@ pub async fn get_release(
         genre: None,
         tracks,
         source: LookupSource::MusicBrainz,
-        cover_art_url: Some(format!(
-            "https://coverartarchive.org/release/{}/front-500",
-            detail.id
-        )),
+        cover_art_url,
     })
 }

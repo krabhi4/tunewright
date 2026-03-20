@@ -74,15 +74,19 @@ pub async fn embed_cover_art_from_url(
     State(state): State<AppState>,
     Json(body): Json<CoverArtFromUrlRequest>,
 ) -> Result<Json<serde_json::Value>, AppError> {
-    fn is_allowed_host(raw: &str) -> bool {
-        Url::parse(raw)
-            .ok()
-            .and_then(|u| u.host_str().map(|h| h == "coverartarchive.org" || h == "archive.org"))
-            .unwrap_or(false)
+    fn is_allowed_cover_host(host: &str) -> bool {
+        let host = host.trim_end_matches('.');
+        host == "coverartarchive.org"
+            || host == "archive.org"
+            || host.ends_with(".archive.org")
     }
 
     // Only allow CoverArtArchive URLs
-    if !is_allowed_host(&body.url) {
+    let parsed_ok = Url::parse(&body.url)
+        .ok()
+        .and_then(|u| u.host_str().map(is_allowed_cover_host))
+        .unwrap_or(false);
+    if !parsed_ok {
         return Err(AppError(TagStudioError::Io(std::io::Error::new(
             std::io::ErrorKind::InvalidInput,
             "only coverartarchive.org URLs are allowed",
@@ -98,9 +102,14 @@ pub async fn embed_cover_art_from_url(
 
     // Fetch the image once, restricting redirects to known hosts
     let client = reqwest::Client::builder()
+        .user_agent("Mozilla/5.0 (compatible; TagStudio/0.1.0; +https://github.com/tagstudio)")
         .redirect(reqwest::redirect::Policy::custom(|attempt| {
-            let host = attempt.url().host_str().unwrap_or("");
-            if host == "coverartarchive.org" || host == "archive.org" {
+            let raw = attempt.url().host_str().unwrap_or("");
+            let host = raw.trim_end_matches('.');
+            if host == "coverartarchive.org"
+                || host == "archive.org"
+                || host.ends_with(".archive.org")
+            {
                 attempt.follow()
             } else {
                 attempt.stop()

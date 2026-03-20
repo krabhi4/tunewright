@@ -9,3 +9,9 @@ export const filterVisible = persisted('ts:filterVisible', false);
 // Sort state — synced to URL by +page.svelte
 export const sortColumn = writable<string | null>(null);
 export const sortAsc = writable(true);
+
+// Increment to force cover art refresh across components
+export const coverArtVersion = writable(0);
+export function bumpCoverArt() {
+	coverArtVersion.update((n) => n + 1);
+}

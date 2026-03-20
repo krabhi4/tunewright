@@ -2,6 +2,7 @@
 	import { selectedCount, selectedFiles } from '$lib/stores/files';
 	import { selectedTags, KEEP_VALUE, setPendingEdit, mergedTags } from '$lib/stores/tags';
 	import { getCoverArtUrl, uploadCoverArt } from '$lib/api/coverart';
+	import { coverArtVersion } from '$lib/stores/ui';
 
 	let coverArtError = $state(false);
 	let dragOver = $state(false);
@@ -63,13 +64,15 @@
 	// Get cover art URL for first selected file (check tags for has_cover)
 	let coverArtUrl = $derived.by(() => {
 		const files = $selectedFiles;
-		const _refresh = coverArtRefreshKey; // reactive dependency for refresh
+		const _refresh = coverArtRefreshKey;
+		const _version = $coverArtVersion; // react to global cover art changes
+		const key = _refresh + _version;
 		if (files.length === 0) return null;
 		const first = files[0];
 		const tags = $mergedTags.get(first.id);
-		if (!tags?.has_cover && !first.has_cover && _refresh === 0) return null;
+		if (!tags?.has_cover && !first.has_cover && key === 0) return null;
 		coverArtError = false;
-		return getCoverArtUrl(first.relative_path, 250) + `&_=${_refresh}`;
+		return getCoverArtUrl(first.relative_path, 250) + `&_=${key}`;
 	});
 
 	const fields = [
