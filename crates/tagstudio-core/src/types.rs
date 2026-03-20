@@ -1,4 +1,5 @@
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use std::path::PathBuf;
 
 /// Supported audio formats
@@ -97,6 +98,10 @@ pub struct TagData {
     pub tag_types: Vec<String>,
     #[serde(default)]
     pub has_cover: bool,
+
+    /// Extra/custom tag fields not covered by the standard fields above
+    #[serde(default, skip_serializing_if = "HashMap::is_empty")]
+    pub extra: HashMap<String, String>,
 }
 
 /// Directory tree node for folder picker
@@ -118,7 +123,7 @@ pub struct FileListResult {
 }
 
 /// Changes to write to a single file's tags
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TagWriteChanges {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub title: Option<String>,
@@ -144,6 +149,10 @@ pub struct TagWriteChanges {
     pub comment: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub composer: Option<String>,
+
+    /// Extra/custom tag fields to write
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub extra: Option<HashMap<String, String>>,
 }
 
 /// Result of writing tags to a single file

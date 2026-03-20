@@ -1,4 +1,6 @@
+pub mod actions;
 pub mod coverart;
+pub mod filename_to_tag;
 pub mod files;
 pub mod health;
 pub mod lookup;
@@ -47,6 +49,12 @@ pub fn create_router(state: AppState) -> Router {
         )
         .route("/rename/preview", post(rename::preview))
         .route("/rename/execute", post(rename::execute))
+        .route(
+            "/filename-to-tag/preview",
+            post(filename_to_tag::preview),
+        )
+        .route("/actions/preview", post(actions::preview))
+        .route("/actions/execute", post(actions::execute))
         .route(
             "/lookup/musicbrainz/search",
             get(lookup::musicbrainz_search),

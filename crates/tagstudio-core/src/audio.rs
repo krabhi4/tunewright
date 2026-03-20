@@ -2,7 +2,7 @@ use crate::types::{TagData, TagStudioError, TagWriteChanges, WriteResult};
 use lofty::config::{ParseOptions, ParsingMode, WriteOptions};
 use lofty::file::{AudioFile, TaggedFileExt};
 use lofty::probe::Probe;
-use lofty::tag::{Accessor, Tag};
+use lofty::tag::{Accessor, ItemKey, ItemValue, Tag, TagItem};
 use rayon::prelude::*;
 use std::collections::HashMap;
 use std::path::Path;
@@ -63,6 +63,8 @@ pub fn read_tags_fast(path: &Path) -> Result<TagData, TagStudioError> {
     // Check picture count without loading picture data
     let has_cover = tags.iter().any(|t| !t.pictures().is_empty());
 
+    let extra = collect_extra_tags(&tags);
+
     Ok(TagData {
         title,
         artist,
@@ -84,6 +86,7 @@ pub fn read_tags_fast(path: &Path) -> Result<TagData, TagStudioError> {
         format: Some(format!("{:?}", tagged.file_type())),
         tag_types,
         has_cover,
+        extra,
     })
 }
 
@@ -131,6 +134,8 @@ pub fn read_tags_full(path: &Path) -> Result<TagData, TagStudioError> {
 
     let has_cover = tags.iter().any(|t| !t.pictures().is_empty());
 
+    let extra = collect_extra_tags(&tags);
+
     Ok(TagData {
         title,
         artist,
@@ -151,6 +156,7 @@ pub fn read_tags_full(path: &Path) -> Result<TagData, TagStudioError> {
         format: Some(format!("{:?}", tagged.file_type())),
         tag_types,
         has_cover,
+        extra,
     })
 }
 
@@ -246,6 +252,39 @@ pub fn write_tags(path: &Path, changes: &TagWriteChanges) -> Result<(), TagStudi
         tag.set_disk_total(v);
     }
 
+    // Write album_artist via TagItem (not available on Accessor trait)
+    if let Some(ref v) = changes.album_artist {
+        tag.remove_key(&ItemKey::AlbumArtist);
+        if !v.is_empty() {
+            tag.push(TagItem::new(
+                ItemKey::AlbumArtist,
+                ItemValue::Text(v.clone()),
+            ));
+        }
+    }
+
+    // Write composer via TagItem
+    if let Some(ref v) = changes.composer {
+        tag.remove_key(&ItemKey::Composer);
+        if !v.is_empty() {
+            tag.push(TagItem::new(
+                ItemKey::Composer,
+                ItemValue::Text(v.clone()),
+            ));
+        }
+    }
+
+    // Write extra/custom tag fields
+    if let Some(ref extra) = changes.extra {
+        for (key, value) in extra {
+            let item_key = string_to_item_key(key);
+            tag.remove_key(&item_key);
+            if !value.is_empty() {
+                tag.push(TagItem::new(item_key, ItemValue::Text(value.clone())));
+            }
+        }
+    }
+
     tagged
         .save_to_path(path, WriteOptions::default())
         .map_err(|e| TagStudioError::TagWriteError(format!("{}: {}", path.display(), e)))?;
@@ -291,11 +330,11 @@ fn first_item_value(tags: &[&Tag], key: &str) -> Option<String> {
     for tag in tags {
         for item in tag.items() {
             let item_key = match item.key() {
-                lofty::tag::ItemKey::Unknown(k) => k.to_string(),
+                ItemKey::Unknown(k) => k.to_string(),
                 other => format!("{:?}", other),
             };
             if item_key.eq_ignore_ascii_case(key) {
-                if let lofty::tag::ItemValue::Text(val) = item.value() {
+                if let ItemValue::Text(val) = item.value() {
                     if !val.is_empty() {
                         return Some(val.to_string());
                     }
@@ -304,4 +343,82 @@ fn first_item_value(tags: &[&Tag], key: &str) -> Option<String> {
         }
     }
     None
+}
+
+/// Fields already handled by the standard TagData fields
+fn is_standard_key(key: &ItemKey) -> bool {
+    matches!(
+        key,
+        ItemKey::TrackTitle
+            | ItemKey::TrackArtist
+            | ItemKey::AlbumTitle
+            | ItemKey::AlbumArtist
+            | ItemKey::TrackNumber
+            | ItemKey::TrackTotal
+            | ItemKey::DiscNumber
+            | ItemKey::DiscTotal
+            | ItemKey::Genre
+            | ItemKey::Comment
+            | ItemKey::Year
+            | ItemKey::RecordingDate
+            | ItemKey::Composer
+    )
+}
+
+/// Convert an ItemKey to a canonical string key for the extra tags map
+fn item_key_to_string(key: &ItemKey) -> String {
+    match key {
+        ItemKey::Unknown(s) => s.to_string(),
+        other => format!("{:?}", other),
+    }
+}
+
+/// Convert a string key back to an ItemKey for writing
+fn string_to_item_key(key: &str) -> ItemKey {
+    match key {
+        "Lyrics" => ItemKey::Lyrics,
+        "Bpm" => ItemKey::Bpm,
+        "CopyrightMessage" => ItemKey::CopyrightMessage,
+        "EncoderSoftware" => ItemKey::EncoderSoftware,
+        "EncodedBy" => ItemKey::EncodedBy,
+        "Lyricist" => ItemKey::Lyricist,
+        "Conductor" => ItemKey::Conductor,
+        "Label" => ItemKey::Label,
+        "Language" => ItemKey::Language,
+        "InitialKey" => ItemKey::InitialKey,
+        "Mood" => ItemKey::Mood,
+        "MusicBrainzRecordingId" => ItemKey::MusicBrainzRecordingId,
+        "MusicBrainzTrackId" => ItemKey::MusicBrainzTrackId,
+        "MusicBrainzReleaseId" => ItemKey::MusicBrainzReleaseId,
+        "MusicBrainzReleaseArtistId" => ItemKey::MusicBrainzReleaseArtistId,
+        "MusicBrainzArtistId" => ItemKey::MusicBrainzArtistId,
+        "MusicBrainzReleaseGroupId" => ItemKey::MusicBrainzReleaseGroupId,
+        "ReplayGainTrackGain" => ItemKey::ReplayGainTrackGain,
+        "ReplayGainTrackPeak" => ItemKey::ReplayGainTrackPeak,
+        "ReplayGainAlbumGain" => ItemKey::ReplayGainAlbumGain,
+        "ReplayGainAlbumPeak" => ItemKey::ReplayGainAlbumPeak,
+        _ => ItemKey::Unknown(key.to_string()),
+    }
+}
+
+/// Collect all non-standard tag items into a HashMap
+fn collect_extra_tags(tags: &[&Tag]) -> HashMap<String, String> {
+    let mut extra = HashMap::new();
+    for tag in tags {
+        for item in tag.items() {
+            if is_standard_key(item.key()) {
+                continue;
+            }
+            let key = item_key_to_string(item.key());
+            if extra.contains_key(&key) {
+                continue; // first tag wins
+            }
+            if let ItemValue::Text(val) = item.value() {
+                if !val.is_empty() {
+                    extra.insert(key, val.to_string());
+                }
+            }
+        }
+    }
+    extra
 }

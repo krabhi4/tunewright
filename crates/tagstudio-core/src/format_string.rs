@@ -1,87 +1,19 @@
+use crate::expr::{self, ExprContext};
 use crate::types::TagData;
 
-/// Tokens from parsing a format string
-#[derive(Debug, Clone, PartialEq)]
-enum Token {
-    Literal(String),
-    Variable(String),
-}
-
-/// Parse a format string like "%artist% - %title%" into tokens
-fn tokenize(format: &str) -> Vec<Token> {
-    let mut tokens = Vec::new();
-    let mut chars = format.chars().peekable();
-    let mut literal = String::new();
-
-    while let Some(c) = chars.next() {
-        if c == '%' {
-            // Flush literal
-            if !literal.is_empty() {
-                tokens.push(Token::Literal(literal.clone()));
-                literal.clear();
-            }
-            // Read variable name until next %
-            let mut var_name = String::new();
-            while let Some(&next) = chars.peek() {
-                if next == '%' {
-                    chars.next();
-                    break;
-                }
-                var_name.push(next);
-                chars.next();
-            }
-            if !var_name.is_empty() {
-                tokens.push(Token::Variable(var_name));
-            }
-        } else {
-            literal.push(c);
-        }
-    }
-
-    if !literal.is_empty() {
-        tokens.push(Token::Literal(literal));
-    }
-
-    tokens
-}
-
-/// Evaluate a format string against tag data, producing a filename (without extension)
+/// Evaluate a format string against tag data, producing a sanitized filename
+/// (without extension). Supports both `%variable%` and `$function()` syntax.
 pub fn evaluate(format: &str, tags: &TagData) -> String {
-    let tokens = tokenize(format);
-    let mut result = String::new();
+    let ctx = ExprContext::new(tags);
+    let raw = expr::evaluate(format, &ctx);
+    sanitize_filename(&raw)
+}
 
-    for token in tokens {
-        match token {
-            Token::Literal(s) => result.push_str(&s),
-            Token::Variable(var) => {
-                let value = match var.to_lowercase().as_str() {
-                    "title" => tags.title.clone().unwrap_or_default(),
-                    "artist" => tags.artist.clone().unwrap_or_default(),
-                    "album" => tags.album.clone().unwrap_or_default(),
-                    "albumartist" | "album_artist" => {
-                        tags.album_artist.clone().unwrap_or_default()
-                    }
-                    "year" => tags.year.map(|y| y.to_string()).unwrap_or_default(),
-                    "genre" => tags.genre.clone().unwrap_or_default(),
-                    "comment" => tags.comment.clone().unwrap_or_default(),
-                    "composer" => tags.composer.clone().unwrap_or_default(),
-                    "track" | "track_number" => tags
-                        .track_number
-                        .map(|n| format!("{:02}", n))
-                        .unwrap_or_default(),
-                    "disc" | "disc_number" => tags
-                        .disc_number
-                        .map(|n| n.to_string())
-                        .unwrap_or_default(),
-                    "_filename" => String::new(), // Will be handled by the caller
-                    _ => String::new(),
-                };
-                result.push_str(&value);
-            }
-        }
-    }
-
-    sanitize_filename(&result)
+/// Evaluate with filename context (for patterns that reference `%_filename%`).
+pub fn evaluate_with_filename(format: &str, tags: &TagData, filename: &str) -> String {
+    let ctx = ExprContext::new(tags).with_filename(filename);
+    let raw = expr::evaluate(format, &ctx);
+    sanitize_filename(&raw)
 }
 
 /// Remove or replace characters that are invalid in filenames
@@ -144,5 +76,19 @@ mod tests {
             ..Default::default()
         };
         assert_eq!(evaluate("%title%", &tags), "Song_ The Remix");
+    }
+
+    #[test]
+    fn test_format_with_functions() {
+        let tags = TagData {
+            artist: Some("the band".to_string()),
+            title: Some("first song".to_string()),
+            track_number: Some(3),
+            ..Default::default()
+        };
+        assert_eq!(
+            evaluate("$num(%track%,2) - $caps(%artist%) - $caps(%title%)", &tags),
+            "03 - The Band - First Song"
+        );
     }
 }

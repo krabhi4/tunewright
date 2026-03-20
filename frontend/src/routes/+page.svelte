@@ -8,6 +8,8 @@
 	import FolderPicker from '$lib/components/common/FolderPicker.svelte';
 	import ConfirmModal from '$lib/components/common/ConfirmModal.svelte';
 	import RenameModal from '$lib/components/rename/RenameModal.svelte';
+	import FilenameToTagModal from '$lib/components/filename2tag/FilenameToTagModal.svelte';
+	import ActionsModal from '$lib/components/actions/ActionsModal.svelte';
 	import LookupModal from '$lib/components/lookup/LookupModal.svelte';
 	import UserManagementModal from '$lib/components/layout/UserManagementModal.svelte';
 	import {
@@ -45,12 +47,16 @@
 
 	let folderPickerOpen = $state(false);
 	let renameModalOpen = $state(false);
+	let filenameToTagOpen = $state(false);
+	let actionsModalOpen = $state(false);
 	let lookupModalOpen = $state(false);
 	let userManagementOpen = $state(false);
 
 	function closeAllModals() {
 		folderPickerOpen = false;
 		renameModalOpen = false;
+		filenameToTagOpen = false;
+		actionsModalOpen = false;
 		lookupModalOpen = false;
 		userManagementOpen = false;
 	}
@@ -225,6 +231,8 @@
 	onOpenFolder={() => { closeAllModals(); folderPickerOpen = true; }}
 	onSave={handleSave}
 	onRename={() => { closeAllModals(); renameModalOpen = true; }}
+	onFilenameToTag={() => { closeAllModals(); filenameToTagOpen = true; }}
+	onActions={() => { closeAllModals(); actionsModalOpen = true; }}
 	onLookup={() => { closeAllModals(); lookupModalOpen = true; }}
 	onManageUsers={() => { closeAllModals(); userManagementOpen = true; }}
 	hasPendingEdits={$hasPendingEdits}
@@ -293,6 +301,20 @@
 	onClose={() => (renameModalOpen = false)}
 	files={$selectedFiles}
 	onComplete={() => { clearTags(); loadDirectory($currentPath); }}
+/>
+
+<FilenameToTagModal
+	open={filenameToTagOpen}
+	onClose={() => (filenameToTagOpen = false)}
+	files={$selectedFiles}
+	onComplete={() => {}}
+/>
+
+<ActionsModal
+	open={actionsModalOpen}
+	onClose={() => (actionsModalOpen = false)}
+	files={$selectedFiles}
+	onComplete={() => {}}
 />
 
 <LookupModal

@@ -1,4 +1,7 @@
+pub mod actions;
 pub mod audio;
+pub mod expr;
+pub mod filename_to_tag;
 pub mod format_string;
 pub mod picture;
 pub mod rename;

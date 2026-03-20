@@ -5,13 +5,15 @@
 		onOpenFolder: () => void;
 		onSave?: () => void;
 		onRename?: () => void;
+		onFilenameToTag?: () => void;
+		onActions?: () => void;
 		onLookup?: () => void;
 		onManageUsers?: () => void;
 		hasPendingEdits?: boolean;
 		hasSelection?: boolean;
 	}
 
-	let { onOpenFolder, onSave, onRename, onLookup, onManageUsers, hasPendingEdits = false, hasSelection = false }: Props = $props();
+	let { onOpenFolder, onSave, onRename, onFilenameToTag, onActions, onLookup, onManageUsers, hasPendingEdits = false, hasSelection = false }: Props = $props();
 </script>
 
 <div class="toolbar">
@@ -28,9 +30,19 @@
 	</div>
 
 	<div class="toolbar-group">
-		<button class="toolbar-btn" disabled={!hasSelection} onclick={onRename} title="Rename selected files">
+		<button class="toolbar-btn" disabled={!hasSelection} onclick={onRename} title="Rename selected files (Tag → Filename)">
 			<svg class="toolbar-icon" aria-hidden="true" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M9.5 3.5l3 3M3 13l-.5-3L10 2.5l3 3L5.5 13z"/></svg>
 			<span>Rename</span>
+		</button>
+
+		<button class="toolbar-btn" disabled={!hasSelection} onclick={onFilenameToTag} title="Extract tags from filenames (Filename → Tag)">
+			<svg class="toolbar-icon" aria-hidden="true" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M2 3h12M2 7h8M2 11h5"/><path d="M12 8l2 3-2 3"/></svg>
+			<span>Fn→Tag</span>
+		</button>
+
+		<button class="toolbar-btn" disabled={!hasSelection} onclick={onActions} title="Apply batch actions to selected files">
+			<svg class="toolbar-icon" aria-hidden="true" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M4 4h8M4 8h8M4 12h5"/><path d="M12 10l2 2-2 2"/></svg>
+			<span>Actions</span>
 		</button>
 
 		<button class="toolbar-btn" disabled={!hasSelection} onclick={onLookup} title="Look up tags on MusicBrainz">

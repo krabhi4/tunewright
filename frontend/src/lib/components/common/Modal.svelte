@@ -6,9 +6,10 @@
 		open: boolean;
 		onClose: () => void;
 		children: Snippet;
+		wide?: boolean;
 	}
 
-	let { title, open, onClose, children }: Props = $props();
+	let { title, open, onClose, children, wide = false }: Props = $props();
 
 	let backdropEl = $state<HTMLDivElement>();
 
@@ -70,7 +71,7 @@
 		onclick={handleBackdrop}
 		onkeydown={handleKeydown}
 	>
-		<div class="modal">
+		<div class="modal" class:modal-wide={wide}>
 			<div class="modal-header">
 				<h2 class="modal-title" id="modal-title">{title}</h2>
 				<button class="modal-close" onclick={onClose} aria-label="Close dialog">&times;</button>
@@ -158,5 +159,9 @@
 	.modal-body {
 		padding: 14px;
 		overflow-y: auto;
+	}
+
+	.modal-wide {
+		max-width: min(750px, calc(100vw - 32px));
 	}
 </style>

@@ -13,5 +13,6 @@ thiserror = { workspace = true }
 sha2 = "0.10"
 hex = "0.4"
 rayon = "1.10"
+regex = "1"
 tracing = { workspace = true }
 walkdir = "2"

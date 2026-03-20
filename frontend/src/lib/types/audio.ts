@@ -31,6 +31,7 @@ export interface TagData {
 	format?: string;
 	tag_types?: string[];
 	has_cover?: boolean;
+	extra?: Record<string, string>;
 }
 
 export interface FileListResult {
