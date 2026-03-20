@@ -4,22 +4,45 @@
 	import { onMount } from 'svelte';
 	import { goto } from '$app/navigation';
 	import { page } from '$app/state';
+	import { checkAuth } from '$lib/api/auth';
+	import { auth } from '$lib/stores/auth';
 
 	let { children }: { children: Snippet } = $props();
 	let authChecked = $state(false);
 
+	const authPages = ['/login', '/setup', '/register'];
+
 	onMount(async () => {
 		try {
-			const res = await fetch('/api/v1/auth/check');
-			const data = await res.json();
+			const data = await checkAuth();
 
-			if (data.auth_required && !data.authenticated) {
-				if (!page.url.pathname.startsWith('/login')) {
+			if (data.setup_required) {
+				auth.set({ checked: true, setupRequired: true, authenticated: false, user: null });
+				if (!page.url.pathname.startsWith('/setup')) {
+					goto('/setup');
+				}
+			} else if (data.authenticated && data.user) {
+				auth.set({ checked: true, setupRequired: false, authenticated: true, user: data.user });
+				if (authPages.some((p) => page.url.pathname.startsWith(p))) {
+					goto('/');
+				}
+			} else {
+				auth.set({ checked: true, setupRequired: false, authenticated: false, user: null });
+				if (
+					!page.url.pathname.startsWith('/login') &&
+					!page.url.pathname.startsWith('/register')
+				) {
 					goto('/login');
 				}
 			}
 		} catch {
-			// Server not reachable, proceed anyway
+			auth.set({ checked: true, setupRequired: false, authenticated: false, user: null });
+			if (
+				!page.url.pathname.startsWith('/login') &&
+				!page.url.pathname.startsWith('/register')
+			) {
+				goto('/login');
+			}
 		} finally {
 			authChecked = true;
 		}

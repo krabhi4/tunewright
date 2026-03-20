@@ -12,6 +12,7 @@ TagStudio runs as a single Docker container, serves a web UI, and operates direc
 - **MusicBrainz lookup** — Search releases, auto-fill tags, download cover art
 - **Spreadsheet-style grid** — Virtual-scrolling file list with sortable columns and multi-select
 - **Tag panel** — Quick-edit sidebar showing tags for selected files, with `< keep >` for mixed values
+- **Multi-user auth** — First visitor creates admin account; invite others with shareable links
 - **Dark theme** — Purpose-built UI, not a generic template
 
 ### Supported Formats
@@ -29,13 +30,11 @@ ID3v1, ID3v2.3, ID3v2.4, MP4/iTunes, Vorbis Comments, APE
 ```yaml
 services:
   tagstudio:
-    image: ghcr.io/YOUR_USERNAME/tagstudio:latest
+    image: ghcr.io/krabhi4/tagstudio:latest
     ports:
       - "8080:8080"
     volumes:
       - /path/to/your/music:/data:rw
-    environment:
-      - TAGSTUDIO_AUTH_ENABLED=false
     restart: unless-stopped
 ```
 
@@ -43,7 +42,7 @@ services:
 docker compose up -d
 ```
 
-Open `http://your-server:8080` in a browser.
+Open `http://your-server:8080` in a browser. On first visit you'll be prompted to create your admin account.
 
 ### Docker Run
 
@@ -51,26 +50,36 @@ Open `http://your-server:8080` in a browser.
 docker run -d \
   -p 8080:8080 \
   -v /path/to/your/music:/data:rw \
-  -e TAGSTUDIO_AUTH_ENABLED=false \
-  ghcr.io/YOUR_USERNAME/tagstudio:latest
+  ghcr.io/krabhi4/tagstudio:latest
 ```
 
-### With Authentication
+## Authentication
 
-```yaml
-services:
-  tagstudio:
-    image: ghcr.io/YOUR_USERNAME/tagstudio:latest
-    ports:
-      - "8080:8080"
-    volumes:
-      - /path/to/your/music:/data:rw
-    environment:
-      - TAGSTUDIO_AUTH_ENABLED=true
-      - TAGSTUDIO_USERNAME=admin
-      - TAGSTUDIO_PASSWORD=your-secure-password
-    restart: unless-stopped
-```
+Authentication is built in and always active once an account exists.
+
+### First-Time Setup
+
+1. Start the container and open the web UI
+2. You'll be redirected to the setup page
+3. Choose a username and password — this becomes the **super admin** account
+4. You're logged in and ready to go
+
+### Inviting Users
+
+1. Click your username in the toolbar (top-right)
+2. Select **Manage Users**
+3. Click **Create Invite** — a shareable link is generated (valid for 48 hours)
+4. Send the link to the person you want to invite
+5. They visit the link, choose a username and password, and get an **admin** account
+
+### Roles
+
+| Role | Access |
+|------|--------|
+| **Super Admin** | Full access + manage users (create invites, remove users) |
+| **Admin** | Full access to all tag editing, renaming, and lookup features |
+
+User accounts are stored in `users.json` inside your data directory and persist across container restarts. Passwords are hashed with Argon2id.
 
 ## Configuration
 
@@ -81,12 +90,9 @@ All configuration is via environment variables.
 | `TAGSTUDIO_DATA_DIR` | `/data` | Music directory inside the container |
 | `TAGSTUDIO_PORT` | `8080` | HTTP port |
 | `TAGSTUDIO_HOST` | `0.0.0.0` | Bind address |
-| `TAGSTUDIO_AUTH_ENABLED` | `false` | Enable username/password authentication |
-| `TAGSTUDIO_USERNAME` | `admin` | Login username (when auth enabled) |
-| `TAGSTUDIO_PASSWORD` | `changeme` | Login password (when auth enabled) |
-| `TAGSTUDIO_SESSION_SECRET` | auto-generated | HMAC key for session cookies |
-| `DISCOGS_API_TOKEN` | — | Optional Discogs API token for lookups |
 | `TAGSTUDIO_STATIC_DIR` | `/srv/static` | Frontend build directory (set by Docker) |
+
+Authentication is managed through the web UI — no environment variables needed.
 
 ## Architecture
 
@@ -96,6 +102,7 @@ Rust (Axum)                          SvelteKit
 │ tagstudio-server    │  REST API    │ frontend/        │
 │   routes/           │◄────────────►│   FileGrid       │
 │   auth middleware    │  /api/v1/*   │   TagPanel       │
+│   users.rs          │              │   UserMenu       │
 │                     │              │   PathBar        │
 │ tagstudio-core      │              │   RenameModal    │
 │   audio.rs (lofty)  │              │   LookupModal    │
@@ -115,9 +122,9 @@ Rust (Axum)                          SvelteKit
 
 - **tagstudio-core** — Pure Rust library. Tag reading/writing via [lofty](https://github.com/Serial-ATA/lofty-rs), thumbnail generation via [image](https://github.com/image-rs/image), directory scanning, format string parser, file renaming.
 - **tagstudio-lookup** — MusicBrainz API client with rate limiting.
-- **tagstudio-server** — Axum HTTP server. Serves the SvelteKit SPA and REST API. Optional cookie-based auth.
+- **tagstudio-server** — Axum HTTP server. Serves the SvelteKit SPA and REST API. Multi-user auth with Argon2id password hashing.
 
-No database. Tag data lives in the audio files. UI state lives in the browser. Server is stateless.
+No database. Tag data lives in the audio files. User accounts live in `users.json`. UI state lives in the browser.
 
 ## Building from Source
 
@@ -155,7 +162,7 @@ docker build -t tagstudio:latest .
 docker buildx create --name multiarch --driver docker-container --use
 docker buildx build \
   --platform linux/amd64,linux/arm64 \
-  -t ghcr.io/YOUR_USERNAME/tagstudio:latest \
+  -t ghcr.io/krabhi4/tagstudio:latest \
   --push .
 ```
 
@@ -177,13 +184,20 @@ All endpoints under `/api/v1/`. See the full API reference in [docs/api.md](docs
 | POST | `/rename/execute` | Execute file renames |
 | GET | `/lookup/musicbrainz/search?query=...` | Search MusicBrainz |
 | GET | `/lookup/musicbrainz/release/:mbid` | Get release details |
+| POST | `/auth/setup` | Create first user (super admin) |
 | POST | `/auth/login` | Login |
 | POST | `/auth/logout` | Logout |
-| GET | `/auth/check` | Check auth status |
+| GET | `/auth/check` | Check auth status / setup state |
+| POST | `/auth/register` | Register via invite token |
+| POST | `/auth/invites` | Create invite (super admin) |
+| GET | `/auth/invites` | List active invites (super admin) |
+| DELETE | `/auth/invites/:token` | Revoke invite (super admin) |
+| GET | `/auth/users` | List users (super admin) |
+| DELETE | `/auth/users/:id` | Remove user (super admin) |
 
 ## Tech Stack
 
-- **Backend:** Rust, Axum, lofty, image, rayon, tokio
+- **Backend:** Rust, Axum, lofty, image, argon2, rayon, tokio
 - **Frontend:** SvelteKit 5, TypeScript, adapter-static
 - **Deployment:** Docker multi-stage build, Debian bookworm-slim runtime
 

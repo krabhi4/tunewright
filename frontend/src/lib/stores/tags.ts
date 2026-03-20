@@ -75,13 +75,13 @@ function intersectTags(tagsList: TagData[]): TagData {
 let fetchGeneration = 0;
 
 // Fetch tags for a set of file IDs
-export async function fetchTagsForFiles(ids: string[]) {
+export async function fetchTagsForFiles(ids: string[], force = false) {
 	const $files = get(files);
 	const $loaded = get(loadedTags);
 	const gen = fetchGeneration;
 
-	// Only fetch for files we don't already have
-	const needed = ids.filter((id) => !$loaded.has(id));
+	// Only fetch for files we don't already have (unless forced)
+	const needed = force ? ids : ids.filter((id) => !$loaded.has(id));
 	if (needed.length === 0) return;
 
 	// Build id -> relative_path map
@@ -195,6 +195,7 @@ export async function saveAllEdits(): Promise<{ success: number; failed: number 
 
 		let success = 0;
 		let failed = 0;
+		const loadedUpdates: Array<[string, TagData]> = [];
 
 		pendingEdits.update((map) => {
 			const next = new Map(map);
@@ -202,14 +203,9 @@ export async function saveAllEdits(): Promise<{ success: number; failed: number 
 				if (r.status === 'ok') {
 					next.delete(r.id);
 					success++;
-					// Update loaded tags with the saved values
-					loadedTags.update((loaded) => {
-						const updated = new Map(loaded);
-						const current = updated.get(r.id) || {};
-						const edits = $pending.get(r.id) || {};
-						updated.set(r.id, { ...current, ...edits });
-						return updated;
-					});
+					const current = get(loadedTags).get(r.id) || {};
+					const edits = $pending.get(r.id) || {};
+					loadedUpdates.push([r.id, { ...current, ...edits } as TagData]);
 				} else {
 					failed++;
 					console.error(`Failed to save ${r.id}: ${r.error}`);
@@ -217,6 +213,21 @@ export async function saveAllEdits(): Promise<{ success: number; failed: number 
 			}
 			return next;
 		});
+
+		// Apply optimistic update after pendingEdits is settled (avoids nested store update)
+		if (loadedUpdates.length > 0) {
+			loadedTags.update((loaded) => {
+				const next = new Map(loaded);
+				for (const [id, data] of loadedUpdates) next.set(id, data);
+				return next;
+			});
+		}
+
+		// Re-read saved files from disk to confirm actual state
+		const savedIds = results.filter((r) => r.status === 'ok').map((r) => r.id);
+		if (savedIds.length > 0) {
+			await fetchTagsForFiles(savedIds, true);
+		}
 
 		return { success, failed };
 	} catch (err) {

@@ -64,15 +64,17 @@ crates/
     src/
       main.rs           Entry point
       routes/           API endpoint handlers
-      auth.rs           Cookie-based authentication
+      auth.rs           Multi-user authentication endpoints + middleware
+      users.rs          User/invite storage (JSON file, Argon2 hashing)
+      state.rs          Shared server state (sessions, config)
       config.rs         Environment variable parsing
 
 frontend/               SvelteKit SPA
   src/
-    lib/api/            Typed API client functions
-    lib/stores/         Svelte stores (files, tags, ui)
-    lib/components/     UI components
-    routes/             SvelteKit pages
+    lib/api/            Typed API client functions (incl. auth.ts)
+    lib/stores/         Svelte stores (files, tags, ui, auth)
+    lib/components/     UI components (incl. UserMenu, UserManagementModal)
+    routes/             SvelteKit pages (/, /login, /setup, /register)
 ```
 
 ## Making Changes

@@ -1,33 +1,46 @@
 <script lang="ts">
 	import { goto } from '$app/navigation';
-	import { login } from '$lib/api/auth';
+	import { setup } from '$lib/api/auth';
 	import { auth } from '$lib/stores/auth';
 
 	let username = $state('');
 	let password = $state('');
+	let confirmPassword = $state('');
 	let error = $state('');
 	let loading = $state(false);
 
-	let setupRequired = $derived($auth.setupRequired);
-
-	async function handleLogin() {
+	async function handleSetup() {
 		error = '';
+
+		if (!username.trim()) {
+			error = 'Username is required';
+			return;
+		}
+		if (password.length < 8) {
+			error = 'Password must be at least 8 characters';
+			return;
+		}
+		if (password !== confirmPassword) {
+			error = 'Passwords do not match';
+			return;
+		}
+
 		loading = true;
 		try {
-			const result = await login(username, password);
+			const result = await setup(username, password);
 			if (result.user) {
 				auth.set({ checked: true, setupRequired: false, authenticated: true, user: result.user });
 			}
 			goto('/');
 		} catch (err: any) {
-			error = err.message || 'Login failed';
+			error = err.message || 'Setup failed';
 		} finally {
 			loading = false;
 		}
 	}
 
 	function handleKeydown(e: KeyboardEvent) {
-		if (e.key === 'Enter') handleLogin();
+		if (e.key === 'Enter') handleSetup();
 	}
 </script>
 
@@ -35,7 +48,8 @@
 	<div class="login-card">
 		<div class="login-header">
 			<div class="login-logo">T</div>
-			<h1 class="login-title">TagStudio</h1>
+			<h1 class="login-title">Welcome to TagStudio</h1>
+			<p class="login-subtitle">Create your admin account to get started.</p>
 		</div>
 
 		<div class="login-form">
@@ -57,22 +71,24 @@
 					class="login-input"
 				/>
 			</div>
+			<div class="field">
+				<input
+					type="password"
+					bind:value={confirmPassword}
+					placeholder="Confirm Password"
+					onkeydown={handleKeydown}
+					class="login-input"
+				/>
+			</div>
 
 			{#if error}
 				<div class="login-error">{error}</div>
 			{/if}
 
-			<button class="login-btn" onclick={handleLogin} disabled={loading}>
-				{loading ? 'Signing in...' : 'Sign In'}
+			<button class="login-btn" onclick={handleSetup} disabled={loading}>
+				{loading ? 'Creating...' : 'Create Account'}
 			</button>
 		</div>
-
-		{#if setupRequired}
-			<div class="login-footer">
-				<p class="login-hint">No accounts exist yet.</p>
-				<a href="/setup" class="login-link">Set up your admin account</a>
-			</div>
-		{/if}
 	</div>
 </div>
 
@@ -116,6 +132,12 @@
 		font-size: 18px;
 		font-weight: 600;
 		color: var(--text-primary);
+	}
+
+	.login-subtitle {
+		font-size: 12px;
+		color: var(--text-secondary);
+		margin-top: 6px;
 	}
 
 	.login-form {
@@ -175,26 +197,5 @@
 
 	.login-btn:disabled {
 		opacity: 0.5;
-	}
-
-	.login-footer {
-		text-align: center;
-		margin-top: 16px;
-	}
-
-	.login-hint {
-		color: var(--text-muted);
-		font-size: 12px;
-		margin-bottom: 4px;
-	}
-
-	.login-link {
-		color: var(--accent);
-		font-size: 12px;
-		text-decoration: none;
-	}
-
-	.login-link:hover {
-		color: var(--accent-hover);
 	}
 </style>

@@ -9,6 +9,7 @@
 	import ConfirmModal from '$lib/components/common/ConfirmModal.svelte';
 	import RenameModal from '$lib/components/rename/RenameModal.svelte';
 	import LookupModal from '$lib/components/lookup/LookupModal.svelte';
+	import UserManagementModal from '$lib/components/layout/UserManagementModal.svelte';
 	import {
 		files,
 		totalCount,
@@ -35,11 +36,13 @@
 	let folderPickerOpen = $state(false);
 	let renameModalOpen = $state(false);
 	let lookupModalOpen = $state(false);
+	let userManagementOpen = $state(false);
 
 	function closeAllModals() {
 		folderPickerOpen = false;
 		renameModalOpen = false;
 		lookupModalOpen = false;
+		userManagementOpen = false;
 	}
 
 	// --- Unsaved edits guard ---
@@ -213,6 +216,7 @@
 	onSave={handleSave}
 	onRename={() => { closeAllModals(); renameModalOpen = true; }}
 	onLookup={() => { closeAllModals(); lookupModalOpen = true; }}
+	onManageUsers={() => { closeAllModals(); userManagementOpen = true; }}
 	hasPendingEdits={$hasPendingEdits}
 	hasSelection={$selectedCount > 0}
 />
@@ -277,6 +281,11 @@
 	onConfirm={handleConfirmSave}
 	onExtra={handleConfirmDiscard}
 	onCancel={handleConfirmCancel}
+/>
+
+<UserManagementModal
+	open={userManagementOpen}
+	onClose={() => (userManagementOpen = false)}
 />
 
 <style>

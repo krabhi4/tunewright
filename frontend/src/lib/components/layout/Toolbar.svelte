@@ -1,14 +1,17 @@
 <script lang="ts">
+	import UserMenu from './UserMenu.svelte';
+
 	interface Props {
 		onOpenFolder: () => void;
 		onSave?: () => void;
 		onRename?: () => void;
 		onLookup?: () => void;
+		onManageUsers?: () => void;
 		hasPendingEdits?: boolean;
 		hasSelection?: boolean;
 	}
 
-	let { onOpenFolder, onSave, onRename, onLookup, hasPendingEdits = false, hasSelection = false }: Props = $props();
+	let { onOpenFolder, onSave, onRename, onLookup, onManageUsers, hasPendingEdits = false, hasSelection = false }: Props = $props();
 </script>
 
 <div class="toolbar">
@@ -39,6 +42,8 @@
 	<div class="toolbar-spacer"></div>
 
 	<div class="toolbar-title">TagStudio</div>
+
+	<UserMenu {onManageUsers} />
 </div>
 
 <style>
@@ -104,5 +109,6 @@
 		color: var(--text-muted);
 		letter-spacing: 0.5px;
 		text-transform: uppercase;
+		margin-right: 8px;
 	}
 </style>

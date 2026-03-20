@@ -23,7 +23,7 @@ pub fn resolve_safe_path(data_root: &Path, requested: &str) -> Result<PathBuf, T
 
     let root_canonical = data_root
         .canonicalize()
-        .map_err(|e| TagStudioError::Io(e))?;
+        .map_err(TagStudioError::Io)?;
 
     if !resolved.starts_with(&root_canonical) {
         return Err(TagStudioError::PathTraversal(requested.to_string()));
@@ -54,7 +54,7 @@ pub fn scan_directory(
         .filter_map(|e| e.ok())
         .collect();
 
-    entries.sort_by(|a, b| a.file_name().cmp(&b.file_name()));
+    entries.sort_by_key(|a| a.file_name());
 
     for entry in &entries {
         let path = entry.path();
@@ -155,7 +155,7 @@ pub fn build_dir_tree(data_root: &Path, max_depth: usize) -> Result<DirNode, Tag
             .map(|rd| rd.filter_map(|e| e.ok()).collect())
             .unwrap_or_default();
 
-        entries.sort_by(|a, b| a.file_name().cmp(&b.file_name()));
+        entries.sort_by_key(|a| a.file_name());
 
         for entry in entries {
             let path = entry.path();

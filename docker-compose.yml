@@ -1,15 +1,11 @@
 services:
   tagstudio:
-    build: .
-    image: tagstudio:latest
+    image: ghcr.io/krabhi4/tagstudio:latest
     ports:
       - "8080:8080"
     volumes:
       # Point this to your music library folder
       - ${MUSIC_DIR:-./music}:/data:rw
     environment:
-      - TAGSTUDIO_AUTH_ENABLED=false
-      # - TAGSTUDIO_USERNAME=admin
-      # - TAGSTUDIO_PASSWORD=changeme
       # - DISCOGS_API_TOKEN=your_token_here
     restart: unless-stopped

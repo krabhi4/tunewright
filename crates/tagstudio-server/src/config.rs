@@ -6,9 +6,6 @@ pub struct Config {
     pub static_dir: PathBuf,
     pub port: u16,
     pub host: String,
-    pub auth_enabled: bool,
-    pub username: String,
-    pub password: String,
 }
 
 impl Config {
@@ -26,12 +23,6 @@ impl Config {
                 .and_then(|p| p.parse().ok())
                 .unwrap_or(8080),
             host: std::env::var("TAGSTUDIO_HOST").unwrap_or_else(|_| "0.0.0.0".to_string()),
-            auth_enabled: std::env::var("TAGSTUDIO_AUTH_ENABLED")
-                .map(|v| v == "true" || v == "1")
-                .unwrap_or(false),
-            username: std::env::var("TAGSTUDIO_USERNAME").unwrap_or_else(|_| "admin".to_string()),
-            password: std::env::var("TAGSTUDIO_PASSWORD")
-                .unwrap_or_else(|_| "changeme".to_string()),
         }
     }
 }
