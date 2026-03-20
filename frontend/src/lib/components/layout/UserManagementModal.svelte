@@ -100,11 +100,16 @@
 	async function handleCopyLink() {
 		try {
 			await navigator.clipboard.writeText(newInviteLink);
-			copied = true;
-			setTimeout(() => (copied = false), 2000);
 		} catch {
-			// Clipboard denied — user can manually select from input
+			// Clipboard API unavailable (non-HTTPS) — fall back to execCommand
+			const input = document.querySelector<HTMLInputElement>('.um-link-input');
+			if (input) {
+				input.select();
+				document.execCommand('copy');
+			}
 		}
+		copied = true;
+		setTimeout(() => (copied = false), 2000);
 	}
 
 	function formatRole(role: string) {
