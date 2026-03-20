@@ -41,6 +41,10 @@ pub fn create_router(state: AppState) -> Router {
                 .delete(coverart::delete_cover_art)
                 .post(coverart::upload_cover_art),
         )
+        .route(
+            "/coverart/from-url",
+            post(coverart::embed_cover_art_from_url),
+        )
         .route("/rename/preview", post(rename::preview))
         .route("/rename/execute", post(rename::execute))
         .route(

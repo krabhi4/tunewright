@@ -3,6 +3,7 @@ use axum::extract::{Multipart, Query, State};
 use axum::http::{header, StatusCode};
 use axum::response::Response;
 use axum::Json;
+use reqwest::Url;
 use serde::Deserialize;
 use tagstudio_core::picture;
 use tagstudio_core::scanner;
@@ -10,6 +11,12 @@ use tagstudio_core::types::TagStudioError;
 
 use crate::error::AppError;
 use crate::state::AppState;
+
+#[derive(Deserialize)]
+pub struct CoverArtFromUrlRequest {
+    pub url: String,
+    pub paths: Vec<String>,
+}
 
 #[derive(Deserialize)]
 pub struct CoverArtQuery {
@@ -61,6 +68,142 @@ pub async fn delete_cover_art(
     picture::remove_cover_art(&safe_path).map_err(AppError)?;
 
     Ok(Json(serde_json::json!({ "status": "ok" })))
+}
+
+pub async fn embed_cover_art_from_url(
+    State(state): State<AppState>,
+    Json(body): Json<CoverArtFromUrlRequest>,
+) -> Result<Json<serde_json::Value>, AppError> {
+    fn is_allowed_host(raw: &str) -> bool {
+        Url::parse(raw)
+            .ok()
+            .and_then(|u| u.host_str().map(|h| h == "coverartarchive.org" || h == "archive.org"))
+            .unwrap_or(false)
+    }
+
+    // Only allow CoverArtArchive URLs
+    if !is_allowed_host(&body.url) {
+        return Err(AppError(TagStudioError::Io(std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            "only coverartarchive.org URLs are allowed",
+        ))));
+    }
+
+    if body.paths.is_empty() {
+        return Err(AppError(TagStudioError::Io(std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            "no file paths provided",
+        ))));
+    }
+
+    // Fetch the image once, restricting redirects to known hosts
+    let client = reqwest::Client::builder()
+        .redirect(reqwest::redirect::Policy::custom(|attempt| {
+            let host = attempt.url().host_str().unwrap_or("");
+            if host == "coverartarchive.org" || host == "archive.org" {
+                attempt.follow()
+            } else {
+                attempt.stop()
+            }
+        }))
+        .build()
+        .map_err(|e| {
+            AppError(TagStudioError::Io(std::io::Error::other(
+                format!("failed to build HTTP client: {}", e),
+            )))
+        })?;
+
+    let mut response = client.get(&body.url).send().await.map_err(|e| {
+        AppError(TagStudioError::Io(std::io::Error::other(
+            format!("failed to fetch cover art: {}", e),
+        )))
+    })?;
+
+    if !response.status().is_success() {
+        return Err(AppError(TagStudioError::Io(std::io::Error::other(
+            format!("cover art fetch returned {}", response.status()),
+        ))));
+    }
+
+    // Reject oversized responses before buffering
+    const MAX_SIZE: u64 = 10 * 1024 * 1024;
+    if let Some(len) = response.content_length() {
+        if len > MAX_SIZE {
+            return Err(AppError(TagStudioError::Io(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                "cover art too large (max 10MB)",
+            ))));
+        }
+    }
+
+    // Stream with size limit to handle chunked responses without Content-Length
+    let mut buf = Vec::new();
+    while let Some(chunk) = response.chunk().await.map_err(|e| {
+        AppError(TagStudioError::Io(std::io::Error::other(
+            format!("failed to read cover art bytes: {}", e),
+        )))
+    })? {
+        buf.extend_from_slice(&chunk);
+        if buf.len() > MAX_SIZE as usize {
+            return Err(AppError(TagStudioError::Io(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                "cover art too large (max 10MB)",
+            ))));
+        }
+    }
+    let image_data = buf;
+
+    if image_data.len() > MAX_SIZE as usize {
+        return Err(AppError(TagStudioError::Io(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            "cover art too large (max 10MB)",
+        ))));
+    }
+
+    if !image_data.starts_with(&[0xFF, 0xD8]) && !image_data.starts_with(&[0x89, 0x50, 0x4E, 0x47]) {
+        return Err(AppError(TagStudioError::Io(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            "invalid image format (JPEG or PNG only)",
+        ))));
+    }
+
+    let image_data = image_data.to_vec();
+    let mut embedded = 0u32;
+    let mut errors: Vec<String> = Vec::new();
+
+    for (i, path_str) in body.paths.iter().enumerate() {
+        match scanner::resolve_safe_path(&state.data_root, path_str) {
+            Ok(safe_path) => {
+                let data = image_data.clone();
+                let result = tokio::task::spawn_blocking(move || {
+                    picture::embed_cover_art(&safe_path, &data)
+                })
+                .await;
+
+                match result {
+                    Ok(Ok(())) => embedded += 1,
+                    Ok(Err(e)) => {
+                        tracing::warn!("cover art embed failed for {:?}: {}", path_str, e);
+                        errors.push(format!("file {}: embed failed", i));
+                    }
+                    Err(e) => {
+                        tracing::warn!("cover art embed task panicked for {:?}: {}", path_str, e);
+                        errors.push(format!("file {}: internal error", i));
+                    }
+                }
+            }
+            Err(e) => {
+                tracing::warn!("path resolution failed for {:?}: {}", path_str, e);
+                errors.push(format!("file {}: invalid path", i));
+            }
+        }
+    }
+
+    Ok(Json(serde_json::json!({
+        "status": "ok",
+        "embedded": embedded,
+        "errors": errors,
+    })))
 }
 
 pub async fn upload_cover_art(

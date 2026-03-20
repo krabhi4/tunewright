@@ -5,6 +5,7 @@
 	import type { ReleaseSearchResult, ReleaseDetail, TrackInfo } from '$lib/api/lookup';
 	import { setPendingEdit, pendingEdits, mergedTags, saveAllEdits } from '$lib/stores/tags';
 	import { executeRenames } from '$lib/api/rename';
+	import { embedCoverArtFromUrl } from '$lib/api/coverart';
 	import { selectedIds, files } from '$lib/stores/files';
 	import { get } from 'svelte/store';
 	import { selectedTags } from '$lib/stores/tags';
@@ -248,6 +249,20 @@
 
 				if (renameFiles) {
 					filesToRename.push({ id: file.id, path: file.relative_path, track });
+				}
+			}
+
+			// Embed cover art before rename (paths are still valid)
+			if (selectedRelease?.cover_art_url) {
+				const coverPaths = matchedFiles
+					.filter((f): f is FileEntry => f !== null)
+					.map((f) => f.relative_path);
+				if (coverPaths.length > 0) {
+					try {
+						await embedCoverArtFromUrl(selectedRelease.cover_art_url, coverPaths);
+					} catch (err) {
+						console.error('Cover art embed failed:', err);
+					}
 				}
 			}
 
