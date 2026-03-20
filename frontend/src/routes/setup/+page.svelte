@@ -54,35 +54,53 @@
 
 		<div class="login-form">
 			<div class="field">
+				<label for="setup-username" class="field-label">Username</label>
 				<input
+					id="setup-username"
 					type="text"
 					bind:value={username}
 					placeholder="Username"
+					autocomplete="username"
+					required
+					aria-required="true"
+					aria-describedby={error ? 'setup-error' : undefined}
 					onkeydown={handleKeydown}
 					class="login-input"
 				/>
 			</div>
 			<div class="field">
+				<label for="setup-password" class="field-label">Password</label>
 				<input
+					id="setup-password"
 					type="password"
 					bind:value={password}
 					placeholder="Password"
+					autocomplete="new-password"
+					required
+					aria-required="true"
+					aria-describedby={error ? 'setup-error' : undefined}
 					onkeydown={handleKeydown}
 					class="login-input"
 				/>
 			</div>
 			<div class="field">
+				<label for="setup-confirm" class="field-label">Confirm Password</label>
 				<input
+					id="setup-confirm"
 					type="password"
 					bind:value={confirmPassword}
 					placeholder="Confirm Password"
+					autocomplete="new-password"
+					required
+					aria-required="true"
+					aria-describedby={error ? 'setup-error' : undefined}
 					onkeydown={handleKeydown}
 					class="login-input"
 				/>
 			</div>
 
 			{#if error}
-				<div class="login-error">{error}</div>
+				<div id="setup-error" class="login-error" role="alert">{error}</div>
 			{/if}
 
 			<button class="login-btn" onclick={handleSetup} disabled={loading}>
@@ -94,7 +112,7 @@
 
 <style>
 	.login-page {
-		height: 100vh;
+		height: 100dvh;
 		display: flex;
 		align-items: center;
 		justify-content: center;
@@ -102,7 +120,7 @@
 	}
 
 	.login-card {
-		width: 320px;
+		width: min(320px, calc(100vw - 32px));
 		background: var(--bg-surface);
 		border: 1px solid var(--border);
 		border-radius: var(--radius-md);
@@ -118,7 +136,7 @@
 		width: 48px;
 		height: 48px;
 		background: var(--bg-elevated);
-		border-radius: 10px;
+		border-radius: var(--radius-lg);
 		display: inline-flex;
 		align-items: center;
 		justify-content: center;
@@ -151,6 +169,12 @@
 		flex-direction: column;
 	}
 
+	.field-label {
+		font-size: 11px;
+		color: var(--text-secondary);
+		margin-bottom: 4px;
+	}
+
 	.login-input {
 		width: 100%;
 		background: var(--bg-base);
@@ -163,8 +187,9 @@
 		outline: none;
 	}
 
-	.login-input:focus {
+	.login-input:focus-visible {
 		border-color: var(--accent);
+		box-shadow: 0 0 0 1px var(--accent);
 	}
 
 	.login-input::placeholder {
@@ -181,7 +206,7 @@
 		width: 100%;
 		background: var(--accent);
 		border: none;
-		color: white;
+		color: var(--text-on-accent);
 		padding: 9px;
 		border-radius: var(--radius-sm);
 		cursor: pointer;

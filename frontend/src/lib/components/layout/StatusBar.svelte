@@ -66,4 +66,11 @@
 	.modified {
 		color: var(--modified);
 	}
+
+	@media (max-width: 768px) {
+		.statusbar {
+			overflow-x: auto;
+			white-space: nowrap;
+		}
+	}
 </style>

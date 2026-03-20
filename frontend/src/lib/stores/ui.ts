@@ -4,7 +4,7 @@ import { persisted } from './persisted';
 export const sidebarWidth = persisted('ts:sidebarWidth', 272);
 export const sidebarCollapsed = persisted('ts:sidebarCollapsed', false);
 export const filterText = writable('');
-export const filterVisible = writable(false);
+export const filterVisible = persisted('ts:filterVisible', false);
 
 // Sort state — synced to URL by +page.svelte
 export const sortColumn = writable<string | null>(null);

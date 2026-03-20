@@ -10,22 +10,70 @@
 
 	let { title, open, onClose, children }: Props = $props();
 
+	let backdropEl = $state<HTMLDivElement>();
+
 	function handleKeydown(e: KeyboardEvent) {
 		if (e.key === 'Escape') onClose();
+		if (e.key === 'Tab' && backdropEl) {
+			trapFocus(e);
+		}
+	}
+
+	function trapFocus(e: KeyboardEvent) {
+		if (!backdropEl) return;
+		const focusable = backdropEl.querySelectorAll<HTMLElement>(
+			'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])'
+		);
+		if (focusable.length === 0) return;
+		const first = focusable[0];
+		const last = focusable[focusable.length - 1];
+
+		if (e.shiftKey) {
+			if (document.activeElement === first) {
+				e.preventDefault();
+				last.focus();
+			}
+		} else {
+			if (document.activeElement === last) {
+				e.preventDefault();
+				first.focus();
+			}
+		}
 	}
 
 	function handleBackdrop(e: MouseEvent) {
 		if (e.target === e.currentTarget) onClose();
 	}
+
+	$effect(() => {
+		if (open && backdropEl) {
+			const focusable = backdropEl.querySelector<HTMLElement>(
+				'input:not([type="hidden"]), button:not(:disabled), select, textarea, [tabindex]:not([tabindex="-1"])'
+			);
+			if (focusable) {
+				focusable.focus();
+			} else {
+				backdropEl.focus();
+			}
+		}
+	});
 </script>
 
 {#if open}
-	<!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
-	<div class="backdrop" role="dialog" aria-modal="true" tabindex="-1" onclick={handleBackdrop} onkeydown={handleKeydown}>
+	<div
+		class="backdrop"
+		role="dialog"
+		aria-modal="true"
+		aria-labelledby="modal-title"
+		tabindex="-1"
+		bind:this={backdropEl}
+		onclick={handleBackdrop}
+		onkeydown={handleKeydown}
+	>
 		<div class="modal">
 			<div class="modal-header">
-				<span class="modal-title">{title}</span>
-				<button class="modal-close" onclick={onClose}>&times;</button>
+				<h2 class="modal-title" id="modal-title">{title}</h2>
+				<button class="modal-close" onclick={onClose} aria-label="Close dialog">&times;</button>
 			</div>
 			<div class="modal-body">
 				{@render children()}
@@ -35,26 +83,41 @@
 {/if}
 
 <style>
+	@keyframes backdrop-in {
+		from { opacity: 0; }
+		to { opacity: 1; }
+	}
+
+	@keyframes modal-in {
+		from { opacity: 0; transform: scale(0.97); }
+		to { opacity: 1; transform: scale(1); }
+	}
+
 	.backdrop {
 		position: fixed;
 		inset: 0;
-		background: rgba(0, 0, 0, 0.6);
+		background: var(--backdrop);
 		display: flex;
 		align-items: center;
 		justify-content: center;
-		z-index: 100;
+		z-index: var(--z-modal);
+		outline: none;
+		animation: backdrop-in 150ms cubic-bezier(0.25, 1, 0.5, 1);
 	}
 
 	.modal {
 		background: var(--bg-elevated);
 		border: 1px solid var(--border);
 		border-radius: var(--radius-md);
-		min-width: 400px;
-		max-width: 600px;
+		min-width: min(400px, calc(100vw - 32px));
+		max-width: min(600px, calc(100vw - 32px));
 		max-height: 70vh;
+		width: 100%;
 		display: flex;
 		flex-direction: column;
-		box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
+		box-shadow: var(--shadow-modal);
+		animation: modal-in 150ms cubic-bezier(0.25, 1, 0.5, 1);
+		will-change: opacity, transform;
 	}
 
 	.modal-header {
@@ -70,6 +133,7 @@
 		font-size: 13px;
 		font-weight: 600;
 		color: var(--text-primary);
+		margin: 0;
 	}
 
 	.modal-close {
@@ -78,8 +142,13 @@
 		color: var(--text-muted);
 		font-size: 18px;
 		cursor: pointer;
-		padding: 0 4px;
+		padding: 4px 8px;
 		line-height: 1;
+		min-width: 32px;
+		min-height: 32px;
+		display: flex;
+		align-items: center;
+		justify-content: center;
 	}
 
 	.modal-close:hover {

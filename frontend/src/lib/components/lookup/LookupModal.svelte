@@ -26,6 +26,7 @@
 	let selectedRelease = $state<ReleaseDetail | null>(null);
 	let searching = $state(false);
 	let loadingRelease = $state(false);
+	let searchError = $state('');
 
 	// Matching state: tracks on left, files on right, linked by index
 	let matchedFiles = $state<(FileEntry | null)[]>([]);
@@ -34,6 +35,26 @@
 	let dragFromUnmatched = $state<number | null>(null);
 	let renameFiles = $state(false);
 	let applying = $state(false);
+
+	// Click-to-assign: select a file from unmatched, then click a slot to assign
+	let selectedUnmatchedIdx = $state<number | null>(null);
+
+	function handleSlotClick(targetIdx: number) {
+		if (selectedUnmatchedIdx !== null) {
+			// Assign the selected unmatched file to this slot
+			const file = unmatchedFiles[selectedUnmatchedIdx];
+			const displaced = matchedFiles[targetIdx];
+			matchedFiles[targetIdx] = file;
+			matchedFiles = [...matchedFiles];
+			unmatchedFiles = unmatchedFiles.filter((_, i) => i !== selectedUnmatchedIdx);
+			if (displaced) unmatchedFiles = [...unmatchedFiles, displaced];
+			selectedUnmatchedIdx = null;
+		}
+	}
+
+	function handleUnmatchedClick(idx: number) {
+		selectedUnmatchedIdx = selectedUnmatchedIdx === idx ? null : idx;
+	}
 
 	// Auto-fill search from selected tags
 	$effect(() => {
@@ -54,12 +75,13 @@
 	async function handleSearch() {
 		if (!searchQuery.trim()) return;
 		searching = true;
+		searchError = '';
 		searchResults = [];
 		selectedRelease = null;
 		try {
 			searchResults = await searchMusicBrainz(searchQuery);
-		} catch (err) {
-			console.error('Search failed:', err);
+		} catch (err: any) {
+			searchError = err.message || 'Search failed';
 		} finally {
 			searching = false;
 		}
@@ -67,13 +89,14 @@
 
 	async function selectRelease(result: ReleaseSearchResult) {
 		loadingRelease = true;
+		searchError = '';
 		try {
 			selectedRelease = await getMusicBrainzRelease(result.id);
 			if (selectedRelease) {
 				initMatchingStep();
 			}
-		} catch (err) {
-			console.error('Failed to load release:', err);
+		} catch (err: any) {
+			searchError = err.message || 'Failed to load release details';
 		} finally {
 			loadingRelease = false;
 		}
@@ -264,6 +287,7 @@
 				bind:value={searchQuery}
 				onkeydown={handleSearchKeydown}
 				placeholder="Search artist, album..."
+				aria-label="Search MusicBrainz"
 			/>
 			<button class="search-btn" onclick={handleSearch} disabled={searching}>
 				{searching ? 'Searching...' : 'Search'}
@@ -276,7 +300,7 @@
 					{#if selectedRelease.cover_art_url}
 						<img
 							src={selectedRelease.cover_art_url}
-							alt="Cover"
+							alt="Cover art for {selectedRelease.title} by {selectedRelease.artist}"
 							class="release-cover"
 							onerror={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }}
 						/>
@@ -302,8 +326,8 @@
 					{/each}
 				</div>
 				<div class="apply-bar">
-					<button class="btn-back" onclick={() => (selectedRelease = null)}>Back</button>
-					<button class="btn-apply" onclick={initMatchingStep}>
+					<button class="btn btn-secondary" onclick={() => (selectedRelease = null)}>Back</button>
+					<button class="btn btn-primary" onclick={initMatchingStep}>
 						Match to Files
 					</button>
 				</div>
@@ -324,9 +348,13 @@
 				{/each}
 			</div>
 		{:else if searching}
-			<div class="status-msg">Searching MusicBrainz...</div>
+			<div class="status-msg"><span class="spinner spinner--sm"></span> Searching MusicBrainz...</div>
 		{:else if loadingRelease}
-			<div class="status-msg">Loading release details...</div>
+			<div class="status-msg"><span class="spinner spinner--sm"></span> Loading release details...</div>
+		{/if}
+
+		{#if searchError}
+			<div class="search-error" role="alert">{searchError}</div>
 		{/if}
 
 	{:else if step === 'match' && selectedRelease}
@@ -339,6 +367,8 @@
 				<button class="btn-small" onclick={autoMatchByTrackNumber}>Auto-match by #</button>
 			</div>
 		</div>
+
+		<div class="match-hint">Drag files to match them with tracks, or click a file then click a slot.</div>
 
 		<div class="match-grid">
 			<div class="match-col-header">
@@ -356,13 +386,14 @@
 						{/if}
 					</div>
 					<div class="match-arrow">{matchedFiles[i] ? '\u2194' : ''}</div>
-					<!-- svelte-ignore a11y_no_static_element_interactions -->
-					<div
+					<button
 						class="match-file"
 						class:empty={!matchedFiles[i]}
-						class:drag-over={false}
+						class:assignable={selectedUnmatchedIdx !== null && !matchedFiles[i]}
 						ondragover={(e) => e.preventDefault()}
 						ondrop={(e) => onMatchedDrop(i, e)}
+						onclick={() => handleSlotClick(i)}
+						aria-label={matchedFiles[i] ? `Track ${track.position} matched to ${matchedFiles[i]?.filename}` : `Assign file to track ${track.position}`}
 					>
 						{#if matchedFiles[i]}
 							{@const file = matchedFiles[i]}
@@ -373,12 +404,12 @@
 								ondragstart={() => onMatchedDragStart(i)}
 							>
 								<span class="file-chip-name">{file.filename}</span>
-								<button class="file-chip-remove" onclick={() => unmatchFile(i)}>&times;</button>
+								<span class="file-chip-remove" role="button" tabindex="0" onclick={(e) => { e.stopPropagation(); unmatchFile(i); }} onkeydown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); e.stopPropagation(); unmatchFile(i); }}} aria-label="Remove match">&times;</span>
 							</div>
 						{:else}
-							<span class="drop-hint">Drop file here</span>
+							<span class="drop-hint">{selectedUnmatchedIdx !== null ? 'Click to assign' : 'Drop or click file'}</span>
 						{/if}
-					</div>
+					</button>
 				</div>
 			{/each}
 		</div>
@@ -390,30 +421,33 @@
 				ondragover={(e) => e.preventDefault()}
 				ondrop={onUnmatchedDrop}
 			>
-				<div class="unmatched-label">Unmatched files ({unmatchedFiles.length})</div>
+				<div class="unmatched-label">Unmatched files ({unmatchedFiles.length}) {selectedUnmatchedIdx !== null ? '— click a slot above to assign' : '— click to select, then click a slot'}</div>
 				<div class="unmatched-list">
 					{#each unmatchedFiles as file, i}
-						<!-- svelte-ignore a11y_no_static_element_interactions -->
-						<div
+						<button
 							class="file-chip"
+							class:file-chip--selected={selectedUnmatchedIdx === i}
 							draggable="true"
 							ondragstart={() => onUnmatchedDragStart(i)}
+							onclick={() => handleUnmatchedClick(i)}
+							aria-label="Select {file.filename} for assignment"
+							aria-pressed={selectedUnmatchedIdx === i}
 						>
 							<span class="file-chip-name">{file.filename}</span>
-						</div>
+						</button>
 					{/each}
 				</div>
 			</div>
 		{/if}
 
 		<div class="apply-bar">
-			<button class="btn-back" onclick={() => (step = 'search')}>Back</button>
+			<button class="btn btn-secondary" onclick={() => (step = 'search')}>Back</button>
 			<label class="rename-check">
 				<input type="checkbox" bind:checked={renameFiles} />
 				<span>Rename files to match</span>
 			</label>
 			<span class="match-count">{matchedCount}/{selectedRelease.tracks.length} matched</span>
-			<button class="btn-apply" onclick={applyMatches} disabled={matchedCount === 0 || applying}>
+			<button class="btn btn-primary" onclick={applyMatches} disabled={matchedCount === 0 || applying}>
 				{applying ? 'Applying...' : `Apply ${matchedCount} Matches`}
 			</button>
 		</div>
@@ -446,7 +480,7 @@
 	.search-btn {
 		background: var(--accent);
 		border: none;
-		color: white;
+		color: var(--text-on-accent);
 		padding: 6px 14px;
 		border-radius: var(--radius-sm);
 		cursor: pointer;
@@ -591,11 +625,6 @@
 		flex-shrink: 0;
 	}
 
-	.mono {
-		font-family: var(--font-mono);
-		font-size: 11px;
-	}
-
 	.apply-bar {
 		display: flex;
 		justify-content: flex-end;
@@ -604,46 +633,28 @@
 		margin-top: 10px;
 	}
 
-	.btn-back {
-		background: transparent;
-		border: 1px solid var(--border);
-		color: var(--text-secondary);
-		padding: 5px 14px;
-		border-radius: var(--radius-sm);
-		cursor: pointer;
-		font-family: var(--font-ui);
-		font-size: 12px;
-	}
-
-	.btn-back:hover {
-		background: var(--bg-hover);
-	}
-
-	.btn-apply {
-		background: var(--accent);
-		border: none;
-		color: white;
-		padding: 5px 14px;
-		border-radius: var(--radius-sm);
-		cursor: pointer;
-		font-family: var(--font-ui);
-		font-size: 12px;
-	}
-
-	.btn-apply:hover:not(:disabled) {
-		background: var(--accent-hover);
-	}
-
-	.btn-apply:disabled {
-		opacity: 0.5;
-		cursor: not-allowed;
-	}
-
 	.status-msg {
 		color: var(--text-muted);
 		font-size: 12px;
 		padding: 20px;
 		text-align: center;
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		gap: 6px;
+	}
+
+	.search-error {
+		color: var(--error);
+		font-size: 12px;
+		text-align: center;
+		padding: 8px;
+	}
+
+	.match-hint {
+		font-size: 11px;
+		color: var(--text-muted);
+		margin-bottom: 8px;
 	}
 
 	/* Matching step styles */
@@ -737,11 +748,22 @@
 		align-items: center;
 		border-radius: var(--radius-sm);
 		transition: background 0.1s;
+		background: none;
+		font-family: var(--font-ui);
+		color: var(--text-primary);
+		text-align: left;
+		cursor: default;
 	}
 
 	.match-file.empty {
 		border: 1px dashed var(--border-subtle);
 		justify-content: center;
+	}
+
+	.match-file.assignable {
+		border-color: var(--accent);
+		background: var(--accent-subtle);
+		cursor: pointer;
 	}
 
 	.file-chip {
@@ -755,11 +777,19 @@
 		cursor: grab;
 		max-width: 100%;
 		min-width: 0;
+		font-family: var(--font-ui);
+		color: var(--text-primary);
+		text-align: left;
 	}
 
 	.file-chip:active {
 		cursor: grabbing;
 		opacity: 0.7;
+	}
+
+	.file-chip--selected {
+		border-color: var(--accent);
+		background: var(--accent-muted);
 	}
 
 	.file-chip-name {

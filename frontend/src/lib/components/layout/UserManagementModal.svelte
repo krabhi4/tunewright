@@ -1,5 +1,6 @@
 <script lang="ts">
 	import Modal from '$lib/components/common/Modal.svelte';
+	import ConfirmModal from '$lib/components/common/ConfirmModal.svelte';
 	import {
 		listUsers,
 		deleteUser,
@@ -25,6 +26,9 @@
 	let loading = $state(false);
 
 	let currentUsername = $derived($auth.user?.username);
+
+	let deleteConfirmOpen = $state(false);
+	let pendingDeleteUser = $state<{ id: string; username: string } | null>(null);
 
 	$effect(() => {
 		if (open) {
@@ -58,15 +62,27 @@
 		}
 	}
 
-	async function handleDeleteUser(id: string, username: string) {
+	function requestDeleteUser(id: string, username: string) {
+		pendingDeleteUser = { id, username };
+		deleteConfirmOpen = true;
+	}
+
+	async function confirmDeleteUser() {
+		if (!pendingDeleteUser) return;
 		error = '';
-		if (!confirm(`Remove user "${username}"?`)) return;
+		deleteConfirmOpen = false;
 		try {
-			await deleteUser(id);
+			await deleteUser(pendingDeleteUser.id);
 			users = await listUsers();
 		} catch (err: any) {
 			error = err.message || 'Failed to delete user';
 		}
+		pendingDeleteUser = null;
+	}
+
+	function cancelDeleteUser() {
+		deleteConfirmOpen = false;
+		pendingDeleteUser = null;
 	}
 
 	async function handleDeleteInvite(token: string) {
@@ -122,16 +138,22 @@
 
 		<section class="um-section">
 			<h3 class="um-heading">Users</h3>
-			<div class="um-table">
+			<div class="um-table" role="table" aria-label="Users">
+				<div class="um-row um-row--header" role="row" aria-hidden="true">
+					<div class="um-cell um-cell--name" role="columnheader">Name</div>
+					<div class="um-cell um-cell--role" role="columnheader">Role</div>
+					<div class="um-cell um-cell--date" role="columnheader">Created</div>
+					<div class="um-cell um-cell--action" role="columnheader">Action</div>
+				</div>
 				{#each users as user}
-					<div class="um-row">
-						<div class="um-cell um-cell--name">
+					<div class="um-row" role="row">
+						<div class="um-cell um-cell--name" role="cell">
 							{user.username}
 							{#if user.username === currentUsername}
 								<span class="um-badge um-badge--you">you</span>
 							{/if}
 						</div>
-						<div class="um-cell um-cell--role">
+						<div class="um-cell um-cell--role" role="cell">
 							<span
 								class="um-badge"
 								class:um-badge--super={user.role === 'super_admin'}
@@ -139,12 +161,12 @@
 								{formatRole(user.role)}
 							</span>
 						</div>
-						<div class="um-cell um-cell--date">{formatDate(user.created_at)}</div>
-						<div class="um-cell um-cell--action">
+						<div class="um-cell um-cell--date" role="cell">{formatDate(user.created_at)}</div>
+						<div class="um-cell um-cell--action" role="cell">
 							{#if user.username !== currentUsername}
 								<button
 									class="um-btn-delete"
-									onclick={() => handleDeleteUser(user.id, user.username)}
+									onclick={() => requestDeleteUser(user.id, user.username)}
 								>
 									Remove
 								</button>
@@ -163,22 +185,22 @@
 
 			{#if newInviteLink}
 				<div class="um-invite-link">
-					<input type="text" value={newInviteLink} readonly class="um-link-input" />
+					<input type="text" value={newInviteLink} readonly class="um-link-input" aria-label="Invite link" />
 					<button class="um-btn-copy" onclick={handleCopyLink}>{copied ? 'Copied' : 'Copy'}</button>
 				</div>
 			{/if}
 
 			{#if invites.length > 0}
-				<div class="um-table">
+				<div class="um-table" role="table" aria-label="Invites">
 					{#each invites as invite}
-						<div class="um-row">
-							<div class="um-cell um-cell--token" title={invite.token}>
+						<div class="um-row" role="row">
+							<div class="um-cell um-cell--token" role="cell" title={invite.token}>
 								{invite.token.slice(0, 8)}...
 							</div>
-							<div class="um-cell um-cell--expiry">
+							<div class="um-cell um-cell--expiry" role="cell">
 								{formatExpiry(invite.expires_at)}
 							</div>
-							<div class="um-cell um-cell--action">
+							<div class="um-cell um-cell--action" role="cell">
 								<button
 									class="um-btn-delete"
 									onclick={() => handleDeleteInvite(invite.token)}
@@ -195,6 +217,16 @@
 		</section>
 	{/if}
 </Modal>
+
+<ConfirmModal
+	open={deleteConfirmOpen}
+	title="Remove User"
+	message={pendingDeleteUser ? `Remove user "${pendingDeleteUser.username}"? This cannot be undone.` : ''}
+	confirmLabel="Remove"
+	cancelLabel="Cancel"
+	onConfirm={confirmDeleteUser}
+	onCancel={cancelDeleteUser}
+/>
 
 <style>
 	.um-loading,
@@ -244,6 +276,18 @@
 		display: flex;
 		flex-direction: column;
 		gap: 1px;
+	}
+
+	.um-row--header {
+		position: absolute;
+		width: 1px;
+		height: 1px;
+		padding: 0;
+		margin: -1px;
+		overflow: hidden;
+		clip: rect(0, 0, 0, 0);
+		white-space: nowrap;
+		border: 0;
 	}
 
 	.um-row {
@@ -332,13 +376,13 @@
 
 	.um-btn-delete:hover {
 		color: var(--error);
-		background: rgba(239, 68, 68, 0.1);
+		background: var(--error-10);
 	}
 
 	.um-btn-invite {
 		background: var(--accent);
 		border: none;
-		color: white;
+		color: var(--text-on-accent);
 		font-family: var(--font-ui);
 		font-size: 11px;
 		padding: 4px 10px;

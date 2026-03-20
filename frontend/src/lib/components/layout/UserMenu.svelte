@@ -9,6 +9,7 @@
 
 	let { onManageUsers }: Props = $props();
 	let open = $state(false);
+	let dropdownEl = $state<HTMLDivElement>();
 
 	let user = $derived($auth.user);
 	let isSuperAdmin = $derived(user?.role === 'super_admin');
@@ -35,30 +36,73 @@
 			open = false;
 		}
 	}
+
+	function toggleOpen() {
+		open = !open;
+	}
+
+	$effect(() => {
+		if (open && dropdownEl) {
+			const firstItem = dropdownEl.querySelector<HTMLElement>('[role="menuitem"]');
+			firstItem?.focus();
+		}
+	});
+
+	function handleDropdownKeydown(e: KeyboardEvent) {
+		if (!dropdownEl) return;
+		const items = Array.from(dropdownEl.querySelectorAll<HTMLElement>('[role="menuitem"]'));
+		const currentIdx = items.indexOf(document.activeElement as HTMLElement);
+
+		switch (e.key) {
+			case 'ArrowDown':
+				e.preventDefault();
+				items[(currentIdx + 1) % items.length]?.focus();
+				break;
+			case 'ArrowUp':
+				e.preventDefault();
+				items[(currentIdx - 1 + items.length) % items.length]?.focus();
+				break;
+			case 'Escape':
+				e.preventDefault();
+				open = false;
+				break;
+		}
+	}
 </script>
 
 <svelte:window onclick={handleClickOutside} />
 
 {#if user}
 	<div class="user-menu">
-		<button class="user-trigger" onclick={() => (open = !open)}>
+		<button
+			class="user-trigger"
+			onclick={toggleOpen}
+			aria-haspopup="true"
+			aria-expanded={open}
+		>
 			<span class="user-avatar">{user.username[0].toUpperCase()}</span>
 			<span class="user-name">{user.username}</span>
 		</button>
 
 		{#if open}
-			<div class="user-dropdown">
+			<!-- svelte-ignore a11y_interactive_supports_focus -->
+			<div
+				class="user-dropdown"
+				role="menu"
+				bind:this={dropdownEl}
+				onkeydown={handleDropdownKeydown}
+			>
 				<div class="dropdown-header">
 					<span class="dropdown-username">{user.username}</span>
 					<span class="dropdown-role">{isSuperAdmin ? 'Super Admin' : 'Admin'}</span>
 				</div>
-				<div class="dropdown-divider"></div>
+				<div class="dropdown-divider" role="separator"></div>
 				{#if isSuperAdmin}
-					<button class="dropdown-item" onclick={handleManageUsers}>
+					<button class="dropdown-item" role="menuitem" onclick={handleManageUsers}>
 						Manage Users
 					</button>
 				{/if}
-				<button class="dropdown-item dropdown-item--danger" onclick={handleLogout}>
+				<button class="dropdown-item dropdown-item--danger" role="menuitem" onclick={handleLogout}>
 					Sign Out
 				</button>
 			</div>
@@ -111,6 +155,11 @@
 		white-space: nowrap;
 	}
 
+	@keyframes dropdown-in {
+		from { opacity: 0; transform: translateY(-4px); }
+		to { opacity: 1; transform: translateY(0); }
+	}
+
 	.user-dropdown {
 		position: absolute;
 		top: calc(100% + 4px);
@@ -120,8 +169,10 @@
 		border: 1px solid var(--border);
 		border-radius: var(--radius-md);
 		padding: 4px;
-		z-index: 100;
-		box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+		z-index: var(--z-dropdown);
+		box-shadow: var(--shadow-dropdown);
+		animation: dropdown-in 120ms cubic-bezier(0.25, 1, 0.5, 1);
+		will-change: opacity, transform;
 	}
 
 	.dropdown-header {
@@ -162,12 +213,15 @@
 		border-radius: var(--radius-sm);
 	}
 
-	.dropdown-item:hover {
+	.dropdown-item:hover,
+	.dropdown-item:focus-visible {
 		background: var(--bg-hover);
 		color: var(--text-primary);
+		outline: none;
 	}
 
-	.dropdown-item--danger:hover {
+	.dropdown-item--danger:hover,
+	.dropdown-item--danger:focus-visible {
 		color: var(--error);
 	}
 </style>

@@ -61,23 +61,26 @@
 
 	let hasConflicts = $derived(previews.some((p) => p.conflict));
 
-	function handleFormatChange() {
-		loadPreview();
+	let previewTimer: ReturnType<typeof setTimeout>;
+
+	function handleFormatInput() {
+		clearTimeout(previewTimer);
+		previewTimer = setTimeout(() => loadPreview(), 300);
 	}
 </script>
 
 <Modal title="Rename Files" {open} {onClose}>
 	<div class="rename-form">
-		<!-- svelte-ignore a11y_label_has_associated_control -->
-		<label class="label">Format String</label>
+		<label class="label" for="rename-format">Format String</label>
 		<input
+			id="rename-format"
 			class="format-input"
 			type="text"
 			bind:value={format}
-			onchange={handleFormatChange}
+			oninput={handleFormatInput}
 			placeholder="%track% - %artist% - %title%"
 		/>
-		<div class="tokens">
+		<div class="tokens" role="group" aria-label="Format tokens">
 			{#each ['%track%', '%artist%', '%title%', '%album%', '%year%', '%genre%'] as token}
 				<button class="token-btn" onclick={() => { format += token; loadPreview(); }}>
 					{token}
@@ -87,7 +90,7 @@
 	</div>
 
 	{#if loading}
-		<div class="preview-loading">Loading preview...</div>
+		<div class="preview-loading"><span class="spinner spinner--sm"></span> Loading preview...</div>
 	{:else if previews.length > 0}
 		<div class="preview-list">
 			<div class="preview-header">
@@ -109,11 +112,11 @@
 
 	<div class="rename-actions">
 		{#if hasConflicts}
-			<span class="conflict-warning">Conflicts detected</span>
+			<span class="conflict-warning" role="alert">Conflicts detected</span>
 		{/if}
-		<button class="btn-cancel" onclick={onClose}>Cancel</button>
+		<button class="btn btn-secondary" onclick={onClose}>Cancel</button>
 		<button
-			class="btn-execute"
+			class="btn btn-primary"
 			disabled={previews.length === 0 || hasConflicts || executing}
 			onclick={handleExecute}
 		>
@@ -206,7 +209,7 @@
 	}
 
 	.preview-row.conflict {
-		background: rgba(239, 68, 68, 0.1);
+		background: var(--error-10);
 	}
 
 	.preview-old {
@@ -236,16 +239,15 @@
 		color: var(--accent);
 	}
 
-	.mono {
-		font-family: var(--font-mono);
-		font-size: 11px;
-	}
-
 	.preview-loading {
 		color: var(--text-muted);
 		font-size: 12px;
 		padding: 12px;
 		text-align: center;
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		gap: 6px;
 	}
 
 	.rename-actions {
@@ -261,38 +263,4 @@
 		margin-right: auto;
 	}
 
-	.btn-cancel {
-		background: transparent;
-		border: 1px solid var(--border);
-		color: var(--text-secondary);
-		padding: 5px 14px;
-		border-radius: var(--radius-sm);
-		cursor: pointer;
-		font-family: var(--font-ui);
-		font-size: 12px;
-	}
-
-	.btn-cancel:hover {
-		background: var(--bg-hover);
-	}
-
-	.btn-execute {
-		background: var(--accent);
-		border: none;
-		color: white;
-		padding: 5px 14px;
-		border-radius: var(--radius-sm);
-		cursor: pointer;
-		font-family: var(--font-ui);
-		font-size: 12px;
-	}
-
-	.btn-execute:hover:not(:disabled) {
-		background: var(--accent-hover);
-	}
-
-	.btn-execute:disabled {
-		opacity: 0.4;
-		cursor: default;
-	}
 </style>

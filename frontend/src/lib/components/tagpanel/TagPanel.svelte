@@ -127,9 +127,9 @@
 		{:else}
 			{#each fields as field (field.key)}
 				<div class="field-group">
-					<!-- svelte-ignore a11y_label_has_associated_control -->
-					<label class="field-label">{field.label}</label>
+					<label class="field-label" for="tag-{field.key}">{field.label}</label>
 					<input
+						id="tag-{field.key}"
 						class="field-input"
 						class:keep={isKeep(field.key)}
 						type="text"
@@ -154,8 +154,9 @@
 		{#if coverArtUrl && !coverArtError}
 			<img
 				src={coverArtUrl}
-				alt="Cover art"
+				alt="Cover art for {$selectedFiles[0]?.filename ?? 'selected file'}"
 				class="cover-img"
+				loading="lazy"
 				onerror={() => (coverArtError = true)}
 			/>
 		{:else}
@@ -218,7 +219,7 @@
 		color: var(--accent);
 		background: var(--accent-subtle);
 		padding: 1px 5px;
-		border-radius: 8px;
+		border-radius: var(--radius-md);
 	}
 
 	.panel-body {
@@ -264,8 +265,9 @@
 		transition: border-color 0.15s;
 	}
 
-	.field-input:focus {
+	.field-input:focus-visible {
 		border-color: var(--accent);
+		box-shadow: 0 0 0 1px var(--accent);
 	}
 
 	.field-input.keep {
@@ -282,6 +284,7 @@
 		padding: 10px 12px 12px;
 		flex-shrink: 0;
 		border-top: 1px solid var(--border-subtle);
+		position: relative;
 	}
 
 	.cover-placeholder {
@@ -291,7 +294,7 @@
 		display: flex;
 		align-items: center;
 		justify-content: center;
-		box-shadow: inset 0 1px 3px rgba(0, 0, 0, 0.3);
+		box-shadow: var(--shadow-inset);
 	}
 
 	.cover-img {
@@ -299,16 +302,11 @@
 		aspect-ratio: 1;
 		object-fit: cover;
 		border-radius: var(--radius-sm);
-		box-shadow: inset 0 1px 3px rgba(0, 0, 0, 0.3);
 	}
 
 	.cover-text {
 		color: var(--text-muted);
 		font-size: 11px;
-	}
-
-	.cover-area {
-		position: relative;
 	}
 
 	.cover-area.drag-over {
@@ -349,7 +347,7 @@
 	.drop-overlay {
 		position: absolute;
 		inset: 0;
-		background: rgba(99, 102, 241, 0.15);
+		background: var(--accent-15);
 		border-radius: var(--radius-sm);
 		display: flex;
 		align-items: center;

@@ -16,9 +16,10 @@
 	interface Props {
 		files: FileEntry[];
 		onNavigate: (path: string) => void;
+		filteredCount?: number;
 	}
 
-	let { files, onNavigate }: Props = $props();
+	let { files, onNavigate, filteredCount = $bindable(0) }: Props = $props();
 
 	// Virtual scrolling state
 	let containerEl: HTMLDivElement;
@@ -146,6 +147,9 @@
 		return result;
 	});
 
+	// Expose filtered count to parent
+	$effect(() => { filteredCount = processedFiles.length; });
+
 	// Total rows = directories + files
 	let visibleSelectedCount = $derived(processedFiles.filter((f) => $selectedIds.has(f.id)).length);
 	let totalRows = $derived(dirEntries.length + processedFiles.length);
@@ -187,8 +191,13 @@
 		}
 	});
 
+	let headerEl: HTMLDivElement;
+
 	function handleScroll() {
 		scrollTop = containerEl.scrollTop;
+		if (headerEl) {
+			headerEl.scrollLeft = containerEl.scrollLeft;
+		}
 	}
 
 	function handleSort(key: string) {
@@ -291,12 +300,13 @@
 	}
 </script>
 
-<div class="grid-wrapper">
-	<div class="grid-header" style="height: {HEADER_HEIGHT}px">
+<div class="grid-wrapper" role="grid" aria-label="Audio files">
+	<div class="grid-header" style="height: {HEADER_HEIGHT}px" bind:this={headerEl}>
 		<div class="header-cell check-col">
 			<input
 				type="checkbox"
 				class="row-check"
+				aria-label="Select all files"
 				checked={processedFiles.length > 0 && visibleSelectedCount === processedFiles.length}
 				indeterminate={visibleSelectedCount > 0 && visibleSelectedCount < processedFiles.length}
 				onchange={() => {
@@ -326,6 +336,13 @@
 
 	<!-- svelte-ignore a11y_no_static_element_interactions -->
 	<div class="grid-body" bind:this={containerEl} onscroll={handleScroll} onkeydown={handleKeydown} tabindex="-1">
+		{#if totalRows === 0}
+			<div class="grid-empty">
+				<svg class="empty-icon" aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/></svg>
+				<span class="empty-title">No audio files</span>
+				<span class="empty-hint">{$filterText ? 'Try a different filter' : 'Open a folder to get started. Use F3 to filter, Ctrl+S to save.'}</span>
+			</div>
+		{:else}
 		<div style="height: {totalHeight}px; position: relative;">
 			<div style="transform: translateY({offsetY}px);">
 				{#each visibleRows as row, i}
@@ -334,10 +351,11 @@
 							class="grid-row dir-row"
 							style="height: {ROW_HEIGHT}px"
 							ondblclick={() => navigateToDir(row.name)}
+							onkeydown={(e) => { if (e.key === 'Enter') navigateToDir(row.name); }}
 						>
 							<div class="cell check-col"></div>
 							<div class="cell dir-cell" style="width: {columns[0].width}px">
-								<span class="dir-icon">&#128193;</span>
+								<svg class="dir-icon" aria-hidden="true" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M2 4.5V12a1 1 0 001 1h10a1 1 0 001-1V6a1 1 0 00-1-1H8L6.5 3.5H3a1 1 0 00-1 1z"/></svg>
 								{row.name}
 							</div>
 							{#each columns.slice(1) as col}
@@ -363,6 +381,7 @@
 								<input
 									type="checkbox"
 									class="row-check"
+									aria-label="Select {file.filename}"
 									checked={isSelected}
 									onclick={(e) => e.stopPropagation()}
 									onchange={() => toggleSelection(file.id, true)}
@@ -386,6 +405,7 @@
 				{/each}
 			</div>
 		</div>
+		{/if}
 	</div>
 </div>
 
@@ -413,6 +433,7 @@
 		border-bottom: 1px solid var(--grid-border);
 		flex-shrink: 0;
 		user-select: none;
+		overflow: hidden;
 	}
 
 	.header-cell {
@@ -532,7 +553,8 @@
 	}
 
 	.dir-icon {
-		font-size: 14px;
+		width: 14px;
+		height: 14px;
 		flex-shrink: 0;
 	}
 
@@ -558,5 +580,57 @@
 
 	.cell-fill {
 		flex: 1;
+	}
+
+	.grid-empty {
+		display: flex;
+		flex-direction: column;
+		align-items: center;
+		justify-content: center;
+		gap: 8px;
+		height: 100%;
+		padding: 40px 20px;
+		user-select: none;
+	}
+
+	.empty-icon {
+		width: 32px;
+		height: 32px;
+		color: var(--text-muted);
+		opacity: 0.5;
+		margin-bottom: 4px;
+	}
+
+	.empty-title {
+		font-size: 13px;
+		color: var(--text-secondary);
+		font-weight: 500;
+	}
+
+	.empty-hint {
+		font-size: 11px;
+		color: var(--text-muted);
+		text-align: center;
+		max-width: 280px;
+		line-height: 1.5;
+	}
+
+	@media (max-width: 768px) {
+		.check-col {
+			width: 44px;
+		}
+
+		.row-check {
+			width: 18px;
+			height: 18px;
+		}
+
+		.cell {
+			font-size: 13px;
+		}
+
+		.cell.mono {
+			font-size: 12px;
+		}
 	}
 </style>

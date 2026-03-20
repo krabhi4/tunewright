@@ -31,7 +31,7 @@
 	<div class="confirm-actions">
 		<button class="btn btn-secondary" onclick={onCancel}>{cancelLabel}</button>
 		{#if extraLabel && onExtra}
-			<button class="btn btn-warning" onclick={onExtra}>{extraLabel}</button>
+			<button class="btn btn-danger" onclick={onExtra}>{extraLabel}</button>
 		{/if}
 		<button class="btn btn-primary" onclick={onConfirm}>{confirmLabel}</button>
 	</div>
@@ -49,42 +49,5 @@
 		display: flex;
 		justify-content: flex-end;
 		gap: 8px;
-	}
-
-	.btn {
-		padding: 5px 14px;
-		border-radius: var(--radius-sm);
-		cursor: pointer;
-		font-family: var(--font-ui);
-		font-size: 12px;
-		border: none;
-	}
-
-	.btn-secondary {
-		background: transparent;
-		border: 1px solid var(--border);
-		color: var(--text-secondary);
-	}
-
-	.btn-secondary:hover {
-		background: var(--bg-hover);
-	}
-
-	.btn-warning {
-		background: var(--error);
-		color: white;
-	}
-
-	.btn-warning:hover {
-		opacity: 0.9;
-	}
-
-	.btn-primary {
-		background: var(--accent);
-		color: white;
-	}
-
-	.btn-primary:hover {
-		background: var(--accent-hover);
 	}
 </style>

@@ -31,7 +31,17 @@
 	import { onMount } from 'svelte';
 	import { get } from 'svelte/store';
 	import { goto } from '$app/navigation';
-	import { page } from '$app/state';
+
+	let isNarrow = $state(false);
+	let filteredCount = $state(0);
+
+	$effect(() => {
+		const mq = window.matchMedia('(max-width: 768px)');
+		isNarrow = mq.matches;
+		function onChange(e: MediaQueryListEvent) { isNarrow = e.matches; }
+		mq.addEventListener('change', onChange);
+		return () => mq.removeEventListener('change', onChange);
+	});
 
 	let folderPickerOpen = $state(false);
 	let renameModalOpen = $state(false);
@@ -223,25 +233,44 @@
 
 <PathBar onNavigate={navigateTo} />
 
-<FilterBar />
+<FilterBar matchCount={filteredCount} totalCount={$files.length} />
 
 <div class="main-content" class:resizing={isResizing}>
-	{#if !$sidebarCollapsed}
+	{#if !$sidebarCollapsed && !isNarrow}
 		<div class="sidebar" style="width: {$sidebarWidth}px">
 			<TagPanel />
 		</div>
-		<!-- svelte-ignore a11y_no_static_element_interactions -->
-		<div class="resize-handle" onmousedown={startResize}></div>
+		<!-- svelte-ignore a11y_no_noninteractive_tabindex -->
+		<!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
+		<div
+			class="resize-handle"
+			role="separator"
+			aria-orientation="vertical"
+			aria-label="Resize sidebar"
+			tabindex="0"
+			onmousedown={startResize}
+			onkeydown={(e) => {
+				const step = e.shiftKey ? 20 : 5;
+				if (e.key === 'ArrowLeft') {
+					e.preventDefault();
+					sidebarWidth.set(Math.max(200, $sidebarWidth - step));
+				} else if (e.key === 'ArrowRight') {
+					e.preventDefault();
+					sidebarWidth.set(Math.min(400, $sidebarWidth + step));
+				}
+			}}
+		></div>
 	{/if}
 
 	<div class="content-area">
 		{#if $loading}
 			<div class="loading-overlay">
+				<div class="spinner"></div>
 				<span class="loading-text">Scanning files...</span>
 			</div>
 		{/if}
 
-		<FileGrid files={$files} onNavigate={navigateTo} />
+		<FileGrid files={$files} onNavigate={navigateTo} bind:filteredCount />
 	</div>
 </div>
 
@@ -330,7 +359,8 @@
 		display: flex;
 		align-items: center;
 		justify-content: center;
-		background: rgba(15, 15, 26, 0.7);
+		gap: 8px;
+		background: var(--backdrop);
 		z-index: 10;
 	}
 

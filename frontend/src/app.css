@@ -10,8 +10,8 @@
 	/* Text */
 	--text-primary: #e0e0ee;
 	--text-secondary: #8888a8;
-	--text-muted: #555570;
-	--text-placeholder: #444460;
+	--text-muted: #7e7e9e;
+	--text-placeholder: #6a6a85;
 
 	/* Accent — indigo */
 	--accent: #6366f1;
@@ -42,11 +42,31 @@
 	--sidebar-min: 200px;
 	--sidebar-max: 400px;
 
+	/* Overlays */
+	--backdrop: rgba(0, 0, 0, 0.6);
+	--shadow-modal: 0 8px 32px rgba(0, 0, 0, 0.4);
+	--shadow-dropdown: 0 4px 12px rgba(0, 0, 0, 0.3);
+	--shadow-context: 0 4px 16px rgba(0, 0, 0, 0.4);
+	--accent-15: rgba(99, 102, 241, 0.15);
+	--error-10: rgba(239, 68, 68, 0.1);
+
 	/* Borders */
 	--border: #252542;
 	--border-subtle: #1e1e36;
 	--radius-sm: 3px;
 	--radius-md: 5px;
+	--radius-lg: 10px;
+
+	/* Z-index layers */
+	--z-dropdown: 100;
+	--z-modal: 200;
+	--z-context: 300;
+
+	/* Shadows */
+	--shadow-inset: inset 0 1px 3px rgba(0, 0, 0, 0.3);
+
+	/* Button text */
+	--text-on-accent: #f0f0ff;
 }
 
 * {
@@ -110,4 +130,111 @@ html, body {
 
 .text-muted {
 	color: var(--text-muted);
+}
+
+/* Shared button styles */
+.btn {
+	padding: 5px 14px;
+	border-radius: var(--radius-sm);
+	cursor: pointer;
+	font-family: var(--font-ui);
+	font-size: 12px;
+	border: none;
+	transition: background 0.1s, color 0.1s;
+}
+
+.btn-primary {
+	background: var(--accent);
+	color: var(--text-on-accent);
+}
+
+.btn-primary:hover:not(:disabled) {
+	background: var(--accent-hover);
+}
+
+.btn-primary:disabled {
+	opacity: 0.4;
+	cursor: default;
+}
+
+.btn-secondary {
+	background: transparent;
+	border: 1px solid var(--border);
+	color: var(--text-secondary);
+}
+
+.btn-secondary:hover {
+	background: var(--bg-hover);
+	color: var(--text-primary);
+}
+
+.btn-danger {
+	background: var(--error);
+	color: var(--text-on-accent);
+}
+
+.btn-danger:hover {
+	opacity: 0.9;
+}
+
+/* Firefox scrollbar */
+* {
+	scrollbar-width: thin;
+	scrollbar-color: var(--border) transparent;
+}
+
+/* Responsive: tablet and below */
+@media (max-width: 768px) {
+	:root {
+		--toolbar-height: 48px;
+		--statusbar-height: 30px;
+	}
+
+	.btn {
+		padding: 8px 16px;
+		font-size: 13px;
+		min-height: 44px;
+	}
+}
+
+/* Responsive: small phone */
+@media (max-width: 480px) {
+	:root {
+		--sidebar-width: 100vw;
+		--sidebar-min: 100vw;
+		--sidebar-max: 100vw;
+	}
+}
+
+/* Loading spinner */
+@keyframes spin {
+	to { transform: rotate(360deg); }
+}
+
+.spinner {
+	width: 16px;
+	height: 16px;
+	border: 2px solid var(--border);
+	border-top-color: var(--accent);
+	border-radius: 50%;
+	animation: spin 0.6s linear infinite;
+	flex-shrink: 0;
+}
+
+.spinner--sm {
+	width: 12px;
+	height: 12px;
+	border-width: 1.5px;
+}
+
+/* Reduced motion */
+@media (prefers-reduced-motion: reduce) {
+	*,
+	*::before,
+	*::after {
+		animation-duration: 0.01ms !important;
+		animation-iteration-count: 1 !important;
+		transition-duration: 0.01ms !important;
+		scroll-behavior: auto !important;
+	}
 }

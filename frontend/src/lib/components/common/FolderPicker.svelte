@@ -33,6 +33,7 @@
 			bind:value={manualPath}
 			onkeydown={handleKeydown}
 			placeholder="/ or /Music/Rock"
+			aria-label="Folder path"
 		/>
 		<button class="path-btn" onclick={handleOpen}>Open</button>
 	</div>
@@ -70,7 +71,7 @@
 	.path-btn {
 		background: var(--accent);
 		border: none;
-		color: white;
+		color: var(--text-on-accent);
 		padding: 8px 18px;
 		border-radius: var(--radius-sm);
 		cursor: pointer;
