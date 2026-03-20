@@ -1,8 +1,12 @@
 <script lang="ts">
-	import { currentPath, loadDirectory } from '$lib/stores/files';
-	import { clearTags } from '$lib/stores/tags';
+	import { currentPath } from '$lib/stores/files';
 
-	// Split current path into clickable breadcrumb segments
+	interface Props {
+		onNavigate: (path: string) => void;
+	}
+
+	let { onNavigate }: Props = $props();
+
 	let segments = $derived.by(() => {
 		const path = $currentPath;
 		if (!path || path === '/') return [{ name: 'Root', path: '/' }];
@@ -15,11 +19,6 @@
 		}
 		return crumbs;
 	});
-
-	function navigate(path: string) {
-		clearTags();
-		loadDirectory(path);
-	}
 </script>
 
 <div class="pathbar">
@@ -30,7 +29,7 @@
 		{#if i === segments.length - 1}
 			<span class="segment current">{seg.name}</span>
 		{:else}
-			<button class="segment link" onclick={() => navigate(seg.path)}>
+			<button class="segment link" onclick={() => onNavigate(seg.path)}>
 				{seg.name}
 			</button>
 		{/if}

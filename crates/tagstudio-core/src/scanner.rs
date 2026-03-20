@@ -1,6 +1,4 @@
 use crate::types::{AudioFormat, DirNode, FileEntry, FileListResult, TagStudioError};
-use lofty::file::{AudioFile as LoftyAudioFile, TaggedFileExt};
-use lofty::probe::Probe;
 use sha2::{Digest, Sha256};
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -79,11 +77,14 @@ pub fn scan_directory(
             None => continue,
         };
 
-        let relative = path
+        let relative = match path
             .canonicalize()
             .ok()
             .and_then(|p| p.strip_prefix(&root_canonical).ok().map(|r| r.to_path_buf()))
-            .unwrap_or_default();
+        {
+            Some(r) => r,
+            None => continue, // skip files that can't be resolved (broken symlinks, etc.)
+        };
 
         let relative_str = relative.to_string_lossy().to_string();
         let id = file_id(&relative_str);
@@ -131,28 +132,6 @@ pub fn scan_directory(
         total,
         directories,
     })
-}
-
-/// Quick probe: get duration and cover art presence without reading full tags
-fn probe_file_quick(path: &Path) -> (Option<f64>, bool) {
-    let tagged = match Probe::open(path).and_then(|p| p.read()) {
-        Ok(t) => t,
-        Err(_) => return (None, false),
-    };
-
-    let duration = {
-        let props = tagged.properties();
-        let dur = props.duration();
-        if dur.as_secs() > 0 || dur.subsec_millis() > 0 {
-            Some(dur.as_secs_f64())
-        } else {
-            None
-        }
-    };
-
-    let has_cover = tagged.tags().iter().any(|t: &lofty::tag::Tag| !t.pictures().is_empty());
-
-    (duration, has_cover)
 }
 
 /// Build a directory tree starting from data_root

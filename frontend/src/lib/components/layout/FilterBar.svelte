@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { filterText, filterVisible } from '$lib/stores/ui';
 
-	let inputEl: HTMLInputElement;
+	let inputEl = $state<HTMLInputElement>();
 
 	function handleKeydown(e: KeyboardEvent) {
 		if (e.key === 'Escape') {

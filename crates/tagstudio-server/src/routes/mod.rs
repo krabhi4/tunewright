@@ -26,7 +26,7 @@ pub fn create_router(state: AppState) -> Router {
         .route("/tags/read", post(tags::read_tags))
         .route("/tags/read-properties", post(tags::read_properties))
         .route("/tags/write", post(tags::write_tags))
-        .route("/coverart", get(coverart::get_cover_art).delete(coverart::delete_cover_art))
+        .route("/coverart", get(coverart::get_cover_art).delete(coverart::delete_cover_art).post(coverart::upload_cover_art))
         .route("/rename/preview", post(rename::preview))
         .route("/rename/execute", post(rename::execute))
         .route("/lookup/musicbrainz/search", get(lookup::musicbrainz_search))

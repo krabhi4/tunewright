@@ -1,4 +1,4 @@
-import { writable, derived } from 'svelte/store';
+import { writable, derived, get } from 'svelte/store';
 import type { FileEntry } from '$lib/types/audio';
 import { listFiles } from '$lib/api/files';
 
@@ -7,6 +7,7 @@ export const files = writable<FileEntry[]>([]);
 export const totalCount = writable(0);
 export const directories = writable<string[]>([]);
 export const selectedIds = writable<Set<string>>(new Set());
+export const focusedId = writable<string | null>(null);
 export const loading = writable(false);
 
 export const selectedFiles = derived([files, selectedIds], ([$files, $selectedIds]) =>
@@ -48,9 +49,8 @@ export function toggleSelection(id: string, multi: boolean = false) {
 }
 
 export function selectAll() {
-	files.subscribe(($files) => {
-		selectedIds.set(new Set($files.map((f) => f.id)));
-	})();
+	const $files = get(files);
+	selectedIds.set(new Set($files.map((f) => f.id)));
 }
 
 export function selectNone() {
@@ -58,17 +58,16 @@ export function selectNone() {
 }
 
 export function selectRange(fromId: string, toId: string) {
-	files.subscribe(($files) => {
-		const fromIdx = $files.findIndex((f) => f.id === fromId);
-		const toIdx = $files.findIndex((f) => f.id === toId);
-		if (fromIdx === -1 || toIdx === -1) return;
-		const start = Math.min(fromIdx, toIdx);
-		const end = Math.max(fromIdx, toIdx);
-		const rangeIds = $files.slice(start, end + 1).map((f) => f.id);
-		selectedIds.update((ids) => {
-			const next = new Set(ids);
-			for (const id of rangeIds) next.add(id);
-			return next;
-		});
-	})();
+	const $files = get(files);
+	const fromIdx = $files.findIndex((f) => f.id === fromId);
+	const toIdx = $files.findIndex((f) => f.id === toId);
+	if (fromIdx === -1 || toIdx === -1) return;
+	const start = Math.min(fromIdx, toIdx);
+	const end = Math.max(fromIdx, toIdx);
+	const rangeIds = $files.slice(start, end + 1).map((f) => f.id);
+	selectedIds.update((ids) => {
+		const next = new Set(ids);
+		for (const id of rangeIds) next.add(id);
+		return next;
+	});
 }

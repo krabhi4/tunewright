@@ -109,16 +109,44 @@ pub fn execute_renames(
             let old_path = data_root.join(rel_path);
             let new_path = old_path.with_file_name(&preview.new_name);
 
-            if new_path.exists() {
-                return RenameResult {
-                    id: preview.id,
-                    status: "error".to_string(),
-                    old_name: preview.old_name,
-                    new_name: preview.new_name,
-                    error: Some("Target file already exists".to_string()),
-                };
+            // Atomic collision check: hard_link fails if target already exists,
+            // avoiding the TOCTOU race of exists()+rename().
+            match std::fs::hard_link(&old_path, &new_path) {
+                Ok(()) => {
+                    // Link created — remove old name to complete the "rename"
+                    if let Err(e) = std::fs::remove_file(&old_path) {
+                        let _ = std::fs::remove_file(&new_path);
+                        return RenameResult {
+                            id: preview.id,
+                            status: "error".to_string(),
+                            old_name: preview.old_name,
+                            new_name: preview.new_name,
+                            error: Some(format!("Failed to remove old file: {}", e)),
+                        };
+                    }
+                    return RenameResult {
+                        id: preview.id,
+                        status: "ok".to_string(),
+                        old_name: preview.old_name,
+                        new_name: preview.new_name,
+                        error: None,
+                    };
+                }
+                Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {
+                    return RenameResult {
+                        id: preview.id,
+                        status: "error".to_string(),
+                        old_name: preview.old_name,
+                        new_name: preview.new_name,
+                        error: Some("Target file already exists".to_string()),
+                    };
+                }
+                Err(_) => {
+                    // hard_link fails across filesystems — fall back to rename
+                }
             }
 
+            // Fallback: standard rename (cross-filesystem or unsupported hard_link)
             match std::fs::rename(&old_path, &new_path) {
                 Ok(()) => RenameResult {
                     id: preview.id,

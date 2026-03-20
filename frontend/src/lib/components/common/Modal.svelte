@@ -21,7 +21,7 @@
 
 {#if open}
 	<!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
-	<div class="backdrop" role="dialog" aria-modal="true" onclick={handleBackdrop} onkeydown={handleKeydown}>
+	<div class="backdrop" role="dialog" aria-modal="true" tabindex="-1" onclick={handleBackdrop} onkeydown={handleKeydown}>
 		<div class="modal">
 			<div class="modal-header">
 				<span class="modal-title">{title}</span>

@@ -60,7 +60,7 @@ pub async fn dir_tree(
     Query(params): Query<DirTreeQuery>,
 ) -> Result<Json<DirNode>, AppError> {
     let data_root = state.data_root.clone();
-    let depth = params.depth;
+    let depth = params.depth.min(50);
 
     let tree = tokio::task::spawn_blocking(move || {
         scanner::build_dir_tree(&data_root, depth)

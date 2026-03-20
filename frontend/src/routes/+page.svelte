@@ -6,6 +6,7 @@
 	import TagPanel from '$lib/components/tagpanel/TagPanel.svelte';
 	import FileGrid from '$lib/components/grid/FileGrid.svelte';
 	import FolderPicker from '$lib/components/common/FolderPicker.svelte';
+	import ConfirmModal from '$lib/components/common/ConfirmModal.svelte';
 	import RenameModal from '$lib/components/rename/RenameModal.svelte';
 	import LookupModal from '$lib/components/lookup/LookupModal.svelte';
 	import {
@@ -17,7 +18,7 @@
 		currentPath,
 		selectedFiles
 	} from '$lib/stores/files';
-	import { filterVisible, sidebarWidth, sidebarCollapsed } from '$lib/stores/ui';
+	import { filterVisible, filterText, sidebarWidth, sidebarCollapsed, sortColumn, sortAsc } from '$lib/stores/ui';
 	import {
 		clearTags,
 		fetchTagsForFiles,
@@ -26,10 +27,128 @@
 		pendingEdits
 	} from '$lib/stores/tags';
 	import { selectedIds } from '$lib/stores/files';
+	import { onMount } from 'svelte';
+	import { get } from 'svelte/store';
+	import { goto } from '$app/navigation';
+	import { page } from '$app/state';
 
 	let folderPickerOpen = $state(false);
 	let renameModalOpen = $state(false);
 	let lookupModalOpen = $state(false);
+
+	function closeAllModals() {
+		folderPickerOpen = false;
+		renameModalOpen = false;
+		lookupModalOpen = false;
+	}
+
+	// --- Unsaved edits guard ---
+	let confirmOpen = $state(false);
+	let pendingNavPath = $state<string | null>(null);
+
+	function navigateTo(path: string) {
+		if ($hasPendingEdits) {
+			pendingNavPath = path;
+			confirmOpen = true;
+		} else {
+			doNavigate(path);
+		}
+	}
+
+	function doNavigate(path: string) {
+		clearTags();
+		loadDirectory(path);
+	}
+
+	async function handleConfirmSave() {
+		await saveAllEdits();
+		confirmOpen = false;
+		if (pendingNavPath) doNavigate(pendingNavPath);
+		pendingNavPath = null;
+	}
+
+	function handleConfirmDiscard() {
+		confirmOpen = false;
+		if (pendingNavPath) doNavigate(pendingNavPath);
+		pendingNavPath = null;
+	}
+
+	function handleConfirmCancel() {
+		confirmOpen = false;
+		pendingNavPath = null;
+	}
+
+	// --- URL state sync ---
+	let initialized = false;
+
+	onMount(() => {
+		const params = new URLSearchParams(window.location.search);
+		const urlPath = params.get('path') || '/';
+		const urlFilter = params.get('filter') || '';
+		const urlSort = params.get('sort') || '';
+		const urlOrder = params.get('order') || 'asc';
+		const urlSelected = params.get('selected') || '';
+
+		if (urlFilter) {
+			filterText.set(urlFilter);
+			filterVisible.set(true);
+		}
+		if (urlSort) {
+			sortColumn.set(urlSort);
+			sortAsc.set(urlOrder !== 'desc');
+		}
+
+		const pendingSelection = urlSelected ? urlSelected.split(',') : [];
+
+		loadDirectory(urlPath).then(() => {
+			if (pendingSelection.length > 0) {
+				const loadedFileIds = new Set(get(files).map((f) => f.id));
+				const validIds = pendingSelection.filter((id) => loadedFileIds.has(id));
+				if (validIds.length > 0) {
+					selectedIds.set(new Set(validIds));
+				}
+			}
+		});
+		initialized = true;
+	});
+
+	function syncToUrl() {
+		if (!initialized) return;
+		const params = new URLSearchParams();
+
+		const path = $currentPath;
+		if (path && path !== '/') params.set('path', path);
+
+		const filter = $filterText;
+		if (filter) params.set('filter', filter);
+
+		const sort = $sortColumn;
+		if (sort) {
+			params.set('sort', sort);
+			if (!$sortAsc) params.set('order', 'desc');
+		}
+
+		const ids = Array.from($selectedIds);
+		if (ids.length > 0 && ids.length <= 50) {
+			params.set('selected', ids.join(','));
+		}
+
+		const qs = params.toString();
+		const newUrl = qs ? `?${qs}` : window.location.pathname;
+
+		if (newUrl !== window.location.pathname + window.location.search) {
+			history.replaceState(history.state, '', newUrl);
+		}
+	}
+
+	$effect(() => {
+		$currentPath;
+		$filterText;
+		$sortColumn;
+		$sortAsc;
+		$selectedIds;
+		syncToUrl();
+	});
 
 	async function handleSave() {
 		const result = await saveAllEdits();
@@ -62,7 +181,6 @@
 		document.addEventListener('mouseup', onUp);
 	}
 
-	// Computed stats
 	let totalDuration = $derived(
 		$files.reduce((sum, f) => sum + (f.duration_secs ?? 0), 0)
 	);
@@ -80,33 +198,26 @@
 		}
 	}
 
-	// Fetch tags for newly selected files
 	$effect(() => {
 		const ids = Array.from($selectedIds);
 		if (ids.length > 0) {
 			fetchTagsForFiles(ids);
 		}
 	});
-
-	// Load root on mount
-	import { onMount } from 'svelte';
-	onMount(() => {
-		loadDirectory('/');
-	});
 </script>
 
 <svelte:window onkeydown={handleKeydown} />
 
 <Toolbar
-	onOpenFolder={() => (folderPickerOpen = true)}
+	onOpenFolder={() => { closeAllModals(); folderPickerOpen = true; }}
 	onSave={handleSave}
-	onRename={() => (renameModalOpen = true)}
-	onLookup={() => (lookupModalOpen = true)}
+	onRename={() => { closeAllModals(); renameModalOpen = true; }}
+	onLookup={() => { closeAllModals(); lookupModalOpen = true; }}
 	hasPendingEdits={$hasPendingEdits}
 	hasSelection={$selectedCount > 0}
 />
 
-<PathBar />
+<PathBar onNavigate={navigateTo} />
 
 <FilterBar />
 
@@ -126,7 +237,7 @@
 			</div>
 		{/if}
 
-		<FileGrid files={$files} />
+		<FileGrid files={$files} onNavigate={navigateTo} />
 	</div>
 </div>
 
@@ -141,7 +252,7 @@
 <FolderPicker
 	open={folderPickerOpen}
 	onClose={() => (folderPickerOpen = false)}
-	onSelect={(path) => { clearTags(); loadDirectory(path); }}
+	onSelect={navigateTo}
 />
 
 <RenameModal
@@ -154,6 +265,18 @@
 <LookupModal
 	open={lookupModalOpen}
 	onClose={() => (lookupModalOpen = false)}
+/>
+
+<ConfirmModal
+	open={confirmOpen}
+	title="Unsaved Changes"
+	message="You have unsaved tag edits. What would you like to do?"
+	confirmLabel="Save & Navigate"
+	extraLabel="Discard & Navigate"
+	cancelLabel="Cancel"
+	onConfirm={handleConfirmSave}
+	onExtra={handleConfirmDiscard}
+	onCancel={handleConfirmCancel}
 />
 
 <style>

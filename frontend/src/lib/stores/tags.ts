@@ -71,10 +71,14 @@ function intersectTags(tagsList: TagData[]): TagData {
 	return result;
 }
 
+// Generation counter — incremented on clearTags() to invalidate in-flight fetches
+let fetchGeneration = 0;
+
 // Fetch tags for a set of file IDs
 export async function fetchTagsForFiles(ids: string[]) {
 	const $files = get(files);
 	const $loaded = get(loadedTags);
+	const gen = fetchGeneration;
 
 	// Only fetch for files we don't already have
 	const needed = ids.filter((id) => !$loaded.has(id));
@@ -91,6 +95,8 @@ export async function fetchTagsForFiles(ids: string[]) {
 
 	try {
 		const tags = await readTags(needed, paths);
+		// Discard if directory changed while fetching
+		if (gen !== fetchGeneration) return;
 		loadedTags.update((map) => {
 			const next = new Map(map);
 			for (const [id, data] of Object.entries(tags)) {
@@ -125,6 +131,7 @@ export function queuePropertiesFetch(ids: string[]) {
 
 async function fetchPropertiesForFiles(ids: string[]) {
 	const $files = get(files);
+	const gen = fetchGeneration;
 
 	const paths: Record<string, string> = {};
 	for (const id of ids) {
@@ -135,6 +142,8 @@ async function fetchPropertiesForFiles(ids: string[]) {
 
 	try {
 		const tags = await readProperties(ids, paths);
+		// Discard if directory changed while fetching
+		if (gen !== fetchGeneration) return;
 		loadedTags.update((map) => {
 			const next = new Map(map);
 			for (const [id, data] of Object.entries(tags)) {
@@ -223,8 +232,13 @@ export function discardEdits() {
 
 // Clear all loaded tags (e.g., when changing directory)
 export function clearTags() {
+	fetchGeneration++; // invalidate any in-flight fetches
 	loadedTags.set(new Map());
 	pendingEdits.set(new Map());
 	propertiesLoaded.clear();
 	pendingPropertyIds = [];
+	if (propertiesTimer) {
+		clearTimeout(propertiesTimer);
+		propertiesTimer = null;
+	}
 }

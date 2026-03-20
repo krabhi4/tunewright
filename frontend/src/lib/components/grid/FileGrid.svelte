@@ -3,20 +3,22 @@
 	import { formatDuration, formatSize, formatFormatLabel } from '$lib/utils/format';
 	import {
 		selectedIds,
+		focusedId,
 		toggleSelection,
 		selectRange,
 		directories,
-		currentPath,
-		loadDirectory
+		currentPath
 	} from '$lib/stores/files';
-	import { mergedTags, fetchTagsForFiles, queuePropertiesFetch, clearTags } from '$lib/stores/tags';
-	import { filterText } from '$lib/stores/ui';
+	import { mergedTags, fetchTagsForFiles, queuePropertiesFetch } from '$lib/stores/tags';
+	import { filterText, sortColumn, sortAsc } from '$lib/stores/ui';
+	import ContextMenu from '$lib/components/common/ContextMenu.svelte';
 
 	interface Props {
 		files: FileEntry[];
+		onNavigate: (path: string) => void;
 	}
 
-	let { files }: Props = $props();
+	let { files, onNavigate }: Props = $props();
 
 	// Virtual scrolling state
 	let containerEl: HTMLDivElement;
@@ -25,12 +27,46 @@
 	const HEADER_HEIGHT = 30;
 	let containerHeight = $state(600);
 
-	// Sort state
-	let sortColumn = $state<string | null>(null);
-	let sortAsc = $state(true);
+	// Sort state is in $lib/stores/ui (synced to URL)
 
 	// Last clicked row for shift-select
 	let lastClickedId = $state<string | null>(null);
+
+	// Context menu state
+	let contextMenu = $state<{ x: number; y: number; file: FileEntry } | null>(null);
+
+	function handleContextMenu(file: FileEntry, e: MouseEvent) {
+		e.preventDefault();
+		// Select the file if not already selected
+		if (!$selectedIds.has(file.id)) {
+			selectedIds.set(new Set([file.id]));
+			lastClickedId = file.id;
+			focusedId.set(file.id);
+		}
+		contextMenu = { x: e.clientX, y: e.clientY, file };
+	}
+
+	function getContextMenuItems() {
+		if (!contextMenu) return [];
+		const file = contextMenu.file;
+		return [
+			{
+				label: 'Copy Filename',
+				action: () => navigator.clipboard.writeText(file.filename)
+			},
+			{
+				label: 'Copy Path',
+				action: () => navigator.clipboard.writeText(file.relative_path)
+			},
+			{ separator: true as const },
+			{
+				label: `Select All (${processedFiles.length})`,
+				action: () => {
+					selectedIds.set(new Set(processedFiles.map((f) => f.id)));
+				}
+			}
+		];
+	}
 
 	// Column definitions
 	const columns = [
@@ -95,9 +131,9 @@
 			});
 		}
 
-		if (sortColumn) {
-			const col = sortColumn;
-			const dir = sortAsc ? 1 : -1;
+		if ($sortColumn) {
+			const col = $sortColumn;
+			const dir = $sortAsc ? 1 : -1;
 			result = [...result].sort((a, b) => {
 				const av = getCellValue(a, col).toLowerCase();
 				const bv = getCellValue(b, col).toLowerCase();
@@ -111,6 +147,7 @@
 	});
 
 	// Total rows = directories + files
+	let visibleSelectedCount = $derived(processedFiles.filter((f) => $selectedIds.has(f.id)).length);
 	let totalRows = $derived(dirEntries.length + processedFiles.length);
 
 	// Virtual scroll calculations
@@ -155,11 +192,11 @@
 	}
 
 	function handleSort(key: string) {
-		if (sortColumn === key) {
-			sortAsc = !sortAsc;
+		if ($sortColumn === key) {
+			sortAsc.set(!$sortAsc);
 		} else {
-			sortColumn = key;
-			sortAsc = true;
+			sortColumn.set(key);
+			sortAsc.set(true);
 		}
 	}
 
@@ -170,13 +207,13 @@
 			toggleSelection(file.id, e.ctrlKey || e.metaKey);
 		}
 		lastClickedId = file.id;
+		focusedId.set(file.id);
 	}
 
 	function navigateToDir(dirName: string) {
 		const base = $currentPath === '/' ? '' : $currentPath;
 		const newPath = base + '/' + dirName;
-		clearTags();
-		loadDirectory(newPath);
+		onNavigate(newPath);
 	}
 
 	function handleResize() {
@@ -193,30 +230,102 @@
 			return () => observer.disconnect();
 		}
 	});
+
+	function handleKeydown(e: KeyboardEvent) {
+		if (processedFiles.length === 0) return;
+
+		const focIdx = $focusedId
+			? processedFiles.findIndex((f) => f.id === $focusedId)
+			: -1;
+
+		let nextIdx: number | null = null;
+
+		switch (e.key) {
+			case 'ArrowDown':
+				e.preventDefault();
+				nextIdx = focIdx < processedFiles.length - 1 ? focIdx + 1 : processedFiles.length - 1;
+				break;
+			case 'ArrowUp':
+				e.preventDefault();
+				nextIdx = focIdx > 0 ? focIdx - 1 : 0;
+				break;
+			case 'Home':
+				e.preventDefault();
+				nextIdx = 0;
+				break;
+			case 'End':
+				e.preventDefault();
+				nextIdx = processedFiles.length - 1;
+				break;
+			case ' ':
+				e.preventDefault();
+				if ($focusedId) toggleSelection($focusedId, true);
+				return;
+			default:
+				return;
+		}
+
+		if (nextIdx !== null && nextIdx >= 0 && nextIdx < processedFiles.length) {
+			const file = processedFiles[nextIdx];
+			focusedId.set(file.id);
+
+			if (e.shiftKey && lastClickedId) {
+				selectRange(lastClickedId, file.id);
+			} else if (!e.shiftKey) {
+				// Select the focused row (replace selection)
+				selectedIds.set(new Set([file.id]));
+				lastClickedId = file.id;
+			}
+
+			// Scroll focused row into view
+			const rowTop = (dirEntries.length + nextIdx) * ROW_HEIGHT;
+			const rowBottom = rowTop + ROW_HEIGHT;
+			if (containerEl) {
+				if (rowTop < containerEl.scrollTop) {
+					containerEl.scrollTop = rowTop;
+				} else if (rowBottom > containerEl.scrollTop + containerHeight) {
+					containerEl.scrollTop = rowBottom - containerHeight;
+				}
+			}
+		}
+	}
 </script>
 
 <div class="grid-wrapper">
 	<div class="grid-header" style="height: {HEADER_HEIGHT}px">
 		<div class="header-cell check-col">
-			<input type="checkbox" class="row-check" />
+			<input
+				type="checkbox"
+				class="row-check"
+				checked={processedFiles.length > 0 && visibleSelectedCount === processedFiles.length}
+				indeterminate={visibleSelectedCount > 0 && visibleSelectedCount < processedFiles.length}
+				onchange={() => {
+					if (visibleSelectedCount === processedFiles.length) {
+						selectedIds.set(new Set());
+					} else {
+						selectedIds.set(new Set(processedFiles.map((f) => f.id)));
+					}
+				}}
+			/>
 		</div>
 		{#each columns as col}
 			<button
 				class="header-cell"
-				class:sorted={sortColumn === col.key}
+				class:sorted={$sortColumn === col.key}
 				style="width: {col.width}px; {col.align === 'right' ? 'text-align: right; justify-content: flex-end;' : ''}"
 				onclick={() => handleSort(col.key)}
 			>
 				<span>{col.label}</span>
-				{#if sortColumn === col.key}
-					<span class="sort-arrow">{sortAsc ? '▲' : '▼'}</span>
+				{#if $sortColumn === col.key}
+					<span class="sort-arrow">{$sortAsc ? '▲' : '▼'}</span>
 				{/if}
 			</button>
 		{/each}
 		<div class="header-cell header-fill"></div>
 	</div>
 
-	<div class="grid-body" bind:this={containerEl} onscroll={handleScroll}>
+	<!-- svelte-ignore a11y_no_static_element_interactions -->
+	<div class="grid-body" bind:this={containerEl} onscroll={handleScroll} onkeydown={handleKeydown} tabindex="-1">
 		<div style="height: {totalHeight}px; position: relative;">
 			<div style="transform: translateY({offsetY}px);">
 				{#each visibleRows as row, i}
@@ -240,12 +349,15 @@
 						{@const file = row.file}
 						{@const isSelected = $selectedIds.has(file.id)}
 						{@const isOdd = (visibleStart + i) % 2 === 1}
-						<button
+						{@const isFocused = $focusedId === file.id}
+					<button
 							class="grid-row"
 							class:selected={isSelected}
 							class:odd={isOdd}
+							class:focused={isFocused}
 							style="height: {ROW_HEIGHT}px"
 							onclick={(e) => handleRowClick(file, e)}
+							oncontextmenu={(e) => handleContextMenu(file, e)}
 						>
 							<div class="cell check-col">
 								<input
@@ -276,6 +388,15 @@
 		</div>
 	</div>
 </div>
+
+{#if contextMenu}
+	<ContextMenu
+		x={contextMenu.x}
+		y={contextMenu.y}
+		items={getContextMenuItems()}
+		onClose={() => (contextMenu = null)}
+	/>
+{/if}
 
 <style>
 	.grid-wrapper {
@@ -358,6 +479,7 @@
 		flex: 1;
 		overflow-y: auto;
 		overflow-x: auto;
+		outline: none;
 	}
 
 	.grid-row {
@@ -387,6 +509,11 @@
 
 	.grid-row.selected:hover {
 		background: var(--bg-selected-strong);
+	}
+
+	.grid-row.focused {
+		outline: 1px solid var(--accent);
+		outline-offset: -1px;
 	}
 
 	.grid-row.dir-row {

@@ -1,3 +1,5 @@
+import { goto } from '$app/navigation';
+
 const BASE = '/api/v1';
 
 export class ApiError extends Error {
@@ -19,6 +21,9 @@ export async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> 
 	});
 
 	if (!res.ok) {
+		if (res.status === 401 && !path.startsWith('/auth/')) {
+			goto('/login');
+		}
 		const body = await res.json().catch(() => ({ error: res.statusText }));
 		throw new ApiError(res.status, body.error || res.statusText);
 	}

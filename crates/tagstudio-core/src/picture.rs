@@ -1,11 +1,9 @@
 use crate::types::TagStudioError;
-use lofty::config::WriteOptions;
 use image::imageops::FilterType;
-use image::DynamicImage;
+use lofty::config::WriteOptions;
 use lofty::file::{AudioFile, TaggedFileExt};
 use lofty::picture::{MimeType, Picture, PictureType};
 use lofty::probe::Probe;
-use lofty::tag::Accessor;
 use std::io::Cursor;
 use std::path::Path;
 

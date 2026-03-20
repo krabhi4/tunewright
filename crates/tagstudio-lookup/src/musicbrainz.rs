@@ -74,7 +74,8 @@ pub async fn search_releases(
     client: &Client,
     query: &str,
 ) -> Result<Vec<ReleaseSearchResult>, String> {
-    let url = format!("{}/release?query={}&fmt=json&limit=20", MB_BASE, query);
+    let encoded_query = urlencoding::encode(query);
+    let url = format!("{}/release?query={}&fmt=json&limit=20", MB_BASE, encoded_query);
 
     let resp = client
         .get(&url)
@@ -119,6 +120,11 @@ pub async fn get_release(
     client: &Client,
     mbid: &str,
 ) -> Result<ReleaseDetail, String> {
+    // Validate MBID is a valid UUID (hex + dashes) to prevent path injection
+    if !mbid.chars().all(|c| c.is_ascii_hexdigit() || c == '-') || mbid.len() != 36 {
+        return Err("Invalid MusicBrainz ID".to_string());
+    }
+
     let url = format!(
         "{}/release/{}?inc=recordings+artist-credits&fmt=json",
         MB_BASE, mbid

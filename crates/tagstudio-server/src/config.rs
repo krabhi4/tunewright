@@ -9,8 +9,6 @@ pub struct Config {
     pub auth_enabled: bool,
     pub username: String,
     pub password: String,
-    pub session_secret: String,
-    pub discogs_token: Option<String>,
 }
 
 impl Config {
@@ -34,18 +32,6 @@ impl Config {
             username: std::env::var("TAGSTUDIO_USERNAME").unwrap_or_else(|_| "admin".to_string()),
             password: std::env::var("TAGSTUDIO_PASSWORD")
                 .unwrap_or_else(|_| "changeme".to_string()),
-            session_secret: std::env::var("TAGSTUDIO_SESSION_SECRET").unwrap_or_else(|_| {
-                use std::collections::hash_map::DefaultHasher;
-                use std::hash::{Hash, Hasher};
-                let mut h = DefaultHasher::new();
-                std::time::SystemTime::now()
-                    .duration_since(std::time::UNIX_EPOCH)
-                    .unwrap_or_default()
-                    .as_nanos()
-                    .hash(&mut h);
-                format!("{:x}", h.finish())
-            }),
-            discogs_token: std::env::var("DISCOGS_API_TOKEN").ok(),
         }
     }
 }

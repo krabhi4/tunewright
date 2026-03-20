@@ -5,7 +5,8 @@ services:
     ports:
       - "8080:8080"
     volumes:
-      - /path/to/music:/data:rw
+      # Point this to your music library folder
+      - ${MUSIC_DIR:-./music}:/data:rw
     environment:
       - TAGSTUDIO_AUTH_ENABLED=false
       # - TAGSTUDIO_USERNAME=admin
