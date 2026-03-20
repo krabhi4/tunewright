@@ -253,21 +253,6 @@
 				}
 			}
 
-			// Embed cover art before rename (paths are still valid)
-			if (selectedRelease?.cover_art_url) {
-				const coverPaths = matchedFiles
-					.filter((f): f is FileEntry => f !== null)
-					.map((f) => f.relative_path);
-				if (coverPaths.length > 0) {
-					try {
-						await embedCoverArtFromUrl(selectedRelease.cover_art_url, coverPaths);
-						bumpCoverArt();
-					} catch (err) {
-						console.error('Cover art embed failed:', err);
-					}
-				}
-			}
-
 			if (renameFiles && filesToRename.length > 0) {
 				await saveAllEdits();
 				try {
@@ -281,6 +266,18 @@
 			}
 
 			onClose();
+
+			// Embed cover art in background after modal closes (paths still valid since rename already happened)
+			if (selectedRelease?.cover_art_url) {
+				const coverPaths = matchedFiles
+					.filter((f): f is FileEntry => f !== null)
+					.map((f) => f.relative_path);
+				if (coverPaths.length > 0) {
+					embedCoverArtFromUrl(selectedRelease.cover_art_url, coverPaths)
+						.then(() => bumpCoverArt())
+						.catch((err) => console.error('Cover art embed failed:', err));
+				}
+			}
 		} catch (err) {
 			console.error('Apply failed:', err);
 		} finally {
