@@ -49,10 +49,7 @@ pub fn create_router(state: AppState) -> Router {
         )
         .route("/rename/preview", post(rename::preview))
         .route("/rename/execute", post(rename::execute))
-        .route(
-            "/filename-to-tag/preview",
-            post(filename_to_tag::preview),
-        )
+        .route("/filename-to-tag/preview", post(filename_to_tag::preview))
         .route("/actions/preview", post(actions::preview))
         .route("/actions/execute", post(actions::execute))
         .route(
@@ -62,6 +59,11 @@ pub fn create_router(state: AppState) -> Router {
         .route(
             "/lookup/musicbrainz/release/{mbid}",
             get(lookup::musicbrainz_release),
+        )
+        .route("/lookup/applemusic/search", get(lookup::applemusic_search))
+        .route(
+            "/lookup/applemusic/release/{id}",
+            get(lookup::applemusic_release),
         )
         .layer(middleware::from_fn_with_state(
             state.clone(),
@@ -73,9 +75,7 @@ pub fn create_router(state: AppState) -> Router {
 
     Router::new()
         .nest("/api/v1", api)
-        .fallback_service(
-            ServeDir::new(&static_dir).not_found_service(ServeFile::new(index_file)),
-        )
+        .fallback_service(ServeDir::new(&static_dir).not_found_service(ServeFile::new(index_file)))
         .layer(CorsLayer::permissive())
         .layer(TraceLayer::new_for_http())
         .with_state(state)

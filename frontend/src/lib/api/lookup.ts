@@ -36,3 +36,12 @@ export async function searchMusicBrainz(query: string): Promise<ReleaseSearchRes
 export async function getMusicBrainzRelease(mbid: string): Promise<ReleaseDetail> {
 	return apiFetch<ReleaseDetail>(`/lookup/musicbrainz/release/${mbid}`);
 }
+
+export async function searchAppleMusic(query: string): Promise<ReleaseSearchResult[]> {
+	const params = new URLSearchParams({ query });
+	return apiFetch<ReleaseSearchResult[]>(`/lookup/applemusic/search?${params}`);
+}
+
+export async function getAppleMusicRelease(id: string): Promise<ReleaseDetail> {
+	return apiFetch<ReleaseDetail>(`/lookup/applemusic/release/${id}`);
+}

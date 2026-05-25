@@ -44,7 +44,5 @@ async fn main() {
 
     tracing::info!("Listening on http://{}", bind_addr);
 
-    axum::serve(listener, app)
-        .await
-        .expect("Server error");
+    axum::serve(listener, app).await.expect("Server error");
 }

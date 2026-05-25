@@ -57,8 +57,7 @@ pub fn read_tags_fast(path: &Path) -> Result<TagData, TagStudioError> {
     let album_artist = first_item_value(&tags, "ALBUMARTIST")
         .or_else(|| first_item_value(&tags, "ALBUM ARTIST"))
         .or_else(|| first_item_value(&tags, "TPE2"));
-    let composer = first_item_value(&tags, "COMPOSER")
-        .or_else(|| first_item_value(&tags, "TCOM"));
+    let composer = first_item_value(&tags, "COMPOSER").or_else(|| first_item_value(&tags, "TCOM"));
 
     // Check picture count without loading picture data
     let has_cover = tags.iter().any(|t| !t.pictures().is_empty());
@@ -129,8 +128,7 @@ pub fn read_tags_full(path: &Path) -> Result<TagData, TagStudioError> {
     let album_artist = first_item_value(&tags, "ALBUMARTIST")
         .or_else(|| first_item_value(&tags, "ALBUM ARTIST"))
         .or_else(|| first_item_value(&tags, "TPE2"));
-    let composer = first_item_value(&tags, "COMPOSER")
-        .or_else(|| first_item_value(&tags, "TCOM"));
+    let composer = first_item_value(&tags, "COMPOSER").or_else(|| first_item_value(&tags, "TCOM"));
 
     let has_cover = tags.iter().any(|t| !t.pictures().is_empty());
 
@@ -162,10 +160,7 @@ pub fn read_tags_full(path: &Path) -> Result<TagData, TagStudioError> {
 
 /// Parallel batch read tags (fast mode — tags only, no audio properties).
 /// Uses rayon to read multiple files concurrently across CPU cores.
-pub fn batch_read_tags(
-    data_root: &Path,
-    relative_paths: &[String],
-) -> HashMap<String, TagData> {
+pub fn batch_read_tags(data_root: &Path, relative_paths: &[String]) -> HashMap<String, TagData> {
     relative_paths
         .par_iter()
         .filter_map(|rel_path| {
@@ -267,10 +262,7 @@ pub fn write_tags(path: &Path, changes: &TagWriteChanges) -> Result<(), TagStudi
     if let Some(ref v) = changes.composer {
         tag.remove_key(&ItemKey::Composer);
         if !v.is_empty() {
-            tag.push(TagItem::new(
-                ItemKey::Composer,
-                ItemValue::Text(v.clone()),
-            ));
+            tag.push(TagItem::new(ItemKey::Composer, ItemValue::Text(v.clone())));
         }
     }
 

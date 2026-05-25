@@ -21,9 +21,7 @@ pub fn resolve_safe_path(data_root: &Path, requested: &str) -> Result<PathBuf, T
         .canonicalize()
         .map_err(|_| TagStudioError::FileNotFound(candidate.clone()))?;
 
-    let root_canonical = data_root
-        .canonicalize()
-        .map_err(TagStudioError::Io)?;
+    let root_canonical = data_root.canonicalize().map_err(TagStudioError::Io)?;
 
     if !resolved.starts_with(&root_canonical) {
         return Err(TagStudioError::PathTraversal(requested.to_string()));
@@ -50,9 +48,7 @@ pub fn scan_directory(
     let mut files: Vec<FileEntry> = Vec::new();
     let mut directories: Vec<String> = Vec::new();
 
-    let mut entries: Vec<_> = fs::read_dir(&dir)?
-        .filter_map(|e| e.ok())
-        .collect();
+    let mut entries: Vec<_> = fs::read_dir(&dir)?.filter_map(|e| e.ok()).collect();
 
     entries.sort_by_key(|a| a.file_name());
 
@@ -77,11 +73,11 @@ pub fn scan_directory(
             None => continue,
         };
 
-        let relative = match path
-            .canonicalize()
-            .ok()
-            .and_then(|p| p.strip_prefix(&root_canonical).ok().map(|r| r.to_path_buf()))
-        {
+        let relative = match path.canonicalize().ok().and_then(|p| {
+            p.strip_prefix(&root_canonical)
+                .ok()
+                .map(|r| r.to_path_buf())
+        }) {
             Some(r) => r,
             None => continue, // skip files that can't be resolved (broken symlinks, etc.)
         };
@@ -103,9 +99,7 @@ pub fn scan_directory(
             .and_then(|t| {
                 t.duration_since(std::time::UNIX_EPOCH)
                     .ok()
-                    .map(|d| {
-                        chrono_format_timestamp(d.as_secs())
-                    })
+                    .map(|d| chrono_format_timestamp(d.as_secs()))
             })
             .unwrap_or_default();
 

@@ -190,8 +190,7 @@ pub fn run(nodes: &[Node], ctx: &ExprContext) -> String {
             Node::Literal(s) => result.push_str(s),
             Node::Variable(var) => result.push_str(&resolve_variable(var, ctx)),
             Node::FuncCall { name, args } => {
-                let evaluated_args: Vec<String> =
-                    args.iter().map(|a| run(a, ctx)).collect();
+                let evaluated_args: Vec<String> = args.iter().map(|a| run(a, ctx)).collect();
                 result.push_str(&call_function(name, &evaluated_args, ctx));
             }
         }
@@ -645,8 +644,7 @@ mod tests {
     #[test]
     fn test_run_extra_field() {
         let mut t = TagData::default();
-        t.extra
-            .insert("Lyrics".to_string(), "La la la".to_string());
+        t.extra.insert("Lyrics".to_string(), "La la la".to_string());
         assert_eq!(evaluate("%Lyrics%", &make_ctx(&t)), "La la la");
     }
 
@@ -702,10 +700,7 @@ mod tests {
         };
         // Note: ) in regex patterns conflicts with function call parsing,
         // so avoid literal ) in patterns passed to $regex().
-        assert_eq!(
-            evaluate("$regex(%title%, - .*,)", &make_ctx(&t)),
-            "Song"
-        );
+        assert_eq!(evaluate("$regex(%title%, - .*,)", &make_ctx(&t)), "Song");
     }
 
     #[test]
@@ -840,10 +835,7 @@ mod tests {
     #[test]
     fn test_nested_functions() {
         let t = tags();
-        assert_eq!(
-            evaluate("$left($upper(%artist%),3)", &make_ctx(&t)),
-            "THE"
-        );
+        assert_eq!(evaluate("$left($upper(%artist%),3)", &make_ctx(&t)), "THE");
     }
 
     #[test]
@@ -859,8 +851,7 @@ mod tests {
     #[test]
     fn test_fn_meta() {
         let mut t = tags();
-        t.extra
-            .insert("BPM".to_string(), "120".to_string());
+        t.extra.insert("BPM".to_string(), "120".to_string());
         assert_eq!(evaluate("$meta(BPM)", &make_ctx(&t)), "120");
         assert_eq!(evaluate("$meta(artist)", &make_ctx(&t)), "The Band");
     }

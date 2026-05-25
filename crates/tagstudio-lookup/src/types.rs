@@ -40,4 +40,5 @@ pub struct TrackInfo {
 pub enum LookupSource {
     MusicBrainz,
     Discogs,
+    AppleMusic,
 }

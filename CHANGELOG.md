@@ -2,7 +2,7 @@
 
 All notable changes to TagStudio are documented here.
 
-## [0.3.1] — 2026-05-25
+## [0.4.0] — 2026-05-25
 
 ### Added
 
@@ -11,7 +11,7 @@ All notable changes to TagStudio are documented here.
 
 ### Changed
 
-- Updated user agent versioning to `TagStudio/0.3.1`.
+- Updated user agent versioning to `TagStudio/0.4.0`.
 
 ### Fixed
 

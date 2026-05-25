@@ -25,7 +25,12 @@ fn set_session_cookie(token: &str) -> String {
     )
 }
 
-fn create_session_response(state: &AppState, user_id: &str, username: &str, role: Role) -> Response {
+fn create_session_response(
+    state: &AppState,
+    user_id: &str,
+    username: &str,
+    role: Role,
+) -> Response {
     let token = generate_session_token();
     state.add_session(
         token.clone(),
@@ -56,10 +61,7 @@ pub struct SetupRequest {
     pub password: String,
 }
 
-pub async fn setup(
-    State(state): State<AppState>,
-    Json(body): Json<SetupRequest>,
-) -> Response {
+pub async fn setup(State(state): State<AppState>, Json(body): Json<SetupRequest>) -> Response {
     let username = body.username.trim().to_lowercase();
     if username.is_empty() {
         return (
@@ -106,13 +108,13 @@ pub struct LoginRequest {
     pub password: String,
 }
 
-pub async fn login(
-    State(state): State<AppState>,
-    Json(body): Json<LoginRequest>,
-) -> Response {
+pub async fn login(State(state): State<AppState>, Json(body): Json<LoginRequest>) -> Response {
     // Brute-force throttling
     let delay = {
-        let mut guard = state.failed_logins.lock().unwrap_or_else(|e| e.into_inner());
+        let mut guard = state
+            .failed_logins
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
         let (count, last_failure) = &mut *guard;
         if *count > 0 && last_failure.elapsed().as_secs() > 60 {
             *count = 0;
@@ -136,20 +138,28 @@ pub async fn login(
         }
         None => {
             // Dummy verify to prevent timing oracle
-            let dummy = "$argon2id$v=19$m=19456,t=2,p=1$dW50cnVzdGVk$AAAAAAAAAAAAAAAAAAAAAA".to_string();
-            let _ = tokio::task::spawn_blocking(move || users::verify_password(&password, &dummy)).await;
+            let dummy =
+                "$argon2id$v=19$m=19456,t=2,p=1$dW50cnVzdGVk$AAAAAAAAAAAAAAAAAAAAAA".to_string();
+            let _ = tokio::task::spawn_blocking(move || users::verify_password(&password, &dummy))
+                .await;
             false
         }
     };
 
     if valid {
         let user = user.unwrap();
-        let mut guard = state.failed_logins.lock().unwrap_or_else(|e| e.into_inner());
+        let mut guard = state
+            .failed_logins
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
         guard.0 = 0;
         drop(guard);
         create_session_response(&state, &user.id, &user.username, user.role)
     } else {
-        let mut guard = state.failed_logins.lock().unwrap_or_else(|e| e.into_inner());
+        let mut guard = state
+            .failed_logins
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
         guard.0 = guard.0.saturating_add(1);
         guard.1 = std::time::Instant::now();
         drop(guard);
@@ -248,7 +258,10 @@ pub async fn register(
         }
     };
 
-    match state.users.register_with_invite(&body.token, &username, hash) {
+    match state
+        .users
+        .register_with_invite(&body.token, &username, hash)
+    {
         Ok(user) => create_session_response(&state, &user.id, &user.username, user.role),
         Err(msg) => {
             let status = if msg.contains("taken") {
@@ -263,10 +276,7 @@ pub async fn register(
 
 // --- Invite management (super_admin only) ---
 
-pub async fn create_invite(
-    State(state): State<AppState>,
-    req: Request<Body>,
-) -> Response {
+pub async fn create_invite(State(state): State<AppState>, req: Request<Body>) -> Response {
     let session = match require_super_admin(&state, &req) {
         Ok(s) => s,
         Err(r) => return r,
@@ -290,10 +300,7 @@ pub async fn create_invite(
     }
 }
 
-pub async fn list_invites(
-    State(state): State<AppState>,
-    req: Request<Body>,
-) -> Response {
+pub async fn list_invites(State(state): State<AppState>, req: Request<Body>) -> Response {
     if let Err(r) = require_super_admin(&state, &req) {
         return r;
     }
@@ -325,9 +332,7 @@ pub async fn delete_invite(
     }
 
     match state.users.delete_invite(&token) {
-        Ok(true) => {
-            (StatusCode::OK, Json(serde_json::json!({ "status": "ok" }))).into_response()
-        }
+        Ok(true) => (StatusCode::OK, Json(serde_json::json!({ "status": "ok" }))).into_response(),
         Ok(false) => (
             StatusCode::NOT_FOUND,
             Json(serde_json::json!({ "error": "Invite not found" })),
@@ -343,10 +348,7 @@ pub async fn delete_invite(
 
 // --- User management (super_admin only) ---
 
-pub async fn list_users(
-    State(state): State<AppState>,
-    req: Request<Body>,
-) -> Response {
+pub async fn list_users(State(state): State<AppState>, req: Request<Body>) -> Response {
     if let Err(r) = require_super_admin(&state, &req) {
         return r;
     }

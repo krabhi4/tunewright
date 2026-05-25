@@ -38,24 +38,19 @@ pub async fn get_cover_art(
 
     let max_size = if params.size == 0 { 0 } else { params.size };
 
-    let result = picture::extract_cover_art_thumbnail(&safe_path, max_size)
-        .map_err(AppError)?;
+    let result = picture::extract_cover_art_thumbnail(&safe_path, max_size).map_err(AppError)?;
 
     match result {
-        Some((data, mime)) => {
-            Ok(Response::builder()
-                .status(StatusCode::OK)
-                .header(header::CONTENT_TYPE, mime)
-                .header(header::CACHE_CONTROL, "private, max-age=60")
-                .body(Body::from(data))
-                .unwrap())
-        }
-        None => {
-            Ok(Response::builder()
-                .status(StatusCode::NOT_FOUND)
-                .body(Body::from("No cover art"))
-                .unwrap())
-        }
+        Some((data, mime)) => Ok(Response::builder()
+            .status(StatusCode::OK)
+            .header(header::CONTENT_TYPE, mime)
+            .header(header::CACHE_CONTROL, "private, max-age=60")
+            .body(Body::from(data))
+            .unwrap()),
+        None => Ok(Response::builder()
+            .status(StatusCode::NOT_FOUND)
+            .body(Body::from("No cover art"))
+            .unwrap()),
     }
 }
 
@@ -76,9 +71,7 @@ pub async fn embed_cover_art_from_url(
 ) -> Result<Json<serde_json::Value>, AppError> {
     fn is_allowed_cover_host(host: &str) -> bool {
         let host = host.trim_end_matches('.');
-        host == "coverartarchive.org"
-            || host == "archive.org"
-            || host.ends_with(".archive.org")
+        host == "coverartarchive.org" || host == "archive.org" || host.ends_with(".archive.org")
     }
 
     // Only allow CoverArtArchive URLs
@@ -102,7 +95,7 @@ pub async fn embed_cover_art_from_url(
 
     // Fetch the image once, restricting redirects to known hosts
     let client = reqwest::Client::builder()
-        .user_agent("Mozilla/5.0 (compatible; TagStudio/0.3.1; +https://github.com/tagstudio)")
+        .user_agent("Mozilla/5.0 (compatible; TagStudio/0.4.0; +https://github.com/tagstudio)")
         .redirect(reqwest::redirect::Policy::custom(|attempt| {
             let raw = attempt.url().host_str().unwrap_or("");
             let host = raw.trim_end_matches('.');
@@ -117,15 +110,17 @@ pub async fn embed_cover_art_from_url(
         }))
         .build()
         .map_err(|e| {
-            AppError(TagStudioError::Io(std::io::Error::other(
-                format!("failed to build HTTP client: {}", e),
-            )))
+            AppError(TagStudioError::Io(std::io::Error::other(format!(
+                "failed to build HTTP client: {}",
+                e
+            ))))
         })?;
 
     let mut response = client.get(&body.url).send().await.map_err(|e| {
-        AppError(TagStudioError::Io(std::io::Error::other(
-            format!("failed to fetch cover art: {}", e),
-        )))
+        AppError(TagStudioError::Io(std::io::Error::other(format!(
+            "failed to fetch cover art: {}",
+            e
+        ))))
     })?;
 
     if !response.status().is_success() {
@@ -148,9 +143,10 @@ pub async fn embed_cover_art_from_url(
     // Stream with size limit to handle chunked responses without Content-Length
     let mut buf = Vec::new();
     while let Some(chunk) = response.chunk().await.map_err(|e| {
-        AppError(TagStudioError::Io(std::io::Error::other(
-            format!("failed to read cover art bytes: {}", e),
-        )))
+        AppError(TagStudioError::Io(std::io::Error::other(format!(
+            "failed to read cover art bytes: {}",
+            e
+        ))))
     })? {
         buf.extend_from_slice(&chunk);
         if buf.len() > MAX_SIZE as usize {
@@ -169,7 +165,8 @@ pub async fn embed_cover_art_from_url(
         ))));
     }
 
-    if !image_data.starts_with(&[0xFF, 0xD8]) && !image_data.starts_with(&[0x89, 0x50, 0x4E, 0x47]) {
+    if !image_data.starts_with(&[0xFF, 0xD8]) && !image_data.starts_with(&[0x89, 0x50, 0x4E, 0x47])
+    {
         return Err(AppError(TagStudioError::Io(std::io::Error::new(
             std::io::ErrorKind::InvalidData,
             "invalid image format (JPEG or PNG only)",
@@ -223,7 +220,10 @@ pub async fn upload_cover_art(
     let mut image_data: Option<Vec<u8>> = None;
 
     fn multipart_err(msg: &str) -> AppError {
-        AppError(TagStudioError::Io(std::io::Error::new(std::io::ErrorKind::InvalidData, msg.to_string())))
+        AppError(TagStudioError::Io(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            msg.to_string(),
+        )))
     }
 
     loop {
@@ -236,15 +236,23 @@ pub async fn upload_cover_art(
         let name = field.name().unwrap_or("").to_string();
         match name.as_str() {
             "path" => {
-                let text = field.text().await.map_err(|e| multipart_err(&e.to_string()))?;
+                let text = field
+                    .text()
+                    .await
+                    .map_err(|e| multipart_err(&e.to_string()))?;
                 audio_path = Some(text);
             }
             "image" => {
-                let bytes = field.bytes().await.map_err(|e| multipart_err(&e.to_string()))?;
+                let bytes = field
+                    .bytes()
+                    .await
+                    .map_err(|e| multipart_err(&e.to_string()))?;
                 if bytes.len() > 10 * 1024 * 1024 {
                     return Err(multipart_err("image too large (max 10MB)"));
                 }
-                if !bytes.starts_with(&[0xFF, 0xD8]) && !bytes.starts_with(&[0x89, 0x50, 0x4E, 0x47]) {
+                if !bytes.starts_with(&[0xFF, 0xD8])
+                    && !bytes.starts_with(&[0x89, 0x50, 0x4E, 0x47])
+                {
                     return Err(multipart_err("invalid image format (JPEG or PNG only)"));
                 }
                 image_data = Some(bytes.to_vec());
@@ -258,12 +266,10 @@ pub async fn upload_cover_art(
 
     let safe_path = scanner::resolve_safe_path(&state.data_root, &path_str)?;
 
-    tokio::task::spawn_blocking(move || {
-        picture::embed_cover_art(&safe_path, &data)
-    })
-    .await
-    .map_err(|e| multipart_err(&e.to_string()))?
-    .map_err(AppError)?;
+    tokio::task::spawn_blocking(move || picture::embed_cover_art(&safe_path, &data))
+        .await
+        .map_err(|e| multipart_err(&e.to_string()))?
+        .map_err(AppError)?;
 
     Ok(Json(serde_json::json!({ "status": "ok" })))
 }

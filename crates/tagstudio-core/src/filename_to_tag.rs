@@ -55,9 +55,7 @@ fn tokenize_pattern(pattern: &str) -> Vec<PatternToken> {
 
 /// Build a regex from a pattern string. Returns the compiled regex and the
 /// ordered list of variable names that correspond to capture groups.
-fn pattern_to_regex(
-    pattern: &str,
-) -> Result<(regex::Regex, Vec<String>), TagStudioError> {
+fn pattern_to_regex(pattern: &str) -> Result<(regex::Regex, Vec<String>), TagStudioError> {
     let tokens = tokenize_pattern(pattern);
     let mut regex_str = String::from("^");
     let mut var_names = Vec::new();
@@ -112,16 +110,10 @@ pub fn extract_from_filename(
 
 /// Convert extracted string values to TagWriteChanges.
 pub fn values_to_changes(values: &HashMap<String, String>) -> TagWriteChanges {
-    let get = |key: &str| -> Option<String> {
-        values
-            .get(key)
-            .filter(|s| !s.is_empty())
-            .cloned()
-    };
+    let get = |key: &str| -> Option<String> { values.get(key).filter(|s| !s.is_empty()).cloned() };
 
-    let get_u32 = |key: &str| -> Option<u32> {
-        values.get(key).and_then(|s| s.trim().parse().ok())
-    };
+    let get_u32 =
+        |key: &str| -> Option<u32> { values.get(key).and_then(|s| s.trim().parse().ok()) };
 
     let mut extra = HashMap::new();
     for (key, val) in values {
@@ -228,8 +220,7 @@ mod tests {
 
     #[test]
     fn test_basic_extraction() {
-        let values =
-            extract_from_filename("%artist% - %title%", "The Band - First Song").unwrap();
+        let values = extract_from_filename("%artist% - %title%", "The Band - First Song").unwrap();
         let values = values.unwrap();
         assert_eq!(values.get("artist").unwrap(), "The Band");
         assert_eq!(values.get("title").unwrap(), "First Song");
@@ -237,11 +228,9 @@ mod tests {
 
     #[test]
     fn test_track_extraction() {
-        let values = extract_from_filename(
-            "%track% - %artist% - %title%",
-            "03 - The Band - First Song",
-        )
-        .unwrap();
+        let values =
+            extract_from_filename("%track% - %artist% - %title%", "03 - The Band - First Song")
+                .unwrap();
         let values = values.unwrap();
         assert_eq!(values.get("track").unwrap(), "03");
         assert_eq!(values.get("artist").unwrap(), "The Band");
@@ -250,8 +239,7 @@ mod tests {
 
     #[test]
     fn test_no_match() {
-        let values =
-            extract_from_filename("%artist% - %title%", "NoSeparatorHere").unwrap();
+        let values = extract_from_filename("%artist% - %title%", "NoSeparatorHere").unwrap();
         assert!(values.is_none());
     }
 
@@ -292,11 +280,8 @@ mod tests {
 
     #[test]
     fn test_extra_fields_in_pattern() {
-        let values = extract_from_filename(
-            "%artist% - %title% [%BPM%]",
-            "The Band - Song [120]",
-        )
-        .unwrap();
+        let values =
+            extract_from_filename("%artist% - %title% [%BPM%]", "The Band - Song [120]").unwrap();
         let values = values.unwrap();
         assert_eq!(values.get("BPM").unwrap(), "120");
 

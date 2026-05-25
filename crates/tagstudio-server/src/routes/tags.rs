@@ -56,7 +56,12 @@ pub async fn read_tags(
         ReadTagsResponse { tags: result }
     })
     .await
-    .map_err(|e| AppError(TagStudioError::TagReadError(format!("Task join error: {}", e))))?;
+    .map_err(|e| {
+        AppError(TagStudioError::TagReadError(format!(
+            "Task join error: {}",
+            e
+        )))
+    })?;
 
     Ok(Json(result))
 }
@@ -101,7 +106,12 @@ pub async fn write_tags(
         audio::batch_write_tags(&data_root, &changes_vec)
     })
     .await
-    .map_err(|e| AppError(TagStudioError::TagReadError(format!("Task join error: {}", e))))?;
+    .map_err(|e| {
+        AppError(TagStudioError::TagReadError(format!(
+            "Task join error: {}",
+            e
+        )))
+    })?;
 
     Ok(Json(WriteTagsResponse { results }))
 }
@@ -139,7 +149,12 @@ pub async fn read_properties(
         ReadTagsResponse { tags: result }
     })
     .await
-    .map_err(|e| AppError(TagStudioError::TagReadError(format!("Task join error: {}", e))))?;
+    .map_err(|e| {
+        AppError(TagStudioError::TagReadError(format!(
+            "Task join error: {}",
+            e
+        )))
+    })?;
 
     Ok(Json(result))
 }

@@ -97,7 +97,11 @@ pub async fn execute(
         results
     })
     .await
-    .map_err(|e| AppError(TagStudioError::TagWriteError(format!("Task join error: {e}"))))?;
+    .map_err(|e| {
+        AppError(TagStudioError::TagWriteError(format!(
+            "Task join error: {e}"
+        )))
+    })?;
 
     Ok(Json(ExecuteActionsResponse { results }))
 }
@@ -182,7 +186,11 @@ pub async fn preview(
         previews
     })
     .await
-    .map_err(|e| AppError(TagStudioError::TagReadError(format!("Task join error: {e}"))))?;
+    .map_err(|e| {
+        AppError(TagStudioError::TagReadError(format!(
+            "Task join error: {e}"
+        )))
+    })?;
 
     Ok(Json(PreviewActionsResponse { previews }))
 }

@@ -25,9 +25,7 @@ impl IntoResponse for AppError {
             TagStudioError::UnsupportedFormat(_) => {
                 (StatusCode::UNPROCESSABLE_ENTITY, "Unsupported audio format")
             }
-            TagStudioError::ImageError(_) => {
-                (StatusCode::BAD_REQUEST, "Image processing error")
-            }
+            TagStudioError::ImageError(_) => (StatusCode::BAD_REQUEST, "Image processing error"),
             TagStudioError::TagReadError(_) => {
                 (StatusCode::INTERNAL_SERVER_ERROR, "Failed to read tags")
             }

@@ -1,7 +1,7 @@
 <script lang="ts">
 	import Modal from '$lib/components/common/Modal.svelte';
 	import type { FileEntry } from '$lib/types/audio';
-	import { searchMusicBrainz, getMusicBrainzRelease } from '$lib/api/lookup';
+	import { searchMusicBrainz, getMusicBrainzRelease, searchAppleMusic, getAppleMusicRelease } from '$lib/api/lookup';
 	import type { ReleaseSearchResult, ReleaseDetail, TrackInfo } from '$lib/api/lookup';
 	import { setPendingEdit, pendingEdits, mergedTags, saveAllEdits } from '$lib/stores/tags';
 	import { executeRenames } from '$lib/api/rename';
@@ -30,6 +30,7 @@
 	let loadingRelease = $state(false);
 	let loadingReleaseId = $state<string | null>(null);
 	let searchError = $state('');
+	let provider = $state<'musicbrainz' | 'applemusic'>('musicbrainz');
 
 	// Matching state: tracks on left, files on right, linked by index
 	let matchedFiles = $state<(FileEntry | null)[]>([]);
@@ -75,6 +76,7 @@
 			loadingReleaseId = null;
 			matchedFiles = [];
 			unmatchedFiles = [];
+			provider = 'musicbrainz';
 		}
 	});
 
@@ -86,7 +88,9 @@
 		searchResults = [];
 		selectedRelease = null;
 		try {
-			const results = await searchMusicBrainz(query);
+			const results = provider === 'musicbrainz'
+				? await searchMusicBrainz(query)
+				: await searchAppleMusic(query);
 			if (open && searchQuery === query) {
 				searchResults = results;
 			}
@@ -106,7 +110,9 @@
 		loadingRelease = true;
 		searchError = '';
 		try {
-			const release = await getMusicBrainzRelease(result.id);
+			const release = provider === 'musicbrainz'
+				? await getMusicBrainzRelease(result.id)
+				: await getAppleMusicRelease(result.id);
 			if (loadingReleaseId === result.id && open) {
 				selectedRelease = release;
 				if (selectedRelease) {
@@ -313,16 +319,25 @@
 	let matchedCount = $derived(matchedFiles.filter((f) => f !== null).length);
 </script>
 
-<Modal title="MusicBrainz Lookup" {open} {onClose} wide={true}>
+<Modal title="Metadata Lookup" {open} {onClose} wide={true}>
 	{#if step === 'search'}
 		<div class="search-bar">
+			<select
+				class="provider-select"
+				bind:value={provider}
+				disabled={searching || loadingRelease}
+				aria-label="Search Provider"
+			>
+				<option value="musicbrainz">MusicBrainz</option>
+				<option value="applemusic">Apple Music</option>
+			</select>
 			<input
 				class="search-input"
 				type="text"
 				bind:value={searchQuery}
 				onkeydown={handleSearchKeydown}
 				placeholder="Search artist, album..."
-				aria-label="Search MusicBrainz"
+				aria-label="Search Query"
 				disabled={searching || loadingRelease}
 			/>
 			<button class="search-btn" onclick={handleSearch} disabled={searching || loadingRelease}>
@@ -398,7 +413,7 @@
 				{/each}
 			</div>
 		{:else if searching}
-			<div class="status-msg"><span class="spinner spinner--sm"></span> Searching MusicBrainz...</div>
+			<div class="status-msg"><span class="spinner spinner--sm"></span> Searching {provider === 'musicbrainz' ? 'MusicBrainz' : 'Apple Music'}...</div>
 		{:else if loadingRelease}
 			<div class="status-msg"><span class="spinner spinner--sm"></span> Loading release details...</div>
 		{/if}
@@ -509,6 +524,33 @@
 		display: flex;
 		gap: 6px;
 		margin-bottom: 12px;
+	}
+
+	.provider-select {
+		background: var(--bg-base);
+		border: 1px solid var(--border);
+		color: var(--text-primary);
+		font-family: var(--font-ui);
+		font-size: 12px;
+		padding: 6px 24px 6px 8px;
+		border-radius: var(--radius-sm);
+		outline: none;
+		cursor: pointer;
+		appearance: none;
+		/* Add custom arrow */
+		background-image: url("data:image/svg+xml;charset=UTF-8,%3csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3e%3cpolyline points='6 9 12 15 18 9'%3e%3c/polyline%3e%3c/svg%3e");
+		background-repeat: no-repeat;
+		background-position: right 8px center;
+		background-size: 12px;
+	}
+
+	.provider-select:focus {
+		border-color: var(--accent);
+	}
+
+	.provider-select:disabled {
+		opacity: 0.5;
+		cursor: not-allowed;
 	}
 
 	.search-input {

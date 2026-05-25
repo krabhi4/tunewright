@@ -12,10 +12,7 @@ use serde::{Deserialize, Serialize};
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum Action {
     /// Convert text case: title, upper, lower, sentence
-    CaseConversion {
-        field: String,
-        mode: CaseMode,
-    },
+    CaseConversion { field: String, mode: CaseMode },
 
     /// Replace text (plain or regex)
     Replace {
@@ -27,26 +24,16 @@ pub enum Action {
     },
 
     /// Set a field using a format string / expression
-    FormatValue {
-        field: String,
-        format: String,
-    },
+    FormatValue { field: String, format: String },
 
     /// Set a field to a literal value
-    SetField {
-        field: String,
-        value: String,
-    },
+    SetField { field: String, value: String },
 
     /// Remove a field (set to empty)
-    RemoveField {
-        field: String,
-    },
+    RemoveField { field: String },
 
     /// Remove all fields except the listed ones
-    RemoveAllExcept {
-        fields: Vec<String>,
-    },
+    RemoveAllExcept { fields: Vec<String> },
 
     /// Auto-number: set a numeric field sequentially
     AutoNumber {
@@ -74,13 +61,15 @@ pub enum Action {
     },
 
     /// Trim whitespace from a field
-    TrimField {
-        field: String,
-    },
+    TrimField { field: String },
 }
 
-fn default_start() -> u32 { 1 }
-fn default_padding() -> u8 { 2 }
+fn default_start() -> u32 {
+    1
+}
+fn default_padding() -> u8 {
+    2
+}
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -114,7 +103,12 @@ impl Action {
                 }
             }
 
-            Action::Replace { field, search, replace, regex } => {
+            Action::Replace {
+                field,
+                search,
+                replace,
+                regex,
+            } => {
                 let val = get_field(tags, field);
                 if val.is_empty() {
                     return;
@@ -148,9 +142,18 @@ impl Action {
 
             Action::RemoveAllExcept { fields } => {
                 let standard = [
-                    "title", "artist", "album", "album_artist", "year",
-                    "track_number", "track_total", "disc_number", "disc_total",
-                    "genre", "comment", "composer",
+                    "title",
+                    "artist",
+                    "album",
+                    "album_artist",
+                    "year",
+                    "track_number",
+                    "track_total",
+                    "disc_number",
+                    "disc_total",
+                    "genre",
+                    "comment",
+                    "composer",
                 ];
                 for f in &standard {
                     if !fields.iter().any(|k| k.eq_ignore_ascii_case(f)) {
@@ -165,20 +168,33 @@ impl Action {
                 }
             }
 
-            Action::AutoNumber { field, start, padding } => {
+            Action::AutoNumber {
+                field,
+                start,
+                padding,
+            } => {
                 let num = *start + ctx.index as u32;
                 let formatted = format!("{:0>width$}", num, width = *padding as usize);
                 set_field(tags, field, &formatted);
             }
 
-            Action::SplitField { source, separator, part, target } => {
+            Action::SplitField {
+                source,
+                separator,
+                part,
+                target,
+            } => {
                 let val = get_field(tags, source);
                 let parts: Vec<&str> = val.split(separator.as_str()).collect();
                 let result = parts.get(*part).unwrap_or(&"").trim().to_string();
                 set_field(tags, target, &result);
             }
 
-            Action::MergeFields { sources, separator, target } => {
+            Action::MergeFields {
+                sources,
+                separator,
+                target,
+            } => {
                 let values: Vec<String> = sources
                     .iter()
                     .map(|f| get_field(tags, f))
@@ -247,18 +263,54 @@ fn set_field(tags: &mut TagData, field: &str, value: &str) {
     };
 
     match field.to_lowercase().as_str() {
-        "title" => { tags.title = opt_str; return; }
-        "artist" => { tags.artist = opt_str; return; }
-        "album" => { tags.album = opt_str; return; }
-        "album_artist" | "albumartist" => { tags.album_artist = opt_str; return; }
-        "year" => { tags.year = value.parse().ok(); return; }
-        "track_number" | "track" => { tags.track_number = value.parse().ok(); return; }
-        "track_total" => { tags.track_total = value.parse().ok(); return; }
-        "disc_number" | "disc" => { tags.disc_number = value.parse().ok(); return; }
-        "disc_total" => { tags.disc_total = value.parse().ok(); return; }
-        "genre" => { tags.genre = opt_str; return; }
-        "comment" => { tags.comment = opt_str; return; }
-        "composer" => { tags.composer = opt_str; return; }
+        "title" => {
+            tags.title = opt_str;
+            return;
+        }
+        "artist" => {
+            tags.artist = opt_str;
+            return;
+        }
+        "album" => {
+            tags.album = opt_str;
+            return;
+        }
+        "album_artist" | "albumartist" => {
+            tags.album_artist = opt_str;
+            return;
+        }
+        "year" => {
+            tags.year = value.parse().ok();
+            return;
+        }
+        "track_number" | "track" => {
+            tags.track_number = value.parse().ok();
+            return;
+        }
+        "track_total" => {
+            tags.track_total = value.parse().ok();
+            return;
+        }
+        "disc_number" | "disc" => {
+            tags.disc_number = value.parse().ok();
+            return;
+        }
+        "disc_total" => {
+            tags.disc_total = value.parse().ok();
+            return;
+        }
+        "genre" => {
+            tags.genre = opt_str;
+            return;
+        }
+        "comment" => {
+            tags.comment = opt_str;
+            return;
+        }
+        "composer" => {
+            tags.composer = opt_str;
+            return;
+        }
         _ => {}
     }
     // Extra field — use original case for key
@@ -487,8 +539,7 @@ mod tests {
     #[test]
     fn test_extra_field_operations() {
         let mut tags = TagData::default();
-        tags.extra
-            .insert("BPM".to_string(), "120".to_string());
+        tags.extra.insert("BPM".to_string(), "120".to_string());
 
         let action = Action::SetField {
             field: "BPM".to_string(),

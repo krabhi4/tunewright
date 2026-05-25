@@ -4,7 +4,7 @@ use serde::Deserialize;
 use std::collections::HashMap;
 
 const MB_BASE: &str = "https://musicbrainz.org/ws/2";
-const USER_AGENT: &str = "TagStudio/0.3.1 (https://github.com/tagstudio)";
+const USER_AGENT: &str = "TagStudio/0.4.0 (https://github.com/tagstudio)";
 
 // CoverArtArchive JSON API types
 #[derive(Debug, Deserialize)]
@@ -118,7 +118,10 @@ pub async fn search_releases(
     query: &str,
 ) -> Result<Vec<ReleaseSearchResult>, String> {
     let encoded_query = urlencoding::encode(query);
-    let url = format!("{}/release?query={}&fmt=json&limit=20", MB_BASE, encoded_query);
+    let url = format!(
+        "{}/release?query={}&fmt=json&limit=20",
+        MB_BASE, encoded_query
+    );
 
     let resp = client
         .get(&url)
@@ -159,10 +162,7 @@ pub async fn search_releases(
 }
 
 /// Get detailed release info with track listing
-pub async fn get_release(
-    client: &Client,
-    mbid: &str,
-) -> Result<ReleaseDetail, String> {
+pub async fn get_release(client: &Client, mbid: &str) -> Result<ReleaseDetail, String> {
     // Validate MBID is a valid UUID (hex + dashes) to prevent path injection
     if !mbid.chars().all(|c| c.is_ascii_hexdigit() || c == '-') || mbid.len() != 36 {
         return Err("Invalid MusicBrainz ID".to_string());

@@ -39,8 +39,12 @@ pub async fn list_files(
         scanner::scan_directory(&data_root, &path, offset, limit)
     })
     .await
-    .map_err(|e| AppError(TagStudioError::TagReadError(format!("Task join error: {}", e))))?
-    ?;
+    .map_err(|e| {
+        AppError(TagStudioError::TagReadError(format!(
+            "Task join error: {}",
+            e
+        )))
+    })??;
 
     Ok(Json(result))
 }
@@ -62,12 +66,14 @@ pub async fn dir_tree(
     let data_root = state.data_root.clone();
     let depth = params.depth.min(50);
 
-    let tree = tokio::task::spawn_blocking(move || {
-        scanner::build_dir_tree(&data_root, depth)
-    })
-    .await
-    .map_err(|e| AppError(TagStudioError::TagReadError(format!("Task join error: {}", e))))?
-    ?;
+    let tree = tokio::task::spawn_blocking(move || scanner::build_dir_tree(&data_root, depth))
+        .await
+        .map_err(|e| {
+            AppError(TagStudioError::TagReadError(format!(
+                "Task join error: {}",
+                e
+            )))
+        })??;
 
     Ok(Json(tree))
 }

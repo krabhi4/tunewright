@@ -2,8 +2,8 @@ use argon2::{
     password_hash::{PasswordHash, PasswordHasher, PasswordVerifier, SaltString},
     Argon2,
 };
-use rand::Rng;
 use chrono::{DateTime, Duration, Utc};
+use rand::Rng;
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
@@ -102,12 +102,18 @@ impl UserManager {
 
     fn save(&self, store: &UserStore) -> Result<(), &'static str> {
         let tmp_path = self.path.with_extension("json.tmp");
-        let json = serde_json::to_string_pretty(store)
-            .map_err(|e| { tracing::error!("Failed to serialize users: {}", e); "Failed to save user data" })?;
-        std::fs::write(&tmp_path, &json)
-            .map_err(|e| { tracing::error!("Failed to write users temp file: {}", e); "Failed to save user data" })?;
-        std::fs::rename(&tmp_path, &self.path)
-            .map_err(|e| { tracing::error!("Failed to rename users file: {}", e); "Failed to save user data" })?;
+        let json = serde_json::to_string_pretty(store).map_err(|e| {
+            tracing::error!("Failed to serialize users: {}", e);
+            "Failed to save user data"
+        })?;
+        std::fs::write(&tmp_path, &json).map_err(|e| {
+            tracing::error!("Failed to write users temp file: {}", e);
+            "Failed to save user data"
+        })?;
+        std::fs::rename(&tmp_path, &self.path).map_err(|e| {
+            tracing::error!("Failed to rename users file: {}", e);
+            "Failed to save user data"
+        })?;
         Ok(())
     }
 
@@ -256,15 +262,17 @@ impl UserManager {
         })?;
         Ok(true)
     }
-
 }
 
 /// Hash a password with argon2. Call from spawn_blocking.
 pub fn hash_password(password: &str) -> Result<String, argon2::password_hash::Error> {
     let mut salt_bytes = [0u8; 16];
     rand::rng().fill(&mut salt_bytes);
-    let salt = SaltString::encode_b64(&salt_bytes)
-        .map_err(|_| argon2::password_hash::Error::SaltInvalid(argon2::password_hash::errors::InvalidValue::Malformed))?;
+    let salt = SaltString::encode_b64(&salt_bytes).map_err(|_| {
+        argon2::password_hash::Error::SaltInvalid(
+            argon2::password_hash::errors::InvalidValue::Malformed,
+        )
+    })?;
     let argon2 = Argon2::default();
     let hash = argon2.hash_password(password.as_bytes(), &salt)?;
     Ok(hash.to_string())
