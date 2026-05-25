@@ -6,7 +6,7 @@ If you discover a security vulnerability in TagStudio, please report it responsi
 
 **Do not open a public GitHub issue for security vulnerabilities.**
 
-Instead, email: **security@YOUR_DOMAIN** (or use GitHub's private vulnerability reporting if enabled on the repo).
+Instead, please use GitHub's private vulnerability reporting feature on the repository to submit reports securely.
 
 Include:
 - Description of the vulnerability

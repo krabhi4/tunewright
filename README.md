@@ -168,7 +168,7 @@ docker buildx build \
 
 ## API
 
-All endpoints under `/api/v1/`. See the full API reference in [docs/api.md](docs/api.md) (TODO).
+All endpoints under `/api/v1/`. See the full API reference in [docs/api.md](docs/api.md).
 
 | Method | Endpoint | Description |
 |--------|----------|-------------|

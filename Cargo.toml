@@ -10,6 +10,10 @@ members = [
 version = "0.2.0"
 edition = "2021"
 license = "MIT"
+description = "A self-hosted web application for editing audio file metadata"
+repository = "https://github.com/krabhi4/tagstudio"
+homepage = "https://github.com/krabhi4/tagstudio"
+readme = "README.md"
 
 [workspace.dependencies]
 serde = { version = "1", features = ["derive"] }
