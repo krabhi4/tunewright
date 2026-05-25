@@ -47,7 +47,15 @@
 <div class="login-page">
 	<div class="login-card">
 		<div class="login-header">
-			<div class="login-logo">T</div>
+			<div class="login-logo">
+				<svg class="tag-logo" viewBox="0 0 32 32" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+					<path d="M10 12 L16 6 L22 12 L22 25 A 2 2 0 0 1 20 27 L12 27 A 2 2 0 0 1 10 25 Z"/>
+					<circle cx="16" cy="12" r="1.5" fill="currentColor"/>
+					<rect x="12.25" y="16.5" width="1.5" height="6" rx="0.75" fill="currentColor"/>
+					<rect x="15.25" y="14" width="1.5" height="10" rx="0.75" fill="currentColor"/>
+					<rect x="18.25" y="17.5" width="1.5" height="5" rx="0.75" fill="currentColor"/>
+				</svg>
+			</div>
 			<h1 class="login-title">Welcome to TagStudio</h1>
 			<p class="login-subtitle">Create your admin account to get started.</p>
 		</div>
@@ -135,15 +143,15 @@
 	.login-logo {
 		width: 48px;
 		height: 48px;
-		background: var(--bg-elevated);
-		border-radius: var(--radius-lg);
 		display: inline-flex;
 		align-items: center;
 		justify-content: center;
-		font-size: 24px;
-		font-weight: bold;
 		color: var(--accent);
 		margin-bottom: 12px;
+	}
+	.login-logo :global(.tag-logo) {
+		width: 100%;
+		height: 100%;
 	}
 
 	.login-title {
