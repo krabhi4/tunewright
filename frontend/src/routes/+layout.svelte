@@ -6,6 +6,7 @@
 	import { page } from '$app/state';
 	import { checkAuth } from '$lib/api/auth';
 	import { auth } from '$lib/stores/auth';
+	import { initTheme } from '$lib/stores/theme';
 
 	let { children }: { children: Snippet } = $props();
 	let authChecked = $state(false);
@@ -13,6 +14,7 @@
 	const authPages = ['/login', '/setup', '/register'];
 
 	onMount(async () => {
+		initTheme();
 		try {
 			const data = await checkAuth();
 
