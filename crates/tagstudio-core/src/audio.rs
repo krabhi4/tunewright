@@ -151,7 +151,7 @@ pub fn read_tags_full(path: &Path) -> Result<TagData, TagStudioError> {
         composer,
         bitrate: Some(props.audio_bitrate().unwrap_or(0)),
         sample_rate: Some(props.sample_rate().unwrap_or(0)),
-        channels: Some(props.channels().unwrap_or(0) as u8),
+        channels: Some(props.channels().unwrap_or(0)),
         duration_secs,
         format: Some(format!("{:?}", tagged.file_type())),
         tag_types,
