@@ -20,33 +20,37 @@
 
 			if (data.setup_required) {
 				auth.set({ checked: true, setupRequired: true, authenticated: false, user: null });
-				if (!page.url.pathname.startsWith('/setup')) {
-					goto('/setup');
-				}
 			} else if (data.authenticated && data.user) {
 				auth.set({ checked: true, setupRequired: false, authenticated: true, user: data.user });
-				if (authPages.some((p) => page.url.pathname.startsWith(p))) {
+			} else {
+				auth.set({ checked: true, setupRequired: false, authenticated: false, user: null });
+			}
+		} catch {
+			auth.set({ checked: true, setupRequired: false, authenticated: false, user: null });
+		} finally {
+			authChecked = true;
+		}
+	});
+
+	$effect(() => {
+		if (authChecked) {
+			const path = page.url.pathname;
+			if ($auth.setupRequired) {
+				if (!path.startsWith('/setup')) {
+					goto('/setup');
+				}
+			} else if ($auth.authenticated) {
+				if (authPages.some((p) => path.startsWith(p))) {
 					goto('/');
 				}
 			} else {
-				auth.set({ checked: true, setupRequired: false, authenticated: false, user: null });
 				if (
-					!page.url.pathname.startsWith('/login') &&
-					!page.url.pathname.startsWith('/register')
+					!path.startsWith('/login') &&
+					!path.startsWith('/register')
 				) {
 					goto('/login');
 				}
 			}
-		} catch {
-			auth.set({ checked: true, setupRequired: false, authenticated: false, user: null });
-			if (
-				!page.url.pathname.startsWith('/login') &&
-				!page.url.pathname.startsWith('/register')
-			) {
-				goto('/login');
-			}
-		} finally {
-			authChecked = true;
 		}
 	});
 </script>
