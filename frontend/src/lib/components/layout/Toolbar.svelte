@@ -54,7 +54,16 @@
 
 	<div class="toolbar-spacer"></div>
 
-	<div class="toolbar-title">TagStudio</div>
+	<div class="toolbar-title">
+		<svg class="toolbar-logo" viewBox="0 0 32 32" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+			<path d="M10 12 L16 6 L22 12 L22 25 A 2 2 0 0 1 20 27 L12 27 A 2 2 0 0 1 10 25 Z"/>
+			<circle cx="16" cy="12" r="1.5" fill="currentColor"/>
+			<rect x="12.25" y="16.5" width="1.5" height="6" rx="0.75" fill="currentColor"/>
+			<rect x="15.25" y="14" width="1.5" height="10" rx="0.75" fill="currentColor"/>
+			<rect x="18.25" y="17.5" width="1.5" height="5" rx="0.75" fill="currentColor"/>
+		</svg>
+		<span>TagStudio</span>
+	</div>
 
 	<button class="toolbar-btn theme-toggle-btn" onclick={toggleTheme} title="Switch Dark/Light Theme" aria-label="Toggle theme">
 		{#if $theme === 'dark'}
@@ -139,12 +148,22 @@
 	}
 
 	.toolbar-title {
+		display: flex;
+		align-items: center;
+		gap: 6px;
 		font-size: 11px;
-		font-weight: 500;
+		font-weight: 600;
 		color: var(--text-muted);
 		letter-spacing: 0.5px;
 		text-transform: uppercase;
 		margin-right: 8px;
+	}
+
+	.toolbar-logo {
+		width: 16px;
+		height: 16px;
+		color: var(--accent);
+		flex-shrink: 0;
 	}
 
 	@media (max-width: 768px) {
