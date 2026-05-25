@@ -69,7 +69,7 @@
 	}
 </script>
 
-<Modal title="Rename Files" {open} {onClose}>
+<Modal title="Rename Files" {open} {onClose} wide={true}>
 	<div class="rename-form">
 		<label class="label" for="rename-format">Format String</label>
 		<input

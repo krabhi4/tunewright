@@ -111,14 +111,16 @@
 		border: 1px solid var(--border);
 		border-radius: var(--radius-md);
 		min-width: min(400px, calc(100vw - 32px));
-		max-width: min(600px, calc(100vw - 32px));
-		max-height: 70vh;
-		width: 100%;
+		max-width: calc(100vw - 32px);
+		max-height: min(650px, calc(100vh - 32px));
+		width: min(600px, calc(100vw - 32px));
 		display: flex;
 		flex-direction: column;
 		box-shadow: var(--shadow-modal);
 		animation: modal-in 150ms cubic-bezier(0.25, 1, 0.5, 1);
 		will-change: opacity, transform;
+		resize: both;
+		overflow: hidden;
 	}
 
 	.modal-header {
@@ -159,9 +161,12 @@
 	.modal-body {
 		padding: 14px;
 		overflow-y: auto;
+		flex: 1;
+		min-height: 0;
 	}
 
 	.modal-wide {
-		max-width: min(750px, calc(100vw - 32px));
+		width: min(850px, calc(100vw - 32px));
+		max-height: min(800px, calc(100vh - 32px));
 	}
 </style>

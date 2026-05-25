@@ -102,7 +102,7 @@ pub async fn embed_cover_art_from_url(
 
     // Fetch the image once, restricting redirects to known hosts
     let client = reqwest::Client::builder()
-        .user_agent("Mozilla/5.0 (compatible; TagStudio/0.3.0; +https://github.com/tagstudio)")
+        .user_agent("Mozilla/5.0 (compatible; TagStudio/0.3.1; +https://github.com/tagstudio)")
         .redirect(reqwest::redirect::Policy::custom(|attempt| {
             let raw = attempt.url().host_str().unwrap_or("");
             let host = raw.trim_end_matches('.');

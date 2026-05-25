@@ -28,6 +28,7 @@
 	let selectedRelease = $state<ReleaseDetail | null>(null);
 	let searching = $state(false);
 	let loadingRelease = $state(false);
+	let loadingReleaseId = $state<string | null>(null);
 	let searchError = $state('');
 
 	// Matching state: tracks on left, files on right, linked by index
@@ -71,36 +72,56 @@
 			selectedRelease = null;
 			searchResults = [];
 			step = 'search';
+			loadingReleaseId = null;
+			matchedFiles = [];
+			unmatchedFiles = [];
 		}
 	});
 
 	async function handleSearch() {
 		if (!searchQuery.trim()) return;
+		const query = searchQuery;
 		searching = true;
 		searchError = '';
 		searchResults = [];
 		selectedRelease = null;
 		try {
-			searchResults = await searchMusicBrainz(searchQuery);
+			const results = await searchMusicBrainz(query);
+			if (open && searchQuery === query) {
+				searchResults = results;
+			}
 		} catch (err: any) {
-			searchError = err.message || 'Search failed';
+			if (open && searchQuery === query) {
+				searchError = err.message || 'Search failed';
+			}
 		} finally {
-			searching = false;
+			if (searchQuery === query) {
+				searching = false;
+			}
 		}
 	}
 
 	async function selectRelease(result: ReleaseSearchResult) {
+		loadingReleaseId = result.id;
 		loadingRelease = true;
 		searchError = '';
 		try {
-			selectedRelease = await getMusicBrainzRelease(result.id);
-			if (selectedRelease) {
-				initMatchingStep();
+			const release = await getMusicBrainzRelease(result.id);
+			if (loadingReleaseId === result.id && open) {
+				selectedRelease = release;
+				if (selectedRelease) {
+					initMatchingStep();
+				}
 			}
 		} catch (err: any) {
-			searchError = err.message || 'Failed to load release details';
+			if (loadingReleaseId === result.id && open) {
+				searchError = err.message || 'Failed to load release details';
+			}
 		} finally {
-			loadingRelease = false;
+			if (loadingReleaseId === result.id) {
+				loadingRelease = false;
+				loadingReleaseId = null;
+			}
 		}
 	}
 
@@ -292,7 +313,7 @@
 	let matchedCount = $derived(matchedFiles.filter((f) => f !== null).length);
 </script>
 
-<Modal title="MusicBrainz Lookup" {open} {onClose}>
+<Modal title="MusicBrainz Lookup" {open} {onClose} wide={true}>
 	{#if step === 'search'}
 		<div class="search-bar">
 			<input
@@ -302,8 +323,9 @@
 				onkeydown={handleSearchKeydown}
 				placeholder="Search artist, album..."
 				aria-label="Search MusicBrainz"
+				disabled={searching || loadingRelease}
 			/>
-			<button class="search-btn" onclick={handleSearch} disabled={searching}>
+			<button class="search-btn" onclick={handleSearch} disabled={searching || loadingRelease}>
 				{searching ? 'Searching...' : 'Search'}
 			</button>
 		</div>
@@ -349,8 +371,12 @@
 		{:else if searchResults.length > 0}
 			<div class="results-list">
 				{#each searchResults as result (result.id)}
-					<button class="result-row" onclick={() => selectRelease(result)}>
-						{#if result.cover_art_url}
+					<button class="result-row" onclick={() => selectRelease(result)} disabled={loadingRelease || searching}>
+						{#if loadingReleaseId === result.id}
+							<div class="result-thumb result-thumb--loading">
+								<span class="spinner spinner--sm"></span>
+							</div>
+						{:else if result.cover_art_url}
 							<img
 								src={result.cover_art_url}
 								alt=""
@@ -541,8 +567,20 @@
 		font-family: var(--font-ui);
 	}
 
-	.result-row:hover {
+	.result-row:hover:not(:disabled) {
 		background: var(--bg-hover);
+	}
+
+	.result-row:disabled {
+		opacity: 0.6;
+		cursor: not-allowed;
+	}
+
+	.result-thumb--loading {
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		background: var(--bg-base);
 	}
 
 	.result-thumb {

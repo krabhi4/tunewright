@@ -2,6 +2,23 @@
 
 All notable changes to TagStudio are documented here.
 
+## [0.3.1] — 2026-05-25
+
+### Added
+
+- **Resizable Modal Dialogs** — Added native drag-and-resize handles (`resize: both`) to all modal dialogs.
+- **Wider Default Modal Views** — Increased standard wide modal layout default width to `850px` for tabular-dense and file-centric dialogs (MusicBrainz Lookup, Rename Files, Filename to Tag).
+
+### Changed
+
+- Updated user agent versioning to `TagStudio/0.3.1`.
+
+### Fixed
+
+- **MusicBrainz Lookup Loading State** — Added a localized spinner inside the selected result row's cover art thumbnail box, and disabled all result rows and inputs during background data fetching to prevent duplicate clicks.
+- **Asynchronous Race Condition Protection** — Safeguarded lookup and search requests against late-resolving promises if the user quickly closes/reopens the modal or updates search terms.
+- **Matching State Cleanup** — Ensured matched and unmatched file state arrays are explicitly wiped when opening the MusicBrainz lookup modal to avoid stale session carryover.
+
 ## [0.3.0] — 2026-05-25
 
 ### Added

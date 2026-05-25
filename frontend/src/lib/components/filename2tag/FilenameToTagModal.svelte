@@ -96,7 +96,7 @@
 	}
 </script>
 
-<Modal title="Filename → Tag" {open} {onClose}>
+<Modal title="Filename → Tag" {open} {onClose} wide={true}>
 	<div class="form">
 		<label class="label" for="f2t-pattern">Pattern</label>
 		<input
