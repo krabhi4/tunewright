@@ -280,13 +280,31 @@
 				}
 			}
 
+			let coverPaths = matchedFiles
+				.filter((f): f is FileEntry => f !== null)
+				.map((f) => f.relative_path);
+
 			if (renameFiles && filesToRename.length > 0) {
 				await saveAllEdits();
 				try {
-					await executeRenames(
+					const renameResults = await executeRenames(
 						filesToRename.map((f) => ({ id: f.id, path: f.path })),
 						'%track% - %title%'
 					);
+					const renameMap = new Map<string, string>();
+					for (const res of renameResults) {
+						if (res.status === 'ok') {
+							const file = matchedFiles.find((f) => f?.id === res.id);
+							if (file) {
+								const lastSlash = file.relative_path.lastIndexOf('/');
+								const dir = lastSlash !== -1 ? file.relative_path.substring(0, lastSlash + 1) : '';
+								renameMap.set(res.id, dir + res.new_name);
+							}
+						}
+					}
+					coverPaths = matchedFiles
+						.filter((f): f is FileEntry => f !== null)
+						.map((f) => renameMap.get(f.id) || f.relative_path);
 				} catch (err) {
 					console.error('Rename failed:', err);
 				}
@@ -294,11 +312,8 @@
 
 			onClose();
 
-			// Embed cover art in background after modal closes (paths still valid since rename already happened)
+			// Embed cover art in background after modal closes
 			if (selectedRelease?.cover_art_url) {
-				const coverPaths = matchedFiles
-					.filter((f): f is FileEntry => f !== null)
-					.map((f) => f.relative_path);
 				if (coverPaths.length > 0) {
 					embedCoverArtFromUrl(selectedRelease.cover_art_url, coverPaths)
 						.then(() => bumpCoverArt())

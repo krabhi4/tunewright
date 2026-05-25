@@ -552,6 +552,6 @@ mod tests {
             field: "BPM".to_string(),
         };
         action.apply(&mut tags, &ctx(0));
-        assert!(tags.extra.get("BPM").is_none());
+        assert!(!tags.extra.contains_key("BPM"));
     }
 }

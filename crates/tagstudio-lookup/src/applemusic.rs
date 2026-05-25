@@ -2,7 +2,7 @@ use crate::types::{LookupSource, ReleaseDetail, ReleaseSearchResult, TrackInfo};
 use reqwest::Client;
 use serde::Deserialize;
 
-const USER_AGENT: &str = "Mozilla/5.0 (compatible; TagStudio/0.4.0)";
+const USER_AGENT: &str = "Mozilla/5.0 (compatible; TagStudio/0.4.1)";
 
 #[derive(Debug, Deserialize)]
 struct AppleSearchResponse {

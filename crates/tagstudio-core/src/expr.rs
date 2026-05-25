@@ -532,7 +532,7 @@ fn bool_to_string(b: bool) -> String {
 mod tests {
     use super::*;
 
-    fn make_ctx(tags: &TagData) -> ExprContext {
+    fn make_ctx(tags: &TagData) -> ExprContext<'_> {
         ExprContext::new(tags)
     }
 

@@ -2,6 +2,14 @@
 
 All notable changes to TagStudio are documented here.
 
+## [0.4.1] — 2026-05-26
+
+### Fixed
+
+- **Apple Music Artwork Support** — Allowed downloading and embedding album cover art from Apple Music hosts (`mzstatic.com` and its subdomains) in the backend security policies.
+- **MusicBrainz Artwork Loading** — Automatically upgraded retrieved MusicBrainz cover art archive URLs from HTTP to HTTPS, resolving browser Mixed Content blocking when the app runs in secure contexts.
+- **Renamed File Cover Art Embedding** — Fixed an issue where executing a file rename during metadata confirmation caused subsequent cover art embedding to fail due to stale file path targets.
+
 ## [0.4.0] — 2026-05-25
 
 ### Added

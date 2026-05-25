@@ -4,7 +4,7 @@ use serde::Deserialize;
 use std::collections::HashMap;
 
 const MB_BASE: &str = "https://musicbrainz.org/ws/2";
-const USER_AGENT: &str = "TagStudio/0.4.0 (https://github.com/tagstudio)";
+const USER_AGENT: &str = "TagStudio/0.4.1 (https://github.com/tagstudio)";
 
 // CoverArtArchive JSON API types
 #[derive(Debug, Deserialize)]
@@ -38,14 +38,21 @@ async fn fetch_cover_art_url(client: &Client, mbid: &str) -> Option<String> {
     let front = caa.images.iter().find(|img| img.front)?;
 
     // Prefer 500px thumbnail, fall back to 250, then full image
-    front
+    let raw_url = front
         .thumbnails
         .get("500")
         .or_else(|| front.thumbnails.get("large"))
         .or_else(|| front.thumbnails.get("250"))
         .or_else(|| front.thumbnails.get("small"))
         .cloned()
-        .or_else(|| Some(front.image.clone()))
+        .or_else(|| Some(front.image.clone()))?;
+
+    // Upgrade http to https to avoid browser Mixed Content blocking
+    if raw_url.starts_with("http://") {
+        Some(raw_url.replacen("http://", "https://", 1))
+    } else {
+        Some(raw_url)
+    }
 }
 
 #[derive(Debug, Deserialize)]
