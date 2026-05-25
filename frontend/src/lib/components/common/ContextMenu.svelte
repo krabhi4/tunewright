@@ -60,13 +60,15 @@
 
 <!-- svelte-ignore a11y_click_events_have_key_events -->
 <div class="context-backdrop" role="presentation" onclick={onClose}></div>
-<!-- svelte-ignore a11y_interactive_supports_focus a11y_click_events_have_key_events -->
+<!-- svelte-ignore a11y_no_static_element_interactions a11y_no_noninteractive_element_interactions a11y_click_events_have_key_events a11y_interactive_supports_focus -->
 <div
 	class="context-menu"
 	role="menu"
+	tabindex={-1}
 	bind:this={menuEl}
 	style="left: {x}px; top: {y}px"
 	onclick={(e) => e.stopPropagation()}
+	onkeydown={(e) => e.stopPropagation()}
 >
 	{#each items as item}
 		{#if item.separator}
