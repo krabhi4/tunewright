@@ -2,6 +2,30 @@
 
 All notable changes to TagStudio are documented here.
 
+## [0.3.0] — 2026-05-25
+
+### Added
+
+- **Sage & Stone Theme System** — Dynamic theme system that avoids generic AI gradient palettes. Dark Mode features a deep warm graphite base with organic sage green accents, and Light Mode features a sand-linen off-white base with deep forest green accents.
+- **Dynamic System Preference Detection** — Detects user's OS dark/light mode preference dynamically via media query listeners, falling back to system preference by default if no override exists.
+- **Theme Switcher** — Inline theme toggle switch (sun/moon SVG) in the main toolbar.
+- **Plus Jakarta Sans Typography** — Replaced default font stack with a clean, premium, modern typeface.
+- **Modern Brand Identity** — Custom "Tag & Waveform" SVG logo replacing placeholder assets on setup/auth screens.
+- **Theme-Aware SVG Favicon** — Favicon dynamically adapts to system dark/light modes.
+- **Advanced Expression Engine** — Nested recursive descent parser supporting `%variable%` placeholders and `$function(arg1, arg2)` format strings with 30+ string, math, logic, and field manipulation functions.
+- **Filename-to-Tag Parser** — Extract metadata from files using custom filename pattern templates with interactive live preview.
+- **Actions & Batch Processing** — Actions builder to chain operations (CaseConversion, Replace, FormatValue, SetField, RemoveField, RemoveAllExcept, AutoNumber, SplitField, MergeFields, TrimField) on multiple selected files with draggable order.
+
+### Changed
+
+- Updated core request/fetch User Agents to specify TagStudio/0.3.0.
+
+### Fixed
+
+- **Reactive Route Guarding** — Svelte 5 `$effect`-based checks prevent authenticated users from navigating back to setup or auth pages.
+- **Session Persistence** — Disabled global server-side rendering (SSR) in the frontend adapter to prevent hydration mismatches and ensure persistent browser cookie authentication.
+- Fixed modal layouts and cover art lookup API response behavior.
+
 ## [0.2.0] — 2026-03-20
 
 ### Added
