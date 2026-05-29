@@ -1,6 +1,6 @@
 <script lang="ts">
 	import UserMenu from './UserMenu.svelte';
-	import { theme, toggleTheme } from '$lib/stores/theme';
+	import { themeMode, toggleTheme } from '$lib/stores/theme';
 
 	interface Props {
 		onOpenFolder: () => void;
@@ -66,7 +66,7 @@
 	</div>
 
 	<button class="toolbar-btn theme-toggle-btn" onclick={toggleTheme} title="Switch Dark/Light Theme" aria-label="Toggle theme">
-		{#if $theme === 'dark'}
+		{#if $themeMode === 'dark'}
 			<!-- Sun Icon -->
 			<svg class="toolbar-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
 				<circle cx="12" cy="12" r="5"></circle>
