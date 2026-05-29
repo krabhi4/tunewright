@@ -1,6 +1,6 @@
 <script lang="ts">
-	import { selectedCount, selectedFiles } from '$lib/stores/files';
-	import { selectedTags, KEEP_VALUE, setPendingEdit, mergedTags } from '$lib/stores/tags';
+	import { selectedCount, selectedFiles, selectedIds } from '$lib/stores/files';
+	import { selectedTags, KEEP_VALUE, setPendingEdit, mergedTags, pendingEdits } from '$lib/stores/tags';
 	import { getCoverArtUrl, uploadCoverArt } from '$lib/api/coverart';
 	import { coverArtVersion } from '$lib/stores/ui';
 
@@ -100,6 +100,16 @@
 		return fieldValue(key) === KEEP_VALUE;
 	}
 
+	function isEdited(key: string): boolean {
+		const edits = $pendingEdits;
+		const ids = $selectedIds;
+		for (const id of ids) {
+			const fileEdits = edits.get(id);
+			if (fileEdits && Object.prototype.hasOwnProperty.call(fileEdits, key)) return true;
+		}
+		return false;
+	}
+
 	function handleInput(key: string, e: Event) {
 		const target = e.target as HTMLInputElement;
 		const val = target.value;
@@ -135,9 +145,10 @@
 						id="tag-{field.key}"
 						class="field-input"
 						class:keep={isKeep(field.key)}
+						class:edited={isEdited(field.key)}
 						type="text"
 						value={isKeep(field.key) ? '' : fieldValue(field.key)}
-						placeholder={isKeep(field.key) ? KEEP_VALUE : '—'}
+						placeholder={isKeep(field.key) ? '‹ keep ›' : '—'}
 						onchange={(e) => handleInput(field.key, e)}
 					/>
 				</div>
@@ -273,13 +284,18 @@
 		box-shadow: 0 0 0 1px var(--accent);
 	}
 
+	.field-input.edited {
+		border-left: 2px solid var(--state-dirty);
+		color: var(--state-dirty);
+	}
+
 	.field-input.keep {
-		color: var(--text-placeholder);
+		color: var(--text-muted);
 		font-style: italic;
 	}
 
 	.field-input.keep::placeholder {
-		color: var(--text-placeholder);
+		color: var(--text-muted);
 		font-style: italic;
 	}
 
