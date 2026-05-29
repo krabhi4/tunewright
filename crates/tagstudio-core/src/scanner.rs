@@ -73,13 +73,28 @@ pub fn scan_directory(
             None => continue,
         };
 
-        let relative = match path.canonicalize().ok().and_then(|p| {
-            p.strip_prefix(&root_canonical)
+        // `dir` is already canonical (from resolve_safe_path), so for a regular
+        // file `path` is canonical too and we can strip the root prefix directly,
+        // avoiding a canonicalize() syscall per file. Symlinks still get resolved
+        // so their target is re-checked against the root.
+        let is_symlink = metadata
+            .as_ref()
+            .map(|m| m.file_type().is_symlink())
+            .unwrap_or(false);
+        let relative = if is_symlink {
+            match path
+                .canonicalize()
                 .ok()
-                .map(|r| r.to_path_buf())
-        }) {
-            Some(r) => r,
-            None => continue, // skip files that can't be resolved (broken symlinks, etc.)
+                .and_then(|p| p.strip_prefix(&root_canonical).ok().map(|r| r.to_path_buf()))
+            {
+                Some(r) => r,
+                None => continue, // skip symlinks that resolve outside root / are broken
+            }
+        } else {
+            match path.strip_prefix(&root_canonical) {
+                Ok(r) => r.to_path_buf(),
+                Err(_) => continue,
+            }
         };
 
         let relative_str = relative.to_string_lossy().to_string();
@@ -110,6 +125,7 @@ pub fn scan_directory(
             filename,
             relative_path: relative_str,
             format,
+            format_label: format.display_name().to_string(),
             size,
             duration_secs: None,
             has_cover: false,

@@ -12,6 +12,9 @@ export const pendingEdits = writable<Map<string, Partial<TagData>>>(new Map());
 // Whether we have unsaved changes
 export const hasPendingEdits = derived(pendingEdits, ($pe) => $pe.size > 0);
 
+// Number of files with unsaved edits
+export const pendingEditCount = derived(pendingEdits, ($pe) => $pe.size);
+
 // Merged view: loaded + pending overlay
 export const mergedTags = derived([loadedTags, pendingEdits], ([$loaded, $pending]) => {
 	const result = new Map<string, TagData>();

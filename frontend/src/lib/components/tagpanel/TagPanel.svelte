@@ -2,7 +2,7 @@
 	import { selectedCount, selectedFiles, selectedIds } from '$lib/stores/files';
 	import { selectedTags, KEEP_VALUE, setPendingEdit, mergedTags, pendingEdits } from '$lib/stores/tags';
 	import { getCoverArtUrl, uploadCoverArt } from '$lib/api/coverart';
-	import { coverArtVersion } from '$lib/stores/ui';
+	import { coverArtVersion, bumpCoverArt } from '$lib/stores/ui';
 
 	let coverArtError = $state(false);
 	let dragOver = $state(false);
@@ -18,8 +18,8 @@
 				await uploadCoverArt(file.relative_path, blob);
 			}
 			coverArtError = false;
-			// Force cover art refresh by toggling the URL
-			coverArtRefreshKey++;
+			// Force cover art refresh across components by bumping the global version
+			bumpCoverArt();
 		} catch (err) {
 			console.error('Failed to upload cover art:', err);
 		} finally {
@@ -59,20 +59,18 @@
 		}
 	}
 
-	let coverArtRefreshKey = $state(0);
-
-	// Get cover art URL for first selected file (check tags for has_cover)
+	// Get cover art URL for first selected file (check tags for has_cover).
+	// Once any cover art has changed this session ($coverArtVersion > 0) we
+	// optimistically try to load, since has_cover from the listing can be stale.
 	let coverArtUrl = $derived.by(() => {
 		const files = $selectedFiles;
-		const _refresh = coverArtRefreshKey;
-		const _version = $coverArtVersion; // react to global cover art changes
-		const key = _refresh + _version;
+		const version = $coverArtVersion;
 		if (files.length === 0) return null;
 		const first = files[0];
 		const tags = $mergedTags.get(first.id);
-		if (!tags?.has_cover && !first.has_cover && key === 0) return null;
+		if (!tags?.has_cover && !first.has_cover && version === 0) return null;
 		coverArtError = false;
-		return getCoverArtUrl(first.relative_path, 250) + `&_=${key}`;
+		return getCoverArtUrl(first.relative_path, 250) + `&_=${version}`;
 	});
 
 	const fields = [

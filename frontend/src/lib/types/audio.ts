@@ -5,6 +5,8 @@ export interface FileEntry {
 	filename: string;
 	relative_path: string;
 	format: AudioFormat;
+	/** Human-readable format label (e.g. "M4A"), provided by the server. */
+	format_label: string;
 	size: number;
 	duration_secs: number | null;
 	has_cover: boolean;

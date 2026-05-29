@@ -17,6 +17,8 @@ export interface RenameResult {
 	status: string;
 	old_name: string;
 	new_name: string;
+	/** Relative path of the file after the rename (new location on success). */
+	new_relative_path: string;
 	error?: string;
 }
 

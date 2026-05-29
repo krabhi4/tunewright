@@ -18,16 +18,3 @@ export function formatSize(bytes: number): string {
 	if (bytes < 1024 * 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 	return `${(bytes / (1024 * 1024 * 1024)).toFixed(2)} GB`;
 }
-
-export function formatFormatLabel(format: string): string {
-	const labels: Record<string, string> = {
-		mp3: 'MP3',
-		flac: 'FLAC',
-		mp4: 'M4A',
-		ogg: 'OGG',
-		opus: 'Opus',
-		wav: 'WAV',
-		aiff: 'AIFF'
-	};
-	return labels[format] ?? format.toUpperCase();
-}

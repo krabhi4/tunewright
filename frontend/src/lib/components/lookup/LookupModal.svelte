@@ -2,9 +2,9 @@
 	import Modal from '$lib/components/common/Modal.svelte';
 	import type { FileEntry } from '$lib/types/audio';
 	import { searchMusicBrainz, getMusicBrainzRelease, searchAppleMusic, getAppleMusicRelease } from '$lib/api/lookup';
-	import type { ReleaseSearchResult, ReleaseDetail, TrackInfo } from '$lib/api/lookup';
-	import { setPendingEdit, pendingEdits, mergedTags, saveAllEdits, KEEP_VALUE } from '$lib/stores/tags';
-	import { executeRenames } from '$lib/api/rename';
+	import type { ReleaseSearchResult, ReleaseDetail } from '$lib/api/lookup';
+	import { mergedTags, KEEP_VALUE } from '$lib/stores/tags';
+	import { applyReleaseToFiles } from '$lib/services/applyRelease';
 	import { embedCoverArtFromUrl } from '$lib/api/coverart';
 	import { bumpCoverArt } from '$lib/stores/ui';
 	import { selectedIds, files } from '$lib/stores/files';
@@ -176,9 +176,10 @@
 
 		if (dragSourceIdx !== null && dragSourceIdx !== targetIdx) {
 			// Swap two matched slots
-			const temp = matchedFiles[targetIdx];
-			matchedFiles[targetIdx] = matchedFiles[dragSourceIdx];
-			matchedFiles[dragSourceIdx] = temp;
+			[matchedFiles[targetIdx], matchedFiles[dragSourceIdx]] = [
+				matchedFiles[dragSourceIdx],
+				matchedFiles[targetIdx]
+			];
 			matchedFiles = [...matchedFiles];
 		} else if (dragFromUnmatched !== null) {
 			// Move from unmatched into a matched slot
@@ -247,75 +248,18 @@
 		if (!selectedRelease) return;
 		applying = true;
 		try {
-			const tracks = selectedRelease.tracks;
-			const filesToRename: { id: string; path: string; track: TrackInfo }[] = [];
-
-			for (let i = 0; i < tracks.length; i++) {
-				const file = matchedFiles[i];
-				if (!file) continue;
-
-				const track = tracks[i];
-
-				pendingEdits.update((map) => {
-					const next = new Map(map);
-					const existing = next.get(file.id) || {};
-					next.set(file.id, {
-						...existing,
-						title: track.title,
-						track_number: track.position,
-						album: selectedRelease!.title,
-						album_artist: selectedRelease!.artist,
-						...(selectedRelease!.year ? { year: selectedRelease!.year } : {}),
-						...(selectedRelease!.genre ? { genre: selectedRelease!.genre } : {}),
-						...(track.artist ? { artist: track.artist } : { artist: selectedRelease!.artist })
-					});
-					return next;
-				});
-
-				if (renameFiles) {
-					filesToRename.push({ id: file.id, path: file.relative_path, track });
-				}
-			}
-
-			let coverPaths = matchedFiles
-				.filter((f): f is FileEntry => f !== null)
-				.map((f) => f.relative_path);
-
-			if (renameFiles && filesToRename.length > 0) {
-				await saveAllEdits();
-				try {
-					const renameResults = await executeRenames(
-						filesToRename.map((f) => ({ id: f.id, path: f.path })),
-						'%track% - %title%'
-					);
-					const renameMap = new Map<string, string>();
-					for (const res of renameResults) {
-						if (res.status === 'ok') {
-							const file = matchedFiles.find((f) => f?.id === res.id);
-							if (file) {
-								const lastSlash = file.relative_path.lastIndexOf('/');
-								const dir = lastSlash !== -1 ? file.relative_path.substring(0, lastSlash + 1) : '';
-								renameMap.set(res.id, dir + res.new_name);
-							}
-						}
-					}
-					coverPaths = matchedFiles
-						.filter((f): f is FileEntry => f !== null)
-						.map((f) => renameMap.get(f.id) || f.relative_path);
-				} catch (err) {
-					console.error('Rename failed:', err);
-				}
-			}
+			const coverArtUrl = selectedRelease.cover_art_url;
+			const coverPaths = await applyReleaseToFiles(selectedRelease, matchedFiles, {
+				rename: renameFiles
+			});
 
 			onClose();
 
-			// Embed cover art in background after modal closes
-			if (selectedRelease?.cover_art_url) {
-				if (coverPaths.length > 0) {
-					embedCoverArtFromUrl(selectedRelease.cover_art_url, coverPaths)
-						.then(() => bumpCoverArt())
-						.catch((err) => console.error('Cover art embed failed:', err));
-				}
+			// Embed cover art in the background after the modal closes
+			if (coverArtUrl && coverPaths.length > 0) {
+				embedCoverArtFromUrl(coverArtUrl, coverPaths)
+					.then(() => bumpCoverArt())
+					.catch((err) => console.error('Cover art embed failed:', err));
 			}
 		} catch (err) {
 			console.error('Apply failed:', err);

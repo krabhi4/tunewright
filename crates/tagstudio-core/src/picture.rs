@@ -1,6 +1,6 @@
 use crate::types::TagStudioError;
 use image::imageops::FilterType;
-use lofty::config::WriteOptions;
+use lofty::config::{ParseOptions, WriteOptions};
 use lofty::file::{AudioFile, TaggedFileExt};
 use lofty::picture::{MimeType, Picture, PictureType};
 use lofty::probe::Probe;
@@ -9,8 +9,10 @@ use std::path::Path;
 
 /// Extract the first embedded cover art from an audio file
 pub fn extract_cover_art(path: &Path) -> Result<Option<(Vec<u8>, String)>, TagStudioError> {
+    // We only want the cover picture, not audio properties — skip parsing those.
     let tagged = Probe::open(path)
         .map_err(|e| TagStudioError::TagReadError(format!("{}: {}", path.display(), e)))?
+        .options(ParseOptions::new().read_properties(false))
         .read()
         .map_err(|e| TagStudioError::TagReadError(format!("{}: {}", path.display(), e)))?;
 

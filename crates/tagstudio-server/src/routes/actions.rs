@@ -1,10 +1,11 @@
 use axum::extract::State;
 use axum::Json;
 use serde::{Deserialize, Serialize};
+use rayon::prelude::*;
 use tagstudio_core::actions::{Action, ActionContext};
 use tagstudio_core::audio;
 use tagstudio_core::scanner;
-use tagstudio_core::types::{TagWriteChanges, WriteResult};
+use tagstudio_core::types::{TagData, TagWriteChanges, WriteResult};
 
 use crate::error::{join_error, AppError};
 use crate::state::AppState;
@@ -49,28 +50,37 @@ pub async fn execute(
     let results = tokio::task::spawn_blocking(move || {
         let valid_files = safe_file_entries(&data_root, body.files);
 
-        let mut results = Vec::new();
+        // Reads are independent, so run them in parallel. Apply + write stays
+        // serial (matching audio::batch_write_tags) so write ordering is unchanged.
+        let reads: Vec<Result<TagData, String>> = valid_files
+            .par_iter()
+            .map(|(_, rel_path)| {
+                audio::read_tags_fast(&data_root.join(rel_path))
+                    .map_err(|e| format!("Read failed: {e}"))
+            })
+            .collect();
 
-        for (i, (id, rel_path)) in valid_files.iter().enumerate() {
+        let mut results = Vec::with_capacity(valid_files.len());
+
+        for (i, ((id, rel_path), read)) in valid_files.iter().zip(reads).enumerate() {
+            let mut tags = match read {
+                Ok(t) => t,
+                Err(e) => {
+                    results.push(WriteResult {
+                        id: id.clone(),
+                        status: "error".to_string(),
+                        error: Some(e),
+                    });
+                    continue;
+                }
+            };
+
             let full_path = data_root.join(rel_path);
             let filename = full_path
                 .file_stem()
                 .unwrap_or_default()
                 .to_string_lossy()
                 .to_string();
-
-            // Read current tags
-            let mut tags = match audio::read_tags_fast(&full_path) {
-                Ok(t) => t,
-                Err(e) => {
-                    results.push(WriteResult {
-                        id: id.clone(),
-                        status: "error".to_string(),
-                        error: Some(format!("Read failed: {e}")),
-                    });
-                    continue;
-                }
-            };
 
             // Apply all actions in sequence
             let ctx = ActionContext { index: i, filename };
@@ -81,20 +91,16 @@ pub async fn execute(
             // Write modified tags back
             let changes = TagWriteChanges::from(&tags);
             match audio::write_tags(&full_path, &changes) {
-                Ok(()) => {
-                    results.push(WriteResult {
-                        id: id.clone(),
-                        status: "ok".to_string(),
-                        error: None,
-                    });
-                }
-                Err(e) => {
-                    results.push(WriteResult {
-                        id: id.clone(),
-                        status: "error".to_string(),
-                        error: Some(e.to_string()),
-                    });
-                }
+                Ok(()) => results.push(WriteResult {
+                    id: id.clone(),
+                    status: "ok".to_string(),
+                    error: None,
+                }),
+                Err(e) => results.push(WriteResult {
+                    id: id.clone(),
+                    status: "error".to_string(),
+                    error: Some(e.to_string()),
+                }),
             }
         }
 

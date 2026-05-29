@@ -18,6 +18,7 @@ reqwest = { version = "0.12", features = ["json"] }
 tracing = { workspace = true }
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 rand = "0.9"
+rayon = "1.10"
 hex = "0.4"
 argon2 = "0.5"
 uuid = { version = "1", features = ["v4"] }

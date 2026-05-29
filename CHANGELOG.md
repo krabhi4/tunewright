@@ -2,6 +2,37 @@
 
 All notable changes to TagStudio are documented here.
 
+## [0.5.0] - 2026-05-29
+
+### Added
+
+- **Console Theme System** - New two-axis theme model (theme family plus light/dark mode) driven by a central design-token contract. Ships the "Console" theme in both dark and light, replacing the previous Sage & Stone palette, with automatic migration from the old single-key theme storage.
+- **Self-Hosted Typography** - Bundled IBM Plex Sans and IBM Plex Mono locally, replacing Plus Jakarta Sans and removing all external font CDN requests.
+- **Vendored Icon Set** - Local SVG icon set, core glyphs, and a new wordmark/logo, removing external icon and placeholder assets.
+- **Instrument-Style Status Bar** - Reworked status bar with semantic file, selection, and edit counts.
+- **Test Harness** - Added a Vitest suite covering theme resolution, the design-token contract, and a guard against reintroducing generic "AI-slop" visual tells.
+
+### Changed
+
+- **Semantic Dirty State** - Edited grid rows now carry a dirty-state indicator, edited tag-panel fields use an amber treatment, and `< keep >` placeholders are muted.
+- **Redesigned Favicon** - New theme-aware favicon.
+- Updated user agent versioning to `TagStudio/0.5.0`.
+- Removed dead Google Fonts links and unused toolbar selectors.
+
+### Performance
+
+- **Pooled HTTP Client** - Lookup requests (MusicBrainz / Apple Music) now reuse a single connection-pooled client instead of constructing one per request.
+- **Concurrent Release Fetch** - MusicBrainz release detail and its cover-art URL are fetched concurrently, saving a round-trip.
+- **Parallel Tag Reads** - Batch rename and batch actions read tags in parallel across cores (writes stay serial).
+- **Cheaper Directory Scans** - Listing a folder no longer issues a `canonicalize()` syscall per file; cover-art extraction skips decoding audio properties.
+- **Frontend Hot Paths** - File lookups are O(1) via an id-indexed store, the grid precomputes sort keys and does one tag lookup per row, and the tag panel computes per-field state once per render.
+
+### Internal
+
+- **Server-Provided Format Labels** - Format display labels (e.g. "M4A") now come from the server as the single source of truth.
+- **Rename Path In Responses** - Rename results include the post-rename relative path so clients no longer reconstruct it.
+- Broad deduplication and simplification across the lookup providers, server routes, auth, and frontend stores and components.
+
 ## [0.4.1] — 2026-05-26
 
 ### Fixed

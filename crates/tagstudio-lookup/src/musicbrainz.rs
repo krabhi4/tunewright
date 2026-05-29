@@ -1,11 +1,12 @@
-use crate::extract_year;
 use crate::types::{LookupSource, ReleaseDetail, ReleaseSearchResult, TrackInfo};
+use crate::{extract_year, get_json};
 use reqwest::Client;
 use serde::Deserialize;
 use std::collections::HashMap;
 
 const MB_BASE: &str = "https://musicbrainz.org/ws/2";
-const USER_AGENT: &str = "TagStudio/0.4.1 (https://github.com/tagstudio)";
+const USER_AGENT: &str = "TagStudio/0.5.0 (https://github.com/tagstudio)";
+const MB_HEADERS: &[(&str, &str)] = &[("User-Agent", USER_AGENT), ("Accept", "application/json")];
 
 // CoverArtArchive JSON API types
 #[derive(Debug, Deserialize)]
@@ -125,22 +126,7 @@ pub async fn search_releases(
         MB_BASE, encoded_query
     );
 
-    let resp = client
-        .get(&url)
-        .header("User-Agent", USER_AGENT)
-        .header("Accept", "application/json")
-        .send()
-        .await
-        .map_err(|e| format!("MusicBrainz request failed: {}", e))?;
-
-    if !resp.status().is_success() {
-        return Err(format!("MusicBrainz returned {}", resp.status()));
-    }
-
-    let body: MbSearchResponse = resp
-        .json()
-        .await
-        .map_err(|e| format!("Failed to parse response: {}", e))?;
+    let body: MbSearchResponse = get_json(client, &url, MB_HEADERS, "MusicBrainz").await?;
 
     let results = body
         .releases
@@ -177,25 +163,10 @@ pub async fn get_release(client: &Client, mbid: &str) -> Result<ReleaseDetail, S
 
     // The release body (MusicBrainz) and the cover art URL (CoverArtArchive, a
     // separate host) are independent, so fetch them concurrently to save a round-trip.
-    let release_fut = async {
-        let resp = client
-            .get(&url)
-            .header("User-Agent", USER_AGENT)
-            .header("Accept", "application/json")
-            .send()
-            .await
-            .map_err(|e| format!("MusicBrainz request failed: {}", e))?;
-
-        if !resp.status().is_success() {
-            return Err(format!("MusicBrainz returned {}", resp.status()));
-        }
-
-        resp.json::<MbReleaseDetail>()
-            .await
-            .map_err(|e| format!("Failed to parse release: {}", e))
-    };
-
-    let (detail, cover_art_url) = tokio::join!(release_fut, fetch_cover_art_url(client, mbid));
+    let (detail, cover_art_url) = tokio::join!(
+        get_json::<MbReleaseDetail>(client, &url, MB_HEADERS, "MusicBrainz"),
+        fetch_cover_art_url(client, mbid)
+    );
     let detail = detail?;
 
     let tracks: Vec<TrackInfo> = detail

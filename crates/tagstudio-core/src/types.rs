@@ -49,6 +49,9 @@ pub struct FileEntry {
     pub filename: String,
     pub relative_path: String,
     pub format: AudioFormat,
+    /// Human-readable format label (e.g. "M4A"); the single source of truth is
+    /// `AudioFormat::display_name`, sent to clients so they don't re-map it.
+    pub format_label: String,
     pub size: u64,
     pub duration_secs: Option<f64>,
     pub has_cover: bool,

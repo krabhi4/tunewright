@@ -53,6 +53,38 @@ fn create_session_response(
         .into_response()
 }
 
+// --- New-account credential validation + hashing (shared by setup/register) ---
+
+/// Normalize and validate a new account's username/password, then hash the
+/// password. On failure returns the user-facing error `Response` to send back.
+async fn validate_and_hash(username: &str, password: &str) -> Result<(String, String), Response> {
+    let username = username.trim().to_lowercase();
+    if username.is_empty() {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({ "error": "Username cannot be empty" })),
+        )
+            .into_response());
+    }
+    if password.len() < 8 {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({ "error": "Password must be at least 8 characters" })),
+        )
+            .into_response());
+    }
+
+    let password = password.to_string();
+    match tokio::task::spawn_blocking(move || users::hash_password(&password)).await {
+        Ok(Ok(hash)) => Ok((username, hash)),
+        _ => Err((
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({ "error": "Failed to hash password" })),
+        )
+            .into_response()),
+    }
+}
+
 // --- Setup: first user becomes super admin ---
 
 #[derive(Deserialize)]
@@ -62,32 +94,9 @@ pub struct SetupRequest {
 }
 
 pub async fn setup(State(state): State<AppState>, Json(body): Json<SetupRequest>) -> Response {
-    let username = body.username.trim().to_lowercase();
-    if username.is_empty() {
-        return (
-            StatusCode::BAD_REQUEST,
-            Json(serde_json::json!({ "error": "Username cannot be empty" })),
-        )
-            .into_response();
-    }
-    if body.password.len() < 8 {
-        return (
-            StatusCode::BAD_REQUEST,
-            Json(serde_json::json!({ "error": "Password must be at least 8 characters" })),
-        )
-            .into_response();
-    }
-
-    let password = body.password.clone();
-    let hash = match tokio::task::spawn_blocking(move || users::hash_password(&password)).await {
-        Ok(Ok(h)) => h,
-        _ => {
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(serde_json::json!({ "error": "Failed to hash password" })),
-            )
-                .into_response();
-        }
+    let (username, hash) = match validate_and_hash(&body.username, &body.password).await {
+        Ok(ok) => ok,
+        Err(resp) => return resp,
     };
 
     match state.users.add_first_user(&username, hash) {
@@ -230,32 +239,9 @@ pub async fn register(
     State(state): State<AppState>,
     Json(body): Json<RegisterRequest>,
 ) -> Response {
-    let username = body.username.trim().to_lowercase();
-    if username.is_empty() {
-        return (
-            StatusCode::BAD_REQUEST,
-            Json(serde_json::json!({ "error": "Username cannot be empty" })),
-        )
-            .into_response();
-    }
-    if body.password.len() < 8 {
-        return (
-            StatusCode::BAD_REQUEST,
-            Json(serde_json::json!({ "error": "Password must be at least 8 characters" })),
-        )
-            .into_response();
-    }
-
-    let password = body.password.clone();
-    let hash = match tokio::task::spawn_blocking(move || users::hash_password(&password)).await {
-        Ok(Ok(h)) => h,
-        _ => {
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(serde_json::json!({ "error": "Failed to hash password" })),
-            )
-                .into_response();
-        }
+    let (username, hash) = match validate_and_hash(&body.username, &body.password).await {
+        Ok(ok) => ok,
+        Err(resp) => return resp,
     };
 
     match state

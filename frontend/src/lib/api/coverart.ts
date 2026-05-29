@@ -22,13 +22,7 @@ export async function uploadCoverArt(relativePath: string, imageData: Blob): Pro
 	form.append('path', relativePath);
 	form.append('image', imageData);
 
-	const res = await fetch(`${BASE}/coverart`, {
-		method: 'POST',
-		body: form
-	});
-
-	if (!res.ok) {
-		const body = await res.json().catch(() => ({ error: res.statusText }));
-		throw new Error(body.error || res.statusText);
-	}
+	// apiFetch detects the FormData body (skips the JSON header) and gives us
+	// the shared 401-redirect + error handling.
+	await apiFetch<void>('/coverart', { method: 'POST', body: form });
 }

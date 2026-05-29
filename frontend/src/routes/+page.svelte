@@ -27,7 +27,7 @@
 		fetchTagsForFiles,
 		hasPendingEdits,
 		saveAllEdits,
-		pendingEdits
+		pendingEditCount
 	} from '$lib/stores/tags';
 	import { selectedIds } from '$lib/stores/files';
 	import { onMount } from 'svelte';
@@ -200,11 +200,16 @@
 		document.addEventListener('mouseup', onUp);
 	}
 
-	let totalDuration = $derived(
-		$files.reduce((sum, f) => sum + (f.duration_secs ?? 0), 0)
-	);
-	let totalSize = $derived($files.reduce((sum, f) => sum + f.size, 0));
-	let modifiedCount = $derived($pendingEdits.size);
+	// Single pass over the file list for both aggregates.
+	let totals = $derived.by(() => {
+		let duration = 0;
+		let size = 0;
+		for (const f of $files) {
+			duration += f.duration_secs ?? 0;
+			size += f.size;
+		}
+		return { duration, size };
+	});
 
 	function handleKeydown(e: KeyboardEvent) {
 		if (e.key === 'F3') {
@@ -285,9 +290,9 @@
 <StatusBar
 	fileCount={$totalCount}
 	selectedCount={$selectedCount}
-	{totalDuration}
-	{totalSize}
-	{modifiedCount}
+	totalDuration={totals.duration}
+	totalSize={totals.size}
+	modifiedCount={$pendingEditCount}
 />
 
 <FolderPicker

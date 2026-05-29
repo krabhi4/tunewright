@@ -1,9 +1,10 @@
-use crate::extract_year;
 use crate::types::{LookupSource, ReleaseDetail, ReleaseSearchResult, TrackInfo};
+use crate::{extract_year, get_json};
 use reqwest::Client;
 use serde::Deserialize;
 
-const USER_AGENT: &str = "Mozilla/5.0 (compatible; TagStudio/0.4.1)";
+const USER_AGENT: &str = "Mozilla/5.0 (compatible; TagStudio/0.5.0)";
+const APPLE_HEADERS: &[(&str, &str)] = &[("User-Agent", USER_AGENT)];
 
 #[derive(Debug, Deserialize)]
 struct AppleSearchResponse {
@@ -70,21 +71,7 @@ pub async fn search_releases(
         encoded_query
     );
 
-    let resp = client
-        .get(&url)
-        .header("User-Agent", USER_AGENT)
-        .send()
-        .await
-        .map_err(|e| format!("Apple Music request failed: {}", e))?;
-
-    if !resp.status().is_success() {
-        return Err(format!("Apple Music returned {}", resp.status()));
-    }
-
-    let body: AppleSearchResponse = resp
-        .json()
-        .await
-        .map_err(|e| format!("Failed to parse response: {}", e))?;
+    let body: AppleSearchResponse = get_json(client, &url, APPLE_HEADERS, "Apple Music").await?;
 
     let results = body
         .results
@@ -112,21 +99,7 @@ pub async fn get_release(client: &Client, id: &str) -> Result<ReleaseDetail, Str
 
     let url = format!("https://itunes.apple.com/lookup?id={}&entity=song", id);
 
-    let resp = client
-        .get(&url)
-        .header("User-Agent", USER_AGENT)
-        .send()
-        .await
-        .map_err(|e| format!("Apple Music request failed: {}", e))?;
-
-    if !resp.status().is_success() {
-        return Err(format!("Apple Music returned {}", resp.status()));
-    }
-
-    let body: AppleLookupResponse = resp
-        .json()
-        .await
-        .map_err(|e| format!("Failed to parse release detail: {}", e))?;
+    let body: AppleLookupResponse = get_json(client, &url, APPLE_HEADERS, "Apple Music").await?;
 
     // Find the collection (album wrapper) result
     let collection = body

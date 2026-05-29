@@ -1,6 +1,6 @@
 <script lang="ts">
 	import type { FileEntry, TagData } from '$lib/types/audio';
-	import { formatDuration, formatSize, formatFormatLabel } from '$lib/utils/format';
+	import { formatDuration, formatSize } from '$lib/utils/format';
 	import {
 		selectedIds,
 		focusedId,
@@ -88,7 +88,7 @@
 			case 'filename':
 				return file.filename;
 			case 'format':
-				return formatFormatLabel(file.format);
+				return file.format_label;
 			case 'duration':
 				return formatDuration(tags?.duration_secs ?? file.duration_secs);
 			case 'size':

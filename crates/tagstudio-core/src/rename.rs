@@ -1,6 +1,7 @@
 use crate::audio;
 use crate::format_string;
 use crate::types::TagStudioError;
+use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 use std::path::Path;
@@ -19,38 +20,46 @@ pub fn preview_renames(
     files: &[(String, String)], // (id, relative_path)
     format: &str,
 ) -> Result<Vec<RenamePreview>, TagStudioError> {
-    let mut previews = Vec::new();
+    // Reads are independent, so compute (id, old_name, new_name) in parallel.
+    // Conflict detection is order-dependent, so it runs as a sequential pass below.
+    let computed: Vec<(String, String, String)> = files
+        .par_iter()
+        .map(|(id, rel_path)| {
+            let full_path = data_root.join(rel_path);
+            let old_name = full_path
+                .file_name()
+                .unwrap_or_default()
+                .to_string_lossy()
+                .to_string();
+
+            let extension = full_path
+                .extension()
+                .unwrap_or_default()
+                .to_string_lossy()
+                .to_string();
+
+            let tags = audio::read_tags_fast(&full_path).unwrap_or_default();
+            let new_stem = format_string::evaluate(format, &tags);
+
+            let new_name = if new_stem.is_empty() {
+                old_name.clone()
+            } else {
+                format!("{}.{}", new_stem, extension)
+            };
+
+            (id.clone(), old_name, new_name)
+        })
+        .collect();
+
+    let mut previews = Vec::with_capacity(computed.len());
     let mut used_names: HashSet<String> = HashSet::new();
 
-    for (id, rel_path) in files {
-        let full_path = data_root.join(rel_path);
-        let old_name = full_path
-            .file_name()
-            .unwrap_or_default()
-            .to_string_lossy()
-            .to_string();
-
-        let extension = full_path
-            .extension()
-            .unwrap_or_default()
-            .to_string_lossy()
-            .to_string();
-
-        // Read tags for this file
-        let tags = audio::read_tags_fast(&full_path).unwrap_or_default();
-        let new_stem = format_string::evaluate(format, &tags);
-
-        let new_name = if new_stem.is_empty() {
-            old_name.clone()
-        } else {
-            format!("{}.{}", new_stem, extension)
-        };
-
+    for (id, old_name, new_name) in computed {
         let conflict = used_names.contains(&new_name.to_lowercase());
         used_names.insert(new_name.to_lowercase());
 
         previews.push(RenamePreview {
-            id: id.clone(),
+            id,
             old_name,
             new_name,
             conflict,
@@ -71,11 +80,12 @@ pub fn execute_renames(
         Err(e) => {
             return files
                 .iter()
-                .map(|(id, _)| RenameResult {
+                .map(|(id, rel_path)| RenameResult {
                     id: id.clone(),
                     status: "error".to_string(),
                     old_name: String::new(),
                     new_name: String::new(),
+                    new_relative_path: rel_path.clone(),
                     error: Some(e.to_string()),
                 })
                 .collect();
@@ -86,12 +96,17 @@ pub fn execute_renames(
         .into_iter()
         .zip(files.iter())
         .map(|(preview, (_, rel_path))| {
+            // Where the file ends up on success vs. where it stays otherwise.
+            let target_rel = rel_path_with_name(rel_path, &preview.new_name);
+            let unchanged_rel = rel_path.clone();
+
             if preview.conflict {
                 return RenameResult {
                     id: preview.id,
                     status: "error".to_string(),
                     old_name: preview.old_name,
                     new_name: preview.new_name,
+                    new_relative_path: unchanged_rel,
                     error: Some("Duplicate filename conflict".to_string()),
                 };
             }
@@ -102,6 +117,7 @@ pub fn execute_renames(
                     status: "skipped".to_string(),
                     old_name: preview.old_name,
                     new_name: preview.new_name,
+                    new_relative_path: unchanged_rel,
                     error: None,
                 };
             }
@@ -121,6 +137,7 @@ pub fn execute_renames(
                             status: "error".to_string(),
                             old_name: preview.old_name,
                             new_name: preview.new_name,
+                            new_relative_path: unchanged_rel,
                             error: Some(format!("Failed to remove old file: {}", e)),
                         };
                     }
@@ -129,6 +146,7 @@ pub fn execute_renames(
                         status: "ok".to_string(),
                         old_name: preview.old_name,
                         new_name: preview.new_name,
+                        new_relative_path: target_rel,
                         error: None,
                     };
                 }
@@ -138,6 +156,7 @@ pub fn execute_renames(
                         status: "error".to_string(),
                         old_name: preview.old_name,
                         new_name: preview.new_name,
+                        new_relative_path: unchanged_rel,
                         error: Some("Target file already exists".to_string()),
                     };
                 }
@@ -153,6 +172,7 @@ pub fn execute_renames(
                     status: "ok".to_string(),
                     old_name: preview.old_name,
                     new_name: preview.new_name,
+                    new_relative_path: target_rel,
                     error: None,
                 },
                 Err(e) => RenameResult {
@@ -160,6 +180,7 @@ pub fn execute_renames(
                     status: "error".to_string(),
                     old_name: preview.old_name,
                     new_name: preview.new_name,
+                    new_relative_path: unchanged_rel,
                     error: Some(e.to_string()),
                 },
             }
@@ -173,6 +194,20 @@ pub struct RenameResult {
     pub status: String,
     pub old_name: String,
     pub new_name: String,
+    /// Relative path of the file after this operation (the new location on
+    /// success, otherwise the unchanged original path). Lets clients avoid
+    /// re-deriving the directory portion themselves.
+    pub new_relative_path: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub error: Option<String>,
+}
+
+/// Join `new_name` onto the directory portion of `rel_path`.
+fn rel_path_with_name(rel_path: &str, new_name: &str) -> String {
+    match Path::new(rel_path).parent() {
+        Some(parent) if !parent.as_os_str().is_empty() => {
+            format!("{}/{}", parent.to_string_lossy(), new_name)
+        }
+        _ => new_name.to_string(),
+    }
 }
