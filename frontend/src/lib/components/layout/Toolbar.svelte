@@ -1,6 +1,9 @@
 <script lang="ts">
 	import UserMenu from './UserMenu.svelte';
 	import { themeMode, toggleTheme } from '$lib/stores/theme';
+	import Icon from '$lib/icons/Icon.svelte';
+	import { ICONS } from '$lib/icons';
+	import Logo from '$lib/icons/Logo.svelte';
 
 	interface Props {
 		onOpenFolder: () => void;
@@ -20,34 +23,34 @@
 <div class="toolbar">
 	<div class="toolbar-group">
 		<button class="toolbar-btn" onclick={onOpenFolder} title="Open folder">
-			<svg class="toolbar-icon" aria-hidden="true" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M2 4.5V12a1 1 0 001 1h10a1 1 0 001-1V6a1 1 0 00-1-1H8L6.5 3.5H3a1 1 0 00-1 1z"/></svg>
+			<Icon path={ICONS.open} size={15} />
 			<span>Open</span>
 		</button>
 
 		<button class="toolbar-btn" onclick={onSave} disabled={!hasPendingEdits} title="Save all tag edits (Ctrl+S)">
-			<svg class="toolbar-icon" aria-hidden="true" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M3 2h8l2 2v9a1 1 0 01-1 1H3a1 1 0 01-1-1V3a1 1 0 011-1z"/><path d="M5 2v3h5V2"/><path d="M5 10h6"/><path d="M5 12.5h4"/></svg>
+			<Icon path={ICONS.save} size={15} />
 			<span>Save</span>
 		</button>
 	</div>
 
 	<div class="toolbar-group">
 		<button class="toolbar-btn" disabled={!hasSelection} onclick={onRename} title="Rename selected files (Tag → Filename)">
-			<svg class="toolbar-icon" aria-hidden="true" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M9.5 3.5l3 3M3 13l-.5-3L10 2.5l3 3L5.5 13z"/></svg>
+			<Icon path={ICONS.rename} size={15} />
 			<span>Rename</span>
 		</button>
 
 		<button class="toolbar-btn" disabled={!hasSelection} onclick={onFilenameToTag} title="Extract tags from filenames (Filename → Tag)">
-			<svg class="toolbar-icon" aria-hidden="true" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M2 3h12M2 7h8M2 11h5"/><path d="M12 8l2 3-2 3"/></svg>
+			<Icon path={ICONS.fnToTag} size={15} />
 			<span>Fn→Tag</span>
 		</button>
 
 		<button class="toolbar-btn" disabled={!hasSelection} onclick={onActions} title="Apply batch actions to selected files">
-			<svg class="toolbar-icon" aria-hidden="true" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M4 4h8M4 8h8M4 12h5"/><path d="M12 10l2 2-2 2"/></svg>
+			<Icon path={ICONS.actions} size={15} />
 			<span>Actions</span>
 		</button>
 
 		<button class="toolbar-btn" disabled={!hasSelection} onclick={onLookup} title="Look up tags on MusicBrainz">
-			<svg class="toolbar-icon" aria-hidden="true" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="6.5" cy="6.5" r="4"/><path d="M14 14l-4-4"/></svg>
+			<Icon path={ICONS.lookup} size={15} />
 			<span>Lookup</span>
 		</button>
 	</div>
@@ -55,35 +58,15 @@
 	<div class="toolbar-spacer"></div>
 
 	<div class="toolbar-title">
-		<svg class="toolbar-logo" viewBox="0 0 32 32" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
-			<path d="M10 12 L16 6 L22 12 L22 25 A 2 2 0 0 1 20 27 L12 27 A 2 2 0 0 1 10 25 Z"/>
-			<circle cx="16" cy="12" r="1.5" fill="currentColor"/>
-			<rect x="12.25" y="16.5" width="1.5" height="6" rx="0.75" fill="currentColor"/>
-			<rect x="15.25" y="14" width="1.5" height="10" rx="0.75" fill="currentColor"/>
-			<rect x="18.25" y="17.5" width="1.5" height="5" rx="0.75" fill="currentColor"/>
-		</svg>
+		<Logo size={16} />
 		<span>TagStudio</span>
 	</div>
 
 	<button class="toolbar-btn theme-toggle-btn" onclick={toggleTheme} title="Switch Dark/Light Theme" aria-label="Toggle theme">
 		{#if $themeMode === 'dark'}
-			<!-- Sun Icon -->
-			<svg class="toolbar-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-				<circle cx="12" cy="12" r="5"></circle>
-				<line x1="12" y1="1" x2="12" y2="3"></line>
-				<line x1="12" y1="21" x2="12" y2="23"></line>
-				<line x1="4.22" y1="4.22" x2="5.64" y2="5.64"></line>
-				<line x1="18.36" y1="18.36" x2="19.78" y2="19.78"></line>
-				<line x1="1" y1="12" x2="3" y2="12"></line>
-				<line x1="21" y1="12" x2="23" y2="12"></line>
-				<line x1="4.22" y1="19.78" x2="5.64" y2="18.36"></line>
-				<line x1="18.36" y1="5.64" x2="19.78" y2="4.22"></line>
-			</svg>
+			<Icon path={ICONS.sun} size={16} label="Switch to light theme" />
 		{:else}
-			<!-- Moon Icon -->
-			<svg class="toolbar-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-				<path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"></path>
-			</svg>
+			<Icon path={ICONS.moon} size={16} label="Switch to dark theme" />
 		{/if}
 	</button>
 
