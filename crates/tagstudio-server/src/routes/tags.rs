@@ -2,11 +2,12 @@ use axum::extract::State;
 use axum::Json;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use std::path::Path;
 use tagstudio_core::audio;
 use tagstudio_core::scanner;
-use tagstudio_core::types::{TagData, TagStudioError, TagWriteChanges, WriteResult};
+use tagstudio_core::types::{TagData, TagWriteChanges, WriteResult};
 
-use crate::error::AppError;
+use crate::error::{join_error, AppError};
 use crate::state::AppState;
 
 #[derive(Deserialize)]
@@ -20,9 +21,12 @@ pub struct ReadTagsResponse {
     pub tags: HashMap<String, TagData>,
 }
 
-pub async fn read_tags(
-    State(state): State<AppState>,
-    Json(body): Json<ReadTagsRequest>,
+/// Shared body for the tag-read endpoints: resolve the requested ids to safe
+/// paths, batch-read them with `batch_read`, then map results back by id.
+async fn read_with(
+    state: AppState,
+    body: ReadTagsRequest,
+    batch_read: fn(&Path, &[String]) -> HashMap<String, TagData>,
 ) -> Result<Json<ReadTagsResponse>, AppError> {
     let data_root = state.data_root.clone();
 
@@ -44,7 +48,7 @@ pub async fn read_tags(
             }
         }
 
-        let path_tags = audio::batch_read_tags(&data_root, &valid_paths);
+        let path_tags = batch_read(&data_root, &valid_paths);
 
         let mut result: HashMap<String, TagData> = HashMap::new();
         for (id, rel_path) in &id_to_path {
@@ -56,14 +60,16 @@ pub async fn read_tags(
         ReadTagsResponse { tags: result }
     })
     .await
-    .map_err(|e| {
-        AppError(TagStudioError::TagReadError(format!(
-            "Task join error: {}",
-            e
-        )))
-    })?;
+    .map_err(join_error)?;
 
     Ok(Json(result))
+}
+
+pub async fn read_tags(
+    State(state): State<AppState>,
+    Json(body): Json<ReadTagsRequest>,
+) -> Result<Json<ReadTagsResponse>, AppError> {
+    read_with(state, body, audio::batch_read_tags).await
 }
 
 #[derive(Deserialize)]
@@ -106,12 +112,7 @@ pub async fn write_tags(
         audio::batch_write_tags(&data_root, &changes_vec)
     })
     .await
-    .map_err(|e| {
-        AppError(TagStudioError::TagReadError(format!(
-            "Task join error: {}",
-            e
-        )))
-    })?;
+    .map_err(join_error)?;
 
     Ok(Json(WriteTagsResponse { results }))
 }
@@ -122,39 +123,5 @@ pub async fn read_properties(
     State(state): State<AppState>,
     Json(body): Json<ReadTagsRequest>,
 ) -> Result<Json<ReadTagsResponse>, AppError> {
-    let data_root = state.data_root.clone();
-
-    let result = tokio::task::spawn_blocking(move || {
-        let mut valid_paths: Vec<String> = Vec::new();
-        let mut id_to_path: HashMap<String, String> = HashMap::new();
-
-        for id in &body.ids {
-            if let Some(rel_path) = body.paths.get(id) {
-                if scanner::resolve_safe_path(&data_root, rel_path).is_ok() {
-                    valid_paths.push(rel_path.clone());
-                    id_to_path.insert(id.clone(), rel_path.clone());
-                }
-            }
-        }
-
-        let path_tags = audio::batch_read_tags_full(&data_root, &valid_paths);
-
-        let mut result: HashMap<String, TagData> = HashMap::new();
-        for (id, rel_path) in &id_to_path {
-            if let Some(tags) = path_tags.get(rel_path) {
-                result.insert(id.clone(), tags.clone());
-            }
-        }
-
-        ReadTagsResponse { tags: result }
-    })
-    .await
-    .map_err(|e| {
-        AppError(TagStudioError::TagReadError(format!(
-            "Task join error: {}",
-            e
-        )))
-    })?;
-
-    Ok(Json(result))
+    read_with(state, body, audio::batch_read_tags_full).await
 }

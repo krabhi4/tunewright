@@ -12,6 +12,11 @@ impl From<TagStudioError> for AppError {
     }
 }
 
+/// Map a blocking-task join failure (panic or cancellation) into an `AppError`.
+pub fn join_error(e: tokio::task::JoinError) -> AppError {
+    AppError(TagStudioError::TagReadError(format!("Task join error: {e}")))
+}
+
 impl IntoResponse for AppError {
     fn into_response(self) -> Response {
         // Log the detailed error server-side

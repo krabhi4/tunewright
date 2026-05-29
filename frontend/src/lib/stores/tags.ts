@@ -1,7 +1,7 @@
 import { writable, derived, get } from 'svelte/store';
 import type { TagData } from '$lib/types/audio';
 import { readTags, readProperties, writeTags } from '$lib/api/tags';
-import { files, selectedIds } from './files';
+import { filesById, selectedIds } from './files';
 
 // Tags loaded from server, keyed by file ID
 export const loadedTags = writable<Map<string, TagData>>(new Map());
@@ -76,7 +76,7 @@ let fetchGeneration = 0;
 
 // Fetch tags for a set of file IDs
 export async function fetchTagsForFiles(ids: string[], force = false) {
-	const $files = get(files);
+	const $filesById = get(filesById);
 	const $loaded = get(loadedTags);
 	const gen = fetchGeneration;
 
@@ -87,7 +87,7 @@ export async function fetchTagsForFiles(ids: string[], force = false) {
 	// Build id -> relative_path map
 	const paths: Record<string, string> = {};
 	for (const id of needed) {
-		const file = $files.find((f) => f.id === id);
+		const file = $filesById.get(id);
 		if (file) paths[id] = file.relative_path;
 	}
 
@@ -130,12 +130,12 @@ export function queuePropertiesFetch(ids: string[]) {
 }
 
 async function fetchPropertiesForFiles(ids: string[]) {
-	const $files = get(files);
+	const $filesById = get(filesById);
 	const gen = fetchGeneration;
 
 	const paths: Record<string, string> = {};
 	for (const id of ids) {
-		const file = $files.find((f) => f.id === id);
+		const file = $filesById.get(id);
 		if (file) paths[id] = file.relative_path;
 	}
 	if (Object.keys(paths).length === 0) return;
@@ -177,12 +177,12 @@ export function setPendingEdit(field: string, value: string | number | undefined
 // Save all pending edits to the server
 export async function saveAllEdits(): Promise<{ success: number; failed: number }> {
 	const $pending = get(pendingEdits);
-	const $files = get(files);
+	const $filesById = get(filesById);
 
 	if ($pending.size === 0) return { success: 0, failed: 0 };
 
 	const changes = Array.from($pending.entries()).map(([id, edits]) => {
-		const file = $files.find((f) => f.id === id);
+		const file = $filesById.get(id);
 		return {
 			id,
 			path: file?.relative_path ?? '',

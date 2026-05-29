@@ -1,3 +1,4 @@
+use crate::extract_year;
 use crate::types::{LookupSource, ReleaseDetail, ReleaseSearchResult, TrackInfo};
 use reqwest::Client;
 use serde::Deserialize;
@@ -113,12 +114,6 @@ fn extract_artist(credits: &Option<Vec<MbArtistCredit>>) -> String {
         .unwrap_or_default()
 }
 
-fn extract_year(date: &Option<String>) -> Option<u32> {
-    date.as_ref()
-        .and_then(|d| d.split('-').next())
-        .and_then(|y| y.parse().ok())
-}
-
 /// Search MusicBrainz for releases
 pub async fn search_releases(
     client: &Client,
@@ -180,22 +175,28 @@ pub async fn get_release(client: &Client, mbid: &str) -> Result<ReleaseDetail, S
         MB_BASE, mbid
     );
 
-    let resp = client
-        .get(&url)
-        .header("User-Agent", USER_AGENT)
-        .header("Accept", "application/json")
-        .send()
-        .await
-        .map_err(|e| format!("MusicBrainz request failed: {}", e))?;
+    // The release body (MusicBrainz) and the cover art URL (CoverArtArchive, a
+    // separate host) are independent, so fetch them concurrently to save a round-trip.
+    let release_fut = async {
+        let resp = client
+            .get(&url)
+            .header("User-Agent", USER_AGENT)
+            .header("Accept", "application/json")
+            .send()
+            .await
+            .map_err(|e| format!("MusicBrainz request failed: {}", e))?;
 
-    if !resp.status().is_success() {
-        return Err(format!("MusicBrainz returned {}", resp.status()));
-    }
+        if !resp.status().is_success() {
+            return Err(format!("MusicBrainz returned {}", resp.status()));
+        }
 
-    let detail: MbReleaseDetail = resp
-        .json()
-        .await
-        .map_err(|e| format!("Failed to parse release: {}", e))?;
+        resp.json::<MbReleaseDetail>()
+            .await
+            .map_err(|e| format!("Failed to parse release: {}", e))
+    };
+
+    let (detail, cover_art_url) = tokio::join!(release_fut, fetch_cover_art_url(client, mbid));
+    let detail = detail?;
 
     let tracks: Vec<TrackInfo> = detail
         .media
@@ -209,9 +210,6 @@ pub async fn get_release(client: &Client, mbid: &str) -> Result<ReleaseDetail, S
             duration_secs: t.length.map(|ms| ms as f64 / 1000.0),
         })
         .collect();
-
-    // Fetch actual cover art URL from CoverArtArchive JSON API
-    let cover_art_url = fetch_cover_art_url(client, mbid).await;
 
     Ok(ReleaseDetail {
         id: detail.id.clone(),

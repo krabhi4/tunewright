@@ -85,6 +85,17 @@ fn pattern_to_regex(pattern: &str) -> Result<(regex::Regex, Vec<String>), TagStu
 // Extraction
 // ---------------------------------------------------------------------------
 
+/// Build a `name -> value` map from regex captures using the ordered var names.
+fn captures_to_values(caps: &regex::Captures, var_names: &[String]) -> HashMap<String, String> {
+    let mut values = HashMap::new();
+    for (i, name) in var_names.iter().enumerate() {
+        if let Some(m) = caps.name(&format!("g{i}")) {
+            values.insert(name.clone(), m.as_str().to_string());
+        }
+    }
+    values
+}
+
 /// Extract tag values from a filename stem using a pattern.
 /// Returns `None` if the pattern doesn't match.
 pub fn extract_from_filename(
@@ -98,14 +109,7 @@ pub fn extract_from_filename(
         None => return Ok(None),
     };
 
-    let mut values = HashMap::new();
-    for (i, name) in var_names.iter().enumerate() {
-        if let Some(m) = caps.name(&format!("g{i}")) {
-            values.insert(name.clone(), m.as_str().to_string());
-        }
-    }
-
-    Ok(Some(values))
+    Ok(Some(captures_to_values(&caps, &var_names)))
 }
 
 /// Convert extracted string values to TagWriteChanges.
@@ -188,15 +192,9 @@ pub fn preview_extract(
                 .unwrap_or_default()
                 .to_string_lossy();
 
-            let tags = re.captures(&stem).map(|caps| {
-                let mut values = HashMap::new();
-                for (i, name) in var_names.iter().enumerate() {
-                    if let Some(m) = caps.name(&format!("g{i}")) {
-                        values.insert(name.clone(), m.as_str().to_string());
-                    }
-                }
-                values_to_changes(&values)
-            });
+            let tags = re
+                .captures(&stem)
+                .map(|caps| values_to_changes(&captures_to_values(&caps, &var_names)));
 
             FilenameTagPreview {
                 id: id.clone(),

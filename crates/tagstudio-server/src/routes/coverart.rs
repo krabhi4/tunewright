@@ -30,6 +30,24 @@ fn default_size() -> u32 {
     250
 }
 
+/// Maximum accepted cover-art payload size.
+const MAX_IMAGE_SIZE: u64 = 10 * 1024 * 1024;
+
+/// Hosts permitted as a cover-art source and as redirect targets.
+fn is_allowed_cover_host(host: &str) -> bool {
+    let host = host.trim_end_matches('.');
+    host == "coverartarchive.org"
+        || host == "archive.org"
+        || host.ends_with(".archive.org")
+        || host == "mzstatic.com"
+        || host.ends_with(".mzstatic.com")
+}
+
+/// JPEG (`FF D8`) or PNG (`89 50 4E 47`) magic-byte check.
+fn has_image_magic(data: &[u8]) -> bool {
+    data.starts_with(&[0xFF, 0xD8]) || data.starts_with(&[0x89, 0x50, 0x4E, 0x47])
+}
+
 pub async fn get_cover_art(
     State(state): State<AppState>,
     Query(params): Query<CoverArtQuery>,
@@ -69,15 +87,6 @@ pub async fn embed_cover_art_from_url(
     State(state): State<AppState>,
     Json(body): Json<CoverArtFromUrlRequest>,
 ) -> Result<Json<serde_json::Value>, AppError> {
-    fn is_allowed_cover_host(host: &str) -> bool {
-        let host = host.trim_end_matches('.');
-        host == "coverartarchive.org"
-            || host == "archive.org"
-            || host.ends_with(".archive.org")
-            || host == "mzstatic.com"
-            || host.ends_with(".mzstatic.com")
-    }
-
     // Only allow CoverArtArchive or Apple Music URLs
     let parsed_ok = Url::parse(&body.url)
         .ok()
@@ -101,14 +110,7 @@ pub async fn embed_cover_art_from_url(
     let client = reqwest::Client::builder()
         .user_agent("Mozilla/5.0 (compatible; TagStudio/0.4.1; +https://github.com/tagstudio)")
         .redirect(reqwest::redirect::Policy::custom(|attempt| {
-            let raw = attempt.url().host_str().unwrap_or("");
-            let host = raw.trim_end_matches('.');
-            if host == "coverartarchive.org"
-                || host == "archive.org"
-                || host.ends_with(".archive.org")
-                || host == "mzstatic.com"
-                || host.ends_with(".mzstatic.com")
-            {
+            if is_allowed_cover_host(attempt.url().host_str().unwrap_or("")) {
                 attempt.follow()
             } else {
                 attempt.stop()
@@ -135,51 +137,41 @@ pub async fn embed_cover_art_from_url(
         ))));
     }
 
+    let too_large = || {
+        AppError(TagStudioError::Io(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            "cover art too large (max 10MB)",
+        )))
+    };
+
     // Reject oversized responses before buffering
-    const MAX_SIZE: u64 = 10 * 1024 * 1024;
     if let Some(len) = response.content_length() {
-        if len > MAX_SIZE {
-            return Err(AppError(TagStudioError::Io(std::io::Error::new(
-                std::io::ErrorKind::InvalidData,
-                "cover art too large (max 10MB)",
-            ))));
+        if len > MAX_IMAGE_SIZE {
+            return Err(too_large());
         }
     }
 
     // Stream with size limit to handle chunked responses without Content-Length
-    let mut buf = Vec::new();
+    let mut image_data = Vec::new();
     while let Some(chunk) = response.chunk().await.map_err(|e| {
         AppError(TagStudioError::Io(std::io::Error::other(format!(
             "failed to read cover art bytes: {}",
             e
         ))))
     })? {
-        buf.extend_from_slice(&chunk);
-        if buf.len() > MAX_SIZE as usize {
-            return Err(AppError(TagStudioError::Io(std::io::Error::new(
-                std::io::ErrorKind::InvalidData,
-                "cover art too large (max 10MB)",
-            ))));
+        image_data.extend_from_slice(&chunk);
+        if image_data.len() as u64 > MAX_IMAGE_SIZE {
+            return Err(too_large());
         }
     }
-    let image_data = buf;
 
-    if image_data.len() > MAX_SIZE as usize {
-        return Err(AppError(TagStudioError::Io(std::io::Error::new(
-            std::io::ErrorKind::InvalidData,
-            "cover art too large (max 10MB)",
-        ))));
-    }
-
-    if !image_data.starts_with(&[0xFF, 0xD8]) && !image_data.starts_with(&[0x89, 0x50, 0x4E, 0x47])
-    {
+    if !has_image_magic(&image_data) {
         return Err(AppError(TagStudioError::Io(std::io::Error::new(
             std::io::ErrorKind::InvalidData,
             "invalid image format (JPEG or PNG only)",
         ))));
     }
 
-    let image_data = image_data.to_vec();
     let mut embedded = 0u32;
     let mut errors: Vec<String> = Vec::new();
 
@@ -253,12 +245,10 @@ pub async fn upload_cover_art(
                     .bytes()
                     .await
                     .map_err(|e| multipart_err(&e.to_string()))?;
-                if bytes.len() > 10 * 1024 * 1024 {
+                if bytes.len() as u64 > MAX_IMAGE_SIZE {
                     return Err(multipart_err("image too large (max 10MB)"));
                 }
-                if !bytes.starts_with(&[0xFF, 0xD8])
-                    && !bytes.starts_with(&[0x89, 0x50, 0x4E, 0x47])
-                {
+                if !has_image_magic(&bytes) {
                     return Err(multipart_err("invalid image format (JPEG or PNG only)"));
                 }
                 image_data = Some(bytes.to_vec());

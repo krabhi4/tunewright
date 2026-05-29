@@ -87,28 +87,31 @@
 		{ key: 'comment', label: 'Comment' }
 	] as const;
 
-	function fieldValue(key: string): string {
+	// Precompute each field's display value / keep / edited state once per render.
+	// Previously isEdited() looped over every selected id for every field, and
+	// value/keep were recomputed several times per field in the template.
+	let fieldStates = $derived.by(() => {
 		const tags = $selectedTags;
-		if (!tags) return '';
-		const val = (tags as any)[key];
-		if (val === KEEP_VALUE) return KEEP_VALUE;
-		if (val == null) return '';
-		return String(val);
-	}
-
-	function isKeep(key: string): boolean {
-		return fieldValue(key) === KEEP_VALUE;
-	}
-
-	function isEdited(key: string): boolean {
 		const edits = $pendingEdits;
-		const ids = $selectedIds;
-		for (const id of ids) {
+		const editedKeys = new Set<string>();
+		for (const id of $selectedIds) {
 			const fileEdits = edits.get(id);
-			if (fileEdits && Object.prototype.hasOwnProperty.call(fileEdits, key)) return true;
+			if (fileEdits) {
+				for (const k of Object.keys(fileEdits)) editedKeys.add(k);
+			}
 		}
-		return false;
-	}
+		const states: Record<string, { value: string; keep: boolean; edited: boolean }> = {};
+		for (const { key } of fields) {
+			const val = tags ? (tags as any)[key] : undefined;
+			const keep = val === KEEP_VALUE;
+			states[key] = {
+				value: keep ? KEEP_VALUE : val == null ? '' : String(val),
+				keep,
+				edited: editedKeys.has(key)
+			};
+		}
+		return states;
+	});
 
 	function handleInput(key: string, e: Event) {
 		const target = e.target as HTMLInputElement;
@@ -139,16 +142,17 @@
 			</div>
 		{:else}
 			{#each fields as field (field.key)}
+				{@const st = fieldStates[field.key]}
 				<div class="field-group">
 					<label class="field-label" for="tag-{field.key}">{field.label}</label>
 					<input
 						id="tag-{field.key}"
 						class="field-input"
-						class:keep={isKeep(field.key)}
-						class:edited={isEdited(field.key)}
+						class:keep={st.keep}
+						class:edited={st.edited}
 						type="text"
-						value={isKeep(field.key) ? '' : fieldValue(field.key)}
-						placeholder={isKeep(field.key) ? '‹ keep ›' : '—'}
+						value={st.keep ? '' : st.value}
+						placeholder={st.keep ? '‹ keep ›' : '—'}
 						onchange={(e) => handleInput(field.key, e)}
 					/>
 				</div>

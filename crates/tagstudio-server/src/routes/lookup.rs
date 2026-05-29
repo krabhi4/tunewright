@@ -16,6 +16,15 @@ pub struct SearchQuery {
     pub query: String,
 }
 
+/// Map a lookup-provider error string to a 502 Bad Gateway JSON response.
+fn bad_gateway(e: String) -> Response {
+    (
+        StatusCode::BAD_GATEWAY,
+        Json(serde_json::json!({ "error": e })),
+    )
+        .into_response()
+}
+
 /// Enforce minimum gap between MusicBrainz requests globally.
 /// Tracks next-allowed time to properly serialize concurrent requests.
 async fn rate_limit_musicbrainz(state: &AppState) {
@@ -38,16 +47,10 @@ pub async fn musicbrainz_search(
     Query(params): Query<SearchQuery>,
 ) -> Result<Json<Vec<ReleaseSearchResult>>, Response> {
     rate_limit_musicbrainz(&state).await;
-
-    let client = reqwest::Client::new();
-    match musicbrainz::search_releases(&client, &params.query).await {
-        Ok(results) => Ok(Json(results)),
-        Err(e) => Err((
-            StatusCode::BAD_GATEWAY,
-            Json(serde_json::json!({ "error": e })),
-        )
-            .into_response()),
-    }
+    musicbrainz::search_releases(&state.http_client, &params.query)
+        .await
+        .map(Json)
+        .map_err(bad_gateway)
 }
 
 pub async fn musicbrainz_release(
@@ -55,40 +58,28 @@ pub async fn musicbrainz_release(
     Path(mbid): Path<String>,
 ) -> Result<Json<ReleaseDetail>, Response> {
     rate_limit_musicbrainz(&state).await;
-
-    let client = reqwest::Client::new();
-    match musicbrainz::get_release(&client, &mbid).await {
-        Ok(detail) => Ok(Json(detail)),
-        Err(e) => Err((
-            StatusCode::BAD_GATEWAY,
-            Json(serde_json::json!({ "error": e })),
-        )
-            .into_response()),
-    }
+    musicbrainz::get_release(&state.http_client, &mbid)
+        .await
+        .map(Json)
+        .map_err(bad_gateway)
 }
 
 pub async fn applemusic_search(
+    State(state): State<AppState>,
     Query(params): Query<SearchQuery>,
 ) -> Result<Json<Vec<ReleaseSearchResult>>, Response> {
-    let client = reqwest::Client::new();
-    match applemusic::search_releases(&client, &params.query).await {
-        Ok(results) => Ok(Json(results)),
-        Err(e) => Err((
-            StatusCode::BAD_GATEWAY,
-            Json(serde_json::json!({ "error": e })),
-        )
-            .into_response()),
-    }
+    applemusic::search_releases(&state.http_client, &params.query)
+        .await
+        .map(Json)
+        .map_err(bad_gateway)
 }
 
-pub async fn applemusic_release(Path(id): Path<String>) -> Result<Json<ReleaseDetail>, Response> {
-    let client = reqwest::Client::new();
-    match applemusic::get_release(&client, &id).await {
-        Ok(detail) => Ok(Json(detail)),
-        Err(e) => Err((
-            StatusCode::BAD_GATEWAY,
-            Json(serde_json::json!({ "error": e })),
-        )
-            .into_response()),
-    }
+pub async fn applemusic_release(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+) -> Result<Json<ReleaseDetail>, Response> {
+    applemusic::get_release(&state.http_client, &id)
+        .await
+        .map(Json)
+        .map_err(bad_gateway)
 }

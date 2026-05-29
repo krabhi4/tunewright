@@ -1,3 +1,4 @@
+use crate::extract_year;
 use crate::types::{LookupSource, ReleaseDetail, ReleaseSearchResult, TrackInfo};
 use reqwest::Client;
 use serde::Deserialize;
@@ -56,13 +57,6 @@ struct AppleLookupResult {
 fn upgrade_cover_url(url: &Option<String>) -> Option<String> {
     url.as_ref()
         .map(|u| u.replace("100x100bb.jpg", "800x800bb.jpg"))
-}
-
-fn extract_year(date_str: &Option<String>) -> Option<u32> {
-    date_str
-        .as_ref()
-        .and_then(|d| d.split('-').next())
-        .and_then(|y| y.parse().ok())
 }
 
 /// Search iTunes/Apple Music for albums

@@ -3,7 +3,7 @@
 	import type { FileEntry } from '$lib/types/audio';
 	import { searchMusicBrainz, getMusicBrainzRelease, searchAppleMusic, getAppleMusicRelease } from '$lib/api/lookup';
 	import type { ReleaseSearchResult, ReleaseDetail, TrackInfo } from '$lib/api/lookup';
-	import { setPendingEdit, pendingEdits, mergedTags, saveAllEdits } from '$lib/stores/tags';
+	import { setPendingEdit, pendingEdits, mergedTags, saveAllEdits, KEEP_VALUE } from '$lib/stores/tags';
 	import { executeRenames } from '$lib/api/rename';
 	import { embedCoverArtFromUrl } from '$lib/api/coverart';
 	import { bumpCoverArt } from '$lib/stores/ui';
@@ -27,8 +27,9 @@
 	let searchResults = $state<ReleaseSearchResult[]>([]);
 	let selectedRelease = $state<ReleaseDetail | null>(null);
 	let searching = $state(false);
-	let loadingRelease = $state(false);
 	let loadingReleaseId = $state<string | null>(null);
+	// A release is loading exactly while its id is pending.
+	let loadingRelease = $derived(loadingReleaseId !== null);
 	let searchError = $state('');
 	let provider = $state<'musicbrainz' | 'applemusic'>('musicbrainz');
 
@@ -43,15 +44,19 @@
 	// Click-to-assign: select a file from unmatched, then click a slot to assign
 	let selectedUnmatchedIdx = $state<number | null>(null);
 
+	// Move an unmatched file into a track slot, sending any displaced file back.
+	function assignToSlot(srcIdx: number, targetIdx: number) {
+		const file = unmatchedFiles[srcIdx];
+		const displaced = matchedFiles[targetIdx];
+		matchedFiles[targetIdx] = file;
+		matchedFiles = [...matchedFiles];
+		unmatchedFiles = unmatchedFiles.filter((_, i) => i !== srcIdx);
+		if (displaced) unmatchedFiles = [...unmatchedFiles, displaced];
+	}
+
 	function handleSlotClick(targetIdx: number) {
 		if (selectedUnmatchedIdx !== null) {
-			// Assign the selected unmatched file to this slot
-			const file = unmatchedFiles[selectedUnmatchedIdx];
-			const displaced = matchedFiles[targetIdx];
-			matchedFiles[targetIdx] = file;
-			matchedFiles = [...matchedFiles];
-			unmatchedFiles = unmatchedFiles.filter((_, i) => i !== selectedUnmatchedIdx);
-			if (displaced) unmatchedFiles = [...unmatchedFiles, displaced];
+			assignToSlot(selectedUnmatchedIdx, targetIdx);
 			selectedUnmatchedIdx = null;
 		}
 	}
@@ -66,7 +71,7 @@
 			const tags = $selectedTags;
 			if (tags) {
 				const parts = [tags.artist, tags.album].filter(
-					(v) => v && v !== '< keep >'
+					(v) => v && v !== KEEP_VALUE
 				);
 				searchQuery = parts.join(' ');
 			}
@@ -107,7 +112,6 @@
 
 	async function selectRelease(result: ReleaseSearchResult) {
 		loadingReleaseId = result.id;
-		loadingRelease = true;
 		searchError = '';
 		try {
 			const release = provider === 'musicbrainz'
@@ -125,7 +129,6 @@
 			}
 		} finally {
 			if (loadingReleaseId === result.id) {
-				loadingRelease = false;
 				loadingReleaseId = null;
 			}
 		}
@@ -179,13 +182,7 @@
 			matchedFiles = [...matchedFiles];
 		} else if (dragFromUnmatched !== null) {
 			// Move from unmatched into a matched slot
-			const file = unmatchedFiles[dragFromUnmatched];
-			// If target slot already has a file, send it to unmatched
-			const displaced = matchedFiles[targetIdx];
-			matchedFiles[targetIdx] = file;
-			matchedFiles = [...matchedFiles];
-			unmatchedFiles = unmatchedFiles.filter((_, i) => i !== dragFromUnmatched);
-			if (displaced) unmatchedFiles = [...unmatchedFiles, displaced];
+			assignToSlot(dragFromUnmatched, targetIdx);
 		}
 
 		dragSourceIdx = null;

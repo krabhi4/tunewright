@@ -2,9 +2,9 @@ use axum::extract::{Query, State};
 use axum::Json;
 use serde::Deserialize;
 use tagstudio_core::scanner;
-use tagstudio_core::types::{DirNode, FileListResult, TagStudioError};
+use tagstudio_core::types::{DirNode, FileListResult};
 
-use crate::error::AppError;
+use crate::error::{join_error, AppError};
 use crate::state::AppState;
 
 #[derive(Deserialize)]
@@ -39,12 +39,7 @@ pub async fn list_files(
         scanner::scan_directory(&data_root, &path, offset, limit)
     })
     .await
-    .map_err(|e| {
-        AppError(TagStudioError::TagReadError(format!(
-            "Task join error: {}",
-            e
-        )))
-    })??;
+    .map_err(join_error)??;
 
     Ok(Json(result))
 }
@@ -68,12 +63,7 @@ pub async fn dir_tree(
 
     let tree = tokio::task::spawn_blocking(move || scanner::build_dir_tree(&data_root, depth))
         .await
-        .map_err(|e| {
-            AppError(TagStudioError::TagReadError(format!(
-                "Task join error: {}",
-                e
-            )))
-        })??;
+        .map_err(join_error)??;
 
     Ok(Json(tree))
 }

@@ -4,10 +4,19 @@ use serde::{Deserialize, Serialize};
 use tagstudio_core::actions::{Action, ActionContext};
 use tagstudio_core::audio;
 use tagstudio_core::scanner;
-use tagstudio_core::types::{TagStudioError, TagWriteChanges, WriteResult};
+use tagstudio_core::types::{TagWriteChanges, WriteResult};
 
-use crate::error::AppError;
+use crate::error::{join_error, AppError};
 use crate::state::AppState;
+
+/// Filter request entries to those resolving to a safe path, as `(id, rel_path)`.
+fn safe_file_entries(data_root: &std::path::Path, files: Vec<ActionFileEntry>) -> Vec<(String, String)> {
+    files
+        .into_iter()
+        .filter(|f| scanner::resolve_safe_path(data_root, &f.path).is_ok())
+        .map(|f| (f.id, f.path))
+        .collect()
+}
 
 // ---------------------------------------------------------------------------
 // Execute actions on files (stateless — no saved action groups yet)
@@ -38,12 +47,7 @@ pub async fn execute(
     let data_root = state.data_root.clone();
 
     let results = tokio::task::spawn_blocking(move || {
-        let valid_files: Vec<(String, String)> = body
-            .files
-            .into_iter()
-            .filter(|f| scanner::resolve_safe_path(&data_root, &f.path).is_ok())
-            .map(|f| (f.id, f.path))
-            .collect();
+        let valid_files = safe_file_entries(&data_root, body.files);
 
         let mut results = Vec::new();
 
@@ -75,7 +79,7 @@ pub async fn execute(
             }
 
             // Write modified tags back
-            let changes = tags_to_changes(&tags);
+            let changes = TagWriteChanges::from(&tags);
             match audio::write_tags(&full_path, &changes) {
                 Ok(()) => {
                     results.push(WriteResult {
@@ -97,11 +101,7 @@ pub async fn execute(
         results
     })
     .await
-    .map_err(|e| {
-        AppError(TagStudioError::TagWriteError(format!(
-            "Task join error: {e}"
-        )))
-    })?;
+    .map_err(join_error)?;
 
     Ok(Json(ExecuteActionsResponse { results }))
 }
@@ -136,12 +136,7 @@ pub async fn preview(
     let data_root = state.data_root.clone();
 
     let previews = tokio::task::spawn_blocking(move || {
-        let valid_files: Vec<(String, String)> = body
-            .files
-            .into_iter()
-            .filter(|f| scanner::resolve_safe_path(&data_root, &f.path).is_ok())
-            .map(|f| (f.id, f.path))
-            .collect();
+        let valid_files = safe_file_entries(&data_root, body.files);
 
         let mut previews = Vec::new();
 
@@ -186,11 +181,7 @@ pub async fn preview(
         previews
     })
     .await
-    .map_err(|e| {
-        AppError(TagStudioError::TagReadError(format!(
-            "Task join error: {e}"
-        )))
-    })?;
+    .map_err(join_error)?;
 
     Ok(Json(PreviewActionsResponse { previews }))
 }
@@ -198,29 +189,6 @@ pub async fn preview(
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
-
-/// Convert a full TagData into TagWriteChanges for writing back.
-fn tags_to_changes(tags: &tagstudio_core::types::TagData) -> TagWriteChanges {
-    TagWriteChanges {
-        title: tags.title.clone(),
-        artist: tags.artist.clone(),
-        album: tags.album.clone(),
-        album_artist: tags.album_artist.clone(),
-        year: tags.year,
-        track_number: tags.track_number,
-        track_total: tags.track_total,
-        disc_number: tags.disc_number,
-        disc_total: tags.disc_total,
-        genre: tags.genre.clone(),
-        comment: tags.comment.clone(),
-        composer: tags.composer.clone(),
-        extra: if tags.extra.is_empty() {
-            None
-        } else {
-            Some(tags.extra.clone())
-        },
-    }
-}
 
 /// Compare two TagData and return a list of changed fields.
 fn diff_tags(

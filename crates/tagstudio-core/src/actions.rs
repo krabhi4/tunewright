@@ -325,22 +325,7 @@ fn apply_case(s: &str, mode: CaseMode) -> String {
     match mode {
         CaseMode::Upper => s.to_uppercase(),
         CaseMode::Lower => s.to_lowercase(),
-        CaseMode::Title => {
-            let mut result = String::with_capacity(s.len());
-            let mut cap_next = true;
-            for c in s.chars() {
-                if c.is_whitespace() || c == '-' || c == '(' || c == '[' {
-                    result.push(c);
-                    cap_next = true;
-                } else if cap_next {
-                    result.extend(c.to_uppercase());
-                    cap_next = false;
-                } else {
-                    result.extend(c.to_lowercase());
-                }
-            }
-            result
-        }
+        CaseMode::Title => expr::title_case(s),
         CaseMode::Sentence => {
             let mut chars = s.chars();
             let mut result = String::with_capacity(s.len());

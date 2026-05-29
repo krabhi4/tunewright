@@ -88,8 +88,6 @@
 		previewTimer = setTimeout(() => loadPreview(), 300);
 	}
 
-	const TAG_FIELDS = ['artist', 'title', 'album', 'track', 'year', 'genre', 'albumartist', 'composer'] as const;
-
 	function formatFieldValue(tags: Partial<TagData> | undefined, field: string): string {
 		if (!tags) return '';
 		return String((tags as Record<string, unknown>)[field] ?? '');

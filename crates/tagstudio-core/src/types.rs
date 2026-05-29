@@ -155,6 +155,31 @@ pub struct TagWriteChanges {
     pub extra: Option<HashMap<String, String>>,
 }
 
+impl From<&TagData> for TagWriteChanges {
+    /// Project a full `TagData` onto the writable subset of tag fields.
+    fn from(tags: &TagData) -> Self {
+        Self {
+            title: tags.title.clone(),
+            artist: tags.artist.clone(),
+            album: tags.album.clone(),
+            album_artist: tags.album_artist.clone(),
+            year: tags.year,
+            track_number: tags.track_number,
+            track_total: tags.track_total,
+            disc_number: tags.disc_number,
+            disc_total: tags.disc_total,
+            genre: tags.genre.clone(),
+            comment: tags.comment.clone(),
+            composer: tags.composer.clone(),
+            extra: if tags.extra.is_empty() {
+                None
+            } else {
+                Some(tags.extra.clone())
+            },
+        }
+    }
+}
+
 /// Result of writing tags to a single file
 #[derive(Debug, Clone, Serialize)]
 pub struct WriteResult {

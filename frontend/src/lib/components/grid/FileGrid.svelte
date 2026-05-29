@@ -1,5 +1,5 @@
 <script lang="ts">
-	import type { FileEntry } from '$lib/types/audio';
+	import type { FileEntry, TagData } from '$lib/types/audio';
 	import { formatDuration, formatSize, formatFormatLabel } from '$lib/utils/format';
 	import {
 		selectedIds,
@@ -83,8 +83,7 @@
 		{ key: 'size', label: 'Size', width: 70, mono: true, align: 'right' as const }
 	];
 
-	function getCellValue(file: FileEntry, key: string): string {
-		const tags = $mergedTags.get(file.id);
+	function getCellValue(file: FileEntry, tags: TagData | undefined, key: string): string {
 		switch (key) {
 			case 'filename':
 				return file.filename;
@@ -135,9 +134,15 @@
 		if ($sortColumn) {
 			const col = $sortColumn;
 			const dir = $sortAsc ? 1 : -1;
+			// Precompute one sort key per file so the comparator doesn't redo the
+			// map lookup + lowercasing O(n log n) times.
+			const keyOf = new Map<string, string>();
+			for (const f of result) {
+				keyOf.set(f.id, getCellValue(f, $mergedTags.get(f.id), col).toLowerCase());
+			}
 			result = [...result].sort((a, b) => {
-				const av = getCellValue(a, col).toLowerCase();
-				const bv = getCellValue(b, col).toLowerCase();
+				const av = keyOf.get(a.id) ?? '';
+				const bv = keyOf.get(b.id) ?? '';
 				if (av < bv) return -1 * dir;
 				if (av > bv) return 1 * dir;
 				return 0;
@@ -365,6 +370,7 @@
 						</button>
 					{:else}
 						{@const file = row.file}
+						{@const rowTags = $mergedTags.get(file.id)}
 						{@const isSelected = $selectedIds.has(file.id)}
 						{@const isOdd = (visibleStart + i) % 2 === 1}
 						{@const isFocused = $focusedId === file.id}
@@ -389,7 +395,7 @@
 								/>
 							</div>
 							{#each columns as col}
-								{@const val = getCellValue(file, col.key)}
+								{@const val = getCellValue(file, rowTags, col.key)}
 								<div
 									class="cell"
 									class:mono={col.mono}

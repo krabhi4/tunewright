@@ -290,9 +290,10 @@ fn call_function(name: &str, args: &[String], ctx: &ExprContext) -> String {
 
 // --- String functions ---
 
-/// Title Case: capitalize first letter of each word
-fn fn_caps(args: &[String]) -> String {
-    let s = get_arg(args, 0);
+/// Title Case: capitalize the first letter of each word, breaking on
+/// whitespace and `-`, `(`, `[`. Shared by the `$caps` function and the
+/// case-conversion action.
+pub(crate) fn title_case(s: &str) -> String {
     let mut result = String::with_capacity(s.len());
     let mut cap_next = true;
     for c in s.chars() {
@@ -307,6 +308,11 @@ fn fn_caps(args: &[String]) -> String {
         }
     }
     result
+}
+
+/// Title Case: capitalize first letter of each word
+fn fn_caps(args: &[String]) -> String {
+    title_case(&get_arg(args, 0))
 }
 
 /// Smart Title Case: keeps small words lowercase unless first word

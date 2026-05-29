@@ -14,6 +14,13 @@ export const selectedFiles = derived([files, selectedIds], ([$files, $selectedId
 	$files.filter((f) => $selectedIds.has(f.id))
 );
 
+// Index of files by id for O(1) lookups (avoids repeated linear scans of the list)
+export const filesById = derived(files, ($files) => {
+	const map = new Map<string, FileEntry>();
+	for (const f of $files) map.set(f.id, f);
+	return map;
+});
+
 export const selectedCount = derived(selectedIds, ($ids) => $ids.size);
 
 export async function loadDirectory(path: string) {
