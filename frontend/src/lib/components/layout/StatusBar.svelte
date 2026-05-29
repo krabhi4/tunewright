@@ -13,11 +13,11 @@
 </script>
 
 <div class="statusbar">
-	<span class="stat">{fileCount} file{fileCount !== 1 ? 's' : ''}</span>
+	<span class="stat"><span class="mono">{fileCount}</span> file{fileCount !== 1 ? 's' : ''}</span>
 
 	{#if selectedCount > 0}
 		<span class="sep">&middot;</span>
-		<span class="stat">{selectedCount} selected</span>
+		<span class="stat"><span class="mono">{selectedCount}</span> selected</span>
 	{/if}
 
 	{#if totalDuration > 0}
@@ -30,7 +30,7 @@
 
 	{#if modifiedCount > 0}
 		<span class="sep">&middot;</span>
-		<span class="stat modified">{modifiedCount} modified</span>
+		<span class="stat edited"><span class="mono">{modifiedCount}</span> edited</span>
 	{/if}
 </div>
 
@@ -45,6 +45,7 @@
 		gap: 0;
 		flex-shrink: 0;
 		user-select: none;
+		font-family: var(--font-ui);
 	}
 
 	.stat {
@@ -53,18 +54,19 @@
 	}
 
 	.sep {
-		margin: 0 6px;
+		margin: 0 8px;
 		color: var(--text-muted);
 		font-size: 10px;
 	}
 
 	.mono {
 		font-family: var(--font-mono);
+		font-feature-settings: "tnum" 1;
 		font-size: 10.5px;
 	}
 
-	.modified {
-		color: var(--modified);
+	.edited {
+		color: var(--state-dirty);
 	}
 
 	@media (max-width: 768px) {
