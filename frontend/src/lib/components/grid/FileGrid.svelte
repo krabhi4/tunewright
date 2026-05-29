@@ -9,7 +9,7 @@
 		directories,
 		currentPath
 	} from '$lib/stores/files';
-	import { mergedTags, fetchTagsForFiles, queuePropertiesFetch } from '$lib/stores/tags';
+	import { mergedTags, fetchTagsForFiles, queuePropertiesFetch, pendingEdits } from '$lib/stores/tags';
 	import { filterText, sortColumn, sortAsc } from '$lib/stores/ui';
 	import ContextMenu from '$lib/components/common/ContextMenu.svelte';
 
@@ -373,6 +373,7 @@
 							class:selected={isSelected}
 							class:odd={isOdd}
 							class:focused={isFocused}
+							class:dirty={$pendingEdits.has(file.id)}
 							style="height: {ROW_HEIGHT}px"
 							onclick={(e) => handleRowClick(file, e)}
 							oncontextmenu={(e) => handleContextMenu(file, e)}
@@ -535,6 +536,14 @@
 	.grid-row.focused {
 		outline: 1px solid var(--accent);
 		outline-offset: -1px;
+	}
+
+	.grid-row.dirty {
+		box-shadow: inset 2px 0 0 var(--state-dirty);
+	}
+
+	.grid-row.dirty .tag-cell {
+		color: var(--state-dirty);
 	}
 
 	.grid-row.dir-row {
