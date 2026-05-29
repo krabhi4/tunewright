@@ -58,7 +58,7 @@
 	<div class="toolbar-spacer"></div>
 
 	<div class="toolbar-title">
-		<Logo size={16} />
+		<span class="toolbar-logo"><Logo size={16} /></span>
 		<span>TagStudio</span>
 	</div>
 
@@ -120,12 +120,6 @@
 		cursor: default;
 	}
 
-	.toolbar-icon {
-		width: 15px;
-		height: 15px;
-		flex-shrink: 0;
-	}
-
 	.toolbar-spacer {
 		flex: 1;
 	}
@@ -143,8 +137,7 @@
 	}
 
 	.toolbar-logo {
-		width: 16px;
-		height: 16px;
+		display: inline-flex;
 		color: var(--accent);
 		flex-shrink: 0;
 	}
