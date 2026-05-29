@@ -4,6 +4,18 @@
  * Selector model: [data-theme="<family>"][data-mode="<dark|light>"]
  */
 
+/* Theme-invariant tokens (sizing, layout, z-index) — identical across all themes. */
+:root {
+	--toolbar-height: 44px;
+	--statusbar-height: 26px;
+	--sidebar-width: 272px;
+	--sidebar-min: 200px;
+	--sidebar-max: 400px;
+	--z-dropdown: 100;
+	--z-modal: 200;
+	--z-context: 300;
+}
+
 [data-theme="console"][data-mode="dark"] {
 	/* surfaces */
 	--bg-base: #0d0f13;

@@ -1,19 +1,22 @@
 import { describe, it, expect } from 'vitest';
-import { readFileSync, readdirSync, statSync } from 'node:fs';
+import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { join } from 'node:path';
 
+// Scan both source and shipped static assets (e.g. favicon.svg).
 const SRC = fileURLToPath(new URL('../../', import.meta.url)); // frontend/src
+const STATIC = fileURLToPath(new URL('../../../static', import.meta.url)); // frontend/static
 
 function walk(dir: string): string[] {
+	if (!existsSync(dir)) return [];
 	return readdirSync(dir).flatMap((name) => {
 		const p = join(dir, name);
 		if (statSync(p).isDirectory()) return walk(p);
-		return /\.(svelte|css|ts|html)$/.test(p) && !p.endsWith('.test.ts') ? [p] : [];
+		return /\.(svelte|css|ts|html|svg)$/.test(p) && !p.endsWith('.test.ts') ? [p] : [];
 	});
 }
 
-const files = walk(SRC);
+const files = [...walk(SRC), ...walk(STATIC)];
 const corpus = files.map((f) => ({ f, text: readFileSync(f, 'utf8') }));
 
 // fonts and palettes that signal "AI default" or are the old Sage & Stone scheme
