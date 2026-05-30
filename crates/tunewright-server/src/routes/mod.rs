@@ -10,7 +10,6 @@ pub mod tags;
 use axum::middleware;
 use axum::routing::{delete, get, post};
 use axum::Router;
-use tower_http::cors::CorsLayer;
 use tower_http::services::{ServeDir, ServeFile};
 use tower_http::trace::TraceLayer;
 
@@ -76,7 +75,6 @@ pub fn create_router(state: AppState) -> Router {
     Router::new()
         .nest("/api/v1", api)
         .fallback_service(ServeDir::new(&static_dir).not_found_service(ServeFile::new(index_file)))
-        .layer(CorsLayer::permissive())
         .layer(TraceLayer::new_for_http())
         .with_state(state)
 }
