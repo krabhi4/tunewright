@@ -2,6 +2,12 @@
   "name": "tagstudio-frontend",
   "version": "0.5.1",
   "private": true,
+  "description": "TagStudio web frontend (SvelteKit SPA)",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/krabhi4/tagstudio.git"
+  },
   "type": "module",
   "scripts": {
     "dev": "vite dev",
