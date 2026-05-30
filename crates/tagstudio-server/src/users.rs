@@ -3,7 +3,6 @@ use argon2::{
     Argon2,
 };
 use chrono::{DateTime, Duration, Utc};
-use rand::Rng;
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
@@ -267,7 +266,7 @@ impl UserManager {
 /// Hash a password with argon2. Call from spawn_blocking.
 pub fn hash_password(password: &str) -> Result<String, argon2::password_hash::Error> {
     let mut salt_bytes = [0u8; 16];
-    rand::rng().fill(&mut salt_bytes);
+    rand::fill(&mut salt_bytes);
     let salt = SaltString::encode_b64(&salt_bytes).map_err(|_| {
         argon2::password_hash::Error::SaltInvalid(
             argon2::password_hash::errors::InvalidValue::Malformed,

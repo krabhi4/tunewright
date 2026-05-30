@@ -5,14 +5,14 @@ edition.workspace = true
 license.workspace = true
 
 [dependencies]
-lofty = "0.22"
-image = { version = ">=0.25.0, <0.25.10", default-features = false, features = ["jpeg", "png"] }
+lofty = "0.24"
+image = { version = ">=0.25.0, <0.25.11", default-features = false, features = ["jpeg", "png"] }
 serde = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }
-sha2 = "0.10"
+sha2 = "0.11"
 hex = "0.4"
-rayon = "1.10"
+rayon = "1.12"
 regex = "1"
 tracing = { workspace = true }
 walkdir = "2"

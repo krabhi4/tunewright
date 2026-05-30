@@ -4,7 +4,6 @@ use axum::http::{Request, StatusCode};
 use axum::middleware::Next;
 use axum::response::{IntoResponse, Response};
 use axum::Json;
-use rand::Rng;
 use serde::Deserialize;
 
 use crate::state::{AppState, Session};
@@ -13,8 +12,7 @@ use crate::users::{self, Role};
 const SESSION_COOKIE: &str = "tagstudio_session";
 
 fn generate_session_token() -> String {
-    let mut rng = rand::rng();
-    let bytes: [u8; 32] = rng.random();
+    let bytes: [u8; 32] = rand::random();
     hex::encode(bytes)
 }
 
