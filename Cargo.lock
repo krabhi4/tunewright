@@ -1984,59 +1984,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "tagstudio-core"
-version = "0.5.1"
-dependencies = [
- "hex",
- "image",
- "lofty",
- "rayon",
- "regex",
- "serde",
- "serde_json",
- "sha2",
- "thiserror",
- "tracing",
- "walkdir",
-]
-
-[[package]]
-name = "tagstudio-lookup"
-version = "0.5.1"
-dependencies = [
- "reqwest",
- "serde",
- "serde_json",
- "thiserror",
- "tokio",
- "urlencoding",
-]
-
-[[package]]
-name = "tagstudio-server"
-version = "0.5.1"
-dependencies = [
- "argon2",
- "axum",
- "axum-extra",
- "chrono",
- "hex",
- "rand 0.10.1",
- "rayon",
- "reqwest",
- "serde",
- "serde_json",
- "tagstudio-core",
- "tagstudio-lookup",
- "thiserror",
- "tokio",
- "tower-http",
- "tracing",
- "tracing-subscriber",
- "uuid",
-]
-
-[[package]]
 name = "thiserror"
 version = "2.0.18"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2264,6 +2211,59 @@ name = "try-lock"
 version = "0.2.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e421abadd41a4225275504ea4d6566923418b7f05506fbc9c0fe86ba7396114b"
+
+[[package]]
+name = "tunewright-core"
+version = "0.6.0"
+dependencies = [
+ "hex",
+ "image",
+ "lofty",
+ "rayon",
+ "regex",
+ "serde",
+ "serde_json",
+ "sha2",
+ "thiserror",
+ "tracing",
+ "walkdir",
+]
+
+[[package]]
+name = "tunewright-lookup"
+version = "0.6.0"
+dependencies = [
+ "reqwest",
+ "serde",
+ "serde_json",
+ "thiserror",
+ "tokio",
+ "urlencoding",
+]
+
+[[package]]
+name = "tunewright-server"
+version = "0.6.0"
+dependencies = [
+ "argon2",
+ "axum",
+ "axum-extra",
+ "chrono",
+ "hex",
+ "rand 0.10.1",
+ "rayon",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "thiserror",
+ "tokio",
+ "tower-http",
+ "tracing",
+ "tracing-subscriber",
+ "tunewright-core",
+ "tunewright-lookup",
+ "uuid",
+]
 
 [[package]]
 name = "typenum"

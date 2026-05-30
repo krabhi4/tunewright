@@ -2,7 +2,7 @@
 
 ## Our Standard
 
-We want TagStudio to be a welcoming project for everyone. Be respectful, constructive, and assume good intent.
+We want Tunewright to be a welcoming project for everyone. Be respectful, constructive, and assume good intent.
 
 ## Expected Behavior
 

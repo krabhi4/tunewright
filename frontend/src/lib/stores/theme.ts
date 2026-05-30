@@ -11,9 +11,9 @@ import {
 
 export type { ThemeFamily, ThemeMode } from '$lib/theme/resolve';
 
-const FAMILY_KEY = 'tagstudio-theme-family';
-const MODE_KEY = 'tagstudio-theme-mode';
-const LEGACY_KEY = 'tagstudio-theme';
+const FAMILY_KEY = 'tunewright-theme-family';
+const MODE_KEY = 'tunewright-theme-mode';
+const LEGACY_KEY = 'tunewright-theme';
 
 export const themeFamily = writable<ThemeFamily>('console');
 export const themeMode = writable<ThemeMode>('dark');

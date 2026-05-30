@@ -3,9 +3,9 @@ use axum::Json;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::Path;
-use tagstudio_core::audio;
-use tagstudio_core::scanner;
-use tagstudio_core::types::{TagData, TagWriteChanges, WriteResult};
+use tunewright_core::audio;
+use tunewright_core::scanner;
+use tunewright_core::types::{TagData, TagWriteChanges, WriteResult};
 
 use crate::error::{join_error, AppError};
 use crate::state::AppState;

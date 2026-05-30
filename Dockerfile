@@ -19,21 +19,21 @@ COPY crates/ crates/
 RUN --mount=type=cache,target=/usr/local/cargo/registry \
     --mount=type=cache,target=/app/target \
     cargo build --release && \
-    cp target/release/tagstudio-server /app/tagstudio-server
+    cp target/release/tunewright-server /app/tunewright-server
 
 # Stage 3: Runtime
 FROM debian:bookworm-slim
 RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates && rm -rf /var/lib/apt/lists/*
 
-COPY --from=backend-builder /app/tagstudio-server /usr/local/bin/
+COPY --from=backend-builder /app/tunewright-server /usr/local/bin/
 COPY --from=frontend-builder /app/frontend/build /srv/static
 
-ENV TAGSTUDIO_STATIC_DIR=/srv/static
-ENV TAGSTUDIO_DATA_DIR=/data
-ENV TAGSTUDIO_PORT=8080
-ENV TAGSTUDIO_HOST=0.0.0.0
+ENV TUNEWRIGHT_STATIC_DIR=/srv/static
+ENV TUNEWRIGHT_DATA_DIR=/data
+ENV TUNEWRIGHT_PORT=8080
+ENV TUNEWRIGHT_HOST=0.0.0.0
 
 EXPOSE 8080
 VOLUME ["/data"]
 
-ENTRYPOINT ["tagstudio-server"]
+ENTRYPOINT ["tunewright-server"]

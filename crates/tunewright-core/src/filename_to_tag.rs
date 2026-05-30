@@ -4,7 +4,7 @@
 //! `%artist% - %track% - %title%` and a filename like
 //! `The Band - 03 - First Song.mp3`, extract tag values.
 
-use crate::types::{TagStudioError, TagWriteChanges};
+use crate::types::{TunewrightError, TagWriteChanges};
 use serde::Serialize;
 use std::collections::HashMap;
 
@@ -55,7 +55,7 @@ fn tokenize_pattern(pattern: &str) -> Vec<PatternToken> {
 
 /// Build a regex from a pattern string. Returns the compiled regex and the
 /// ordered list of variable names that correspond to capture groups.
-fn pattern_to_regex(pattern: &str) -> Result<(regex::Regex, Vec<String>), TagStudioError> {
+fn pattern_to_regex(pattern: &str) -> Result<(regex::Regex, Vec<String>), TunewrightError> {
     let tokens = tokenize_pattern(pattern);
     let mut regex_str = String::from("^");
     let mut var_names = Vec::new();
@@ -76,7 +76,7 @@ fn pattern_to_regex(pattern: &str) -> Result<(regex::Regex, Vec<String>), TagStu
     regex_str.push('$');
 
     let re = regex::Regex::new(&regex_str)
-        .map_err(|e| TagStudioError::InvalidFormatString(format!("Invalid pattern: {e}")))?;
+        .map_err(|e| TunewrightError::InvalidFormatString(format!("Invalid pattern: {e}")))?;
 
     Ok((re, var_names))
 }
@@ -101,7 +101,7 @@ fn captures_to_values(caps: &regex::Captures, var_names: &[String]) -> HashMap<S
 pub fn extract_from_filename(
     pattern: &str,
     filename_stem: &str,
-) -> Result<Option<HashMap<String, String>>, TagStudioError> {
+) -> Result<Option<HashMap<String, String>>, TunewrightError> {
     let (re, var_names) = pattern_to_regex(pattern)?;
 
     let caps = match re.captures(filename_stem) {
@@ -181,7 +181,7 @@ pub struct FilenameTagPreview {
 pub fn preview_extract(
     files: &[(String, String)], // (id, filename)
     pattern: &str,
-) -> Result<Vec<FilenameTagPreview>, TagStudioError> {
+) -> Result<Vec<FilenameTagPreview>, TunewrightError> {
     let (re, var_names) = pattern_to_regex(pattern)?;
 
     let previews = files

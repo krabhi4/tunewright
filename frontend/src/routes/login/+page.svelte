@@ -43,7 +43,7 @@
 					<rect x="18.25" y="17.5" width="1.5" height="5" rx="0.75" fill="currentColor"/>
 				</svg>
 			</div>
-			<h1 class="login-title">TagStudio</h1>
+			<h1 class="login-title">Tunewright</h1>
 		</div>
 
 		<div class="login-form">

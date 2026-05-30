@@ -1,8 +1,8 @@
 use axum::extract::{Query, State};
 use axum::Json;
 use serde::Deserialize;
-use tagstudio_core::scanner;
-use tagstudio_core::types::{DirNode, FileListResult};
+use tunewright_core::scanner;
+use tunewright_core::types::{DirNode, FileListResult};
 
 use crate::error::{join_error, AppError};
 use crate::state::AppState;

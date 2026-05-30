@@ -56,7 +56,7 @@
 					<rect x="18.25" y="17.5" width="1.5" height="5" rx="0.75" fill="currentColor"/>
 				</svg>
 			</div>
-			<h1 class="login-title">Welcome to TagStudio</h1>
+			<h1 class="login-title">Welcome to Tunewright</h1>
 			<p class="login-subtitle">Create your admin account to get started.</p>
 		</div>
 

@@ -1,8 +1,8 @@
-# TagStudio
+# Tunewright
 
 A self-hosted web application for editing audio file metadata. Inspired by [Mp3tag](https://www.mp3tag.de/en/) for Windows.
 
-TagStudio runs as a single Docker container, serves a web UI, and operates directly on your music files via a volume mount. No database required.
+Tunewright runs as a single Docker container, serves a web UI, and operates directly on your music files via a volume mount. No database required.
 
 ## Features
 
@@ -29,8 +29,8 @@ ID3v1, ID3v2.3, ID3v2.4, MP4/iTunes, Vorbis Comments, APE
 
 ```yaml
 services:
-  tagstudio:
-    image: ghcr.io/krabhi4/tagstudio:latest
+  tunewright:
+    image: ghcr.io/krabhi4/tunewright:latest
     ports:
       - "8080:8080"
     volumes:
@@ -50,7 +50,7 @@ Open `http://your-server:8080` in a browser. On first visit you'll be prompted t
 docker run -d \
   -p 8080:8080 \
   -v /path/to/your/music:/data:rw \
-  ghcr.io/krabhi4/tagstudio:latest
+  ghcr.io/krabhi4/tunewright:latest
 ```
 
 ## Authentication
@@ -87,10 +87,10 @@ All configuration is via environment variables.
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `TAGSTUDIO_DATA_DIR` | `/data` | Music directory inside the container |
-| `TAGSTUDIO_PORT` | `8080` | HTTP port |
-| `TAGSTUDIO_HOST` | `0.0.0.0` | Bind address |
-| `TAGSTUDIO_STATIC_DIR` | `/srv/static` | Frontend build directory (set by Docker) |
+| `TUNEWRIGHT_DATA_DIR` | `/data` | Music directory inside the container |
+| `TUNEWRIGHT_PORT` | `8080` | HTTP port |
+| `TUNEWRIGHT_HOST` | `0.0.0.0` | Bind address |
+| `TUNEWRIGHT_STATIC_DIR` | `/srv/static` | Frontend build directory (set by Docker) |
 
 Authentication is managed through the web UI — no environment variables needed.
 
@@ -99,19 +99,19 @@ Authentication is managed through the web UI — no environment variables needed
 ```
 Rust (Axum)                          SvelteKit
 ┌─────────────────────┐              ┌──────────────────┐
-│ tagstudio-server    │  REST API    │ frontend/        │
+│ tunewright-server    │  REST API    │ frontend/        │
 │   routes/           │◄────────────►│   FileGrid       │
 │   auth middleware    │  /api/v1/*   │   TagPanel       │
 │   users.rs          │              │   UserMenu       │
 │                     │              │   PathBar        │
-│ tagstudio-core      │              │   RenameModal    │
+│ tunewright-core      │              │   RenameModal    │
 │   audio.rs (lofty)  │              │   LookupModal    │
 │   scanner.rs        │              └──────────────────┘
 │   format_string.rs  │
 │   picture.rs        │
 │   rename.rs         │
 │                     │
-│ tagstudio-lookup    │
+│ tunewright-lookup    │
 │   musicbrainz.rs    │
 └─────────────────────┘
         │
@@ -120,9 +120,9 @@ Rust (Axum)                          SvelteKit
     └───────┘
 ```
 
-- **tagstudio-core** — Pure Rust library. Tag reading/writing via [lofty](https://github.com/Serial-ATA/lofty-rs), thumbnail generation via [image](https://github.com/image-rs/image), directory scanning, format string parser, file renaming.
-- **tagstudio-lookup** — MusicBrainz API client with rate limiting.
-- **tagstudio-server** — Axum HTTP server. Serves the SvelteKit SPA and REST API. Multi-user auth with Argon2id password hashing.
+- **tunewright-core** — Pure Rust library. Tag reading/writing via [lofty](https://github.com/Serial-ATA/lofty-rs), thumbnail generation via [image](https://github.com/image-rs/image), directory scanning, format string parser, file renaming.
+- **tunewright-lookup** — MusicBrainz API client with rate limiting.
+- **tunewright-server** — Axum HTTP server. Serves the SvelteKit SPA and REST API. Multi-user auth with Argon2id password hashing.
 
 No database. Tag data lives in the audio files. User accounts live in `users.json`. UI state lives in the browser.
 
@@ -147,13 +147,13 @@ pnpm install
 pnpm run dev    # Vite dev server with API proxy to localhost:8080
 
 # Run backend
-TAGSTUDIO_DATA_DIR=./test-music cargo run -p tagstudio-server
+TUNEWRIGHT_DATA_DIR=./test-music cargo run -p tunewright-server
 ```
 
 ### Docker Build (single arch)
 
 ```bash
-docker build -t tagstudio:latest .
+docker build -t tunewright:latest .
 ```
 
 ### Docker Build (multi-arch)
@@ -162,7 +162,7 @@ docker build -t tagstudio:latest .
 docker buildx create --name multiarch --driver docker-container --use
 docker buildx build \
   --platform linux/amd64,linux/arm64 \
-  -t ghcr.io/krabhi4/tagstudio:latest \
+  -t ghcr.io/krabhi4/tunewright:latest \
   --push .
 ```
 

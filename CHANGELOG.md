@@ -1,6 +1,12 @@
 # Changelog
 
-All notable changes to TagStudio are documented here.
+All notable changes to Tunewright are documented here.
+
+## [0.6.0] - 2026-05-30
+
+### Changed
+
+- **Renamed project from TagStudio to Tunewright** to avoid a naming collision with the existing [TagStudio](https://github.com/TagStudioDev/TagStudio) project. The Docker image is now `ghcr.io/krabhi4/tunewright`, and all environment variables use the `TUNEWRIGHT_` prefix (e.g. `TUNEWRIGHT_DATA_DIR` replaces `TAGSTUDIO_DATA_DIR`). Update your compose file and environment accordingly.
 
 ## [0.5.1] - 2026-05-30
 
@@ -31,7 +37,7 @@ All notable changes to TagStudio are documented here.
 
 - **Semantic Dirty State** - Edited grid rows now carry a dirty-state indicator, edited tag-panel fields use an amber treatment, and `< keep >` placeholders are muted.
 - **Redesigned Favicon** - New theme-aware favicon.
-- Updated user agent versioning to `TagStudio/0.5.0`.
+- Updated user agent versioning to `Tunewright/0.5.0`.
 - Removed dead Google Fonts links and unused toolbar selectors.
 
 ### Performance
@@ -65,7 +71,7 @@ All notable changes to TagStudio are documented here.
 
 ### Changed
 
-- Updated user agent versioning to `TagStudio/0.4.0`.
+- Updated user agent versioning to `Tunewright/0.4.0`.
 
 ### Fixed
 
@@ -89,7 +95,7 @@ All notable changes to TagStudio are documented here.
 
 ### Changed
 
-- Updated core request/fetch User Agents to specify TagStudio/0.3.0.
+- Updated core request/fetch User Agents to specify Tunewright/0.3.0.
 
 ### Fixed
 
@@ -118,7 +124,7 @@ All notable changes to TagStudio are documented here.
 
 ### Changed
 
-- **Auth is always active** — Authentication is now mandatory once a user account exists. Removed `TAGSTUDIO_AUTH_ENABLED` toggle.
+- **Auth is always active** — Authentication is now mandatory once a user account exists. Removed `TUNEWRIGHT_AUTH_ENABLED` toggle.
 - **Session model enriched** — Sessions now store user ID, username, and role (was just a timestamp).
 - **Middleware rewritten** — Setup mode blocks all non-auth API endpoints (was: allowed everything). Auth endpoints always pass through.
 - **Brute-force throttling** — Consistent mutex handling; timing oracle protection with dummy argon2 verification on unknown usernames.
@@ -129,10 +135,10 @@ All notable changes to TagStudio are documented here.
 
 ### Removed
 
-- `TAGSTUDIO_AUTH_ENABLED` environment variable.
-- `TAGSTUDIO_USERNAME` environment variable.
-- `TAGSTUDIO_PASSWORD` environment variable.
-- `TAGSTUDIO_SESSION_SECRET` environment variable.
+- `TUNEWRIGHT_AUTH_ENABLED` environment variable.
+- `TUNEWRIGHT_USERNAME` environment variable.
+- `TUNEWRIGHT_PASSWORD` environment variable.
+- `TUNEWRIGHT_SESSION_SECRET` environment variable.
 - Plain-text password comparison.
 
 ### Security

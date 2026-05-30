@@ -1,6 +1,6 @@
 use crate::audio;
 use crate::format_string;
-use crate::types::TagStudioError;
+use crate::types::TunewrightError;
 use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
@@ -19,7 +19,7 @@ pub fn preview_renames(
     data_root: &Path,
     files: &[(String, String)], // (id, relative_path)
     format: &str,
-) -> Result<Vec<RenamePreview>, TagStudioError> {
+) -> Result<Vec<RenamePreview>, TunewrightError> {
     // Reads are independent, so compute (id, old_name, new_name) in parallel.
     // Conflict detection is order-dependent, so it runs as a sequential pass below.
     let computed: Vec<(String, String, String)> = files

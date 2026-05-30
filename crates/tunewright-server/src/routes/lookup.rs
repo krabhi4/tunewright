@@ -4,8 +4,8 @@ use axum::response::{IntoResponse, Response};
 use axum::Json;
 use serde::Deserialize;
 use std::time::Duration;
-use tagstudio_lookup::types::{ReleaseDetail, ReleaseSearchResult};
-use tagstudio_lookup::{applemusic, musicbrainz};
+use tunewright_lookup::types::{ReleaseDetail, ReleaseSearchResult};
+use tunewright_lookup::{applemusic, musicbrainz};
 
 use crate::state::AppState;
 
@@ -29,7 +29,10 @@ fn bad_gateway(e: String) -> Response {
 /// Tracks next-allowed time to properly serialize concurrent requests.
 async fn rate_limit_musicbrainz(state: &AppState) {
     let sleep_dur = {
-        let mut next_allowed = state.musicbrainz_next_allowed.lock().unwrap();
+        let mut next_allowed = state
+            .musicbrainz_next_allowed
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
         let now = std::time::Instant::now();
         let wait = next_allowed.checked_duration_since(now);
         // Schedule this request's slot and advance the next-allowed time

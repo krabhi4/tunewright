@@ -1,4 +1,4 @@
-use crate::types::{TagData, TagStudioError, TagWriteChanges, WriteResult};
+use crate::types::{TagData, TunewrightError, TagWriteChanges, WriteResult};
 use lofty::config::{ParseOptions, ParsingMode, WriteOptions};
 use lofty::file::{AudioFile, TaggedFileExt};
 use lofty::probe::Probe;
@@ -28,12 +28,12 @@ fn full_parse_options() -> ParseOptions {
 /// Read tags FAST — skips audio properties and cover art data.
 /// Returns tag text fields only (title, artist, album, etc.).
 /// Use this for populating the grid quickly.
-pub fn read_tags_fast(path: &Path) -> Result<TagData, TagStudioError> {
+pub fn read_tags_fast(path: &Path) -> Result<TagData, TunewrightError> {
     let tagged = Probe::open(path)
-        .map_err(|e| TagStudioError::TagReadError(format!("{}: {}", path.display(), e)))?
+        .map_err(|e| TunewrightError::TagReadError(format!("{}: {}", path.display(), e)))?
         .options(fast_parse_options())
         .read()
-        .map_err(|e| TagStudioError::TagReadError(format!("{}: {}", path.display(), e)))?;
+        .map_err(|e| TunewrightError::TagReadError(format!("{}: {}", path.display(), e)))?;
 
     let tag_types: Vec<String> = tagged
         .tags()
@@ -89,12 +89,12 @@ pub fn read_tags_fast(path: &Path) -> Result<TagData, TagStudioError> {
 
 /// Read tags with full audio properties (duration, bitrate, sample rate).
 /// Slower — use for detailed view or when user explicitly requests properties.
-pub fn read_tags_full(path: &Path) -> Result<TagData, TagStudioError> {
+pub fn read_tags_full(path: &Path) -> Result<TagData, TunewrightError> {
     let tagged = Probe::open(path)
-        .map_err(|e| TagStudioError::TagReadError(format!("{}: {}", path.display(), e)))?
+        .map_err(|e| TunewrightError::TagReadError(format!("{}: {}", path.display(), e)))?
         .options(full_parse_options())
         .read()
-        .map_err(|e| TagStudioError::TagReadError(format!("{}: {}", path.display(), e)))?;
+        .map_err(|e| TunewrightError::TagReadError(format!("{}: {}", path.display(), e)))?;
 
     let props = tagged.properties();
     let duration = props.duration();
@@ -193,11 +193,11 @@ pub fn batch_read_tags_full(
 }
 
 /// Write tag changes to a single audio file
-pub fn write_tags(path: &Path, changes: &TagWriteChanges) -> Result<(), TagStudioError> {
+pub fn write_tags(path: &Path, changes: &TagWriteChanges) -> Result<(), TunewrightError> {
     let mut tagged = Probe::open(path)
-        .map_err(|e| TagStudioError::TagWriteError(format!("{}: {}", path.display(), e)))?
+        .map_err(|e| TunewrightError::TagWriteError(format!("{}: {}", path.display(), e)))?
         .read()
-        .map_err(|e| TagStudioError::TagWriteError(format!("{}: {}", path.display(), e)))?;
+        .map_err(|e| TunewrightError::TagWriteError(format!("{}: {}", path.display(), e)))?;
 
     let primary_type = tagged
         .primary_tag()
@@ -283,7 +283,7 @@ pub fn write_tags(path: &Path, changes: &TagWriteChanges) -> Result<(), TagStudi
 
     tagged
         .save_to_path(path, WriteOptions::default())
-        .map_err(|e| TagStudioError::TagWriteError(format!("{}: {}", path.display(), e)))?;
+        .map_err(|e| TunewrightError::TagWriteError(format!("{}: {}", path.display(), e)))?;
 
     Ok(())
 }

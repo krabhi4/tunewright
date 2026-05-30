@@ -1,6 +1,6 @@
 services:
-  tagstudio:
-    image: ghcr.io/krabhi4/tagstudio:latest
+  tunewright:
+    image: ghcr.io/krabhi4/tunewright:latest
     ports:
       - "8080:8080"
     volumes:

@@ -9,7 +9,7 @@ use serde::Deserialize;
 use crate::state::{AppState, Session};
 use crate::users::{self, Role};
 
-const SESSION_COOKIE: &str = "tagstudio_session";
+const SESSION_COOKIE: &str = "tunewright_session";
 
 fn generate_session_token() -> String {
     let bytes: [u8; 32] = rand::random();
