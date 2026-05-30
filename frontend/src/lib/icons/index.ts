@@ -9,7 +9,9 @@ export const ICONS = {
 	sun: '<circle cx="12" cy="12" r="4.5"/><path d="M12 2v2M12 20v2M4 12H2M22 12h-2M5 5l1.5 1.5M17.5 17.5L19 19M19 5l-1.5 1.5M6.5 17.5L5 19"/>',
 	moon: '<path d="M20 13a8 8 0 1 1-9-9 6.5 6.5 0 0 0 9 9z"/>',
 	folder: '<path d="M3 6h6l2 2h10v11H3z"/>',
-	command: '<path d="M9 6a3 3 0 1 0-3 3h12a3 3 0 1 0-3-3v12a3 3 0 1 0 3-3H6a3 3 0 1 0 3 3z"/>'
+	command: '<path d="M9 6a3 3 0 1 0-3 3h12a3 3 0 1 0-3-3v12a3 3 0 1 0 3-3H6a3 3 0 1 0 3 3z"/>',
+	palette: '<rect x="4" y="4" width="7" height="7" rx="1"/><rect x="13" y="4" width="7" height="7" rx="1"/><rect x="4" y="13" width="7" height="7" rx="1"/><rect x="13" y="13" width="7" height="7" rx="1"/>',
+	check: '<path d="M5 12l4.5 4.5L19 7"/>'
 } as const;
 
 export type IconName = keyof typeof ICONS;

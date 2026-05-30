@@ -1,6 +1,6 @@
 <script lang="ts">
 	import UserMenu from './UserMenu.svelte';
-	import { themeMode, toggleTheme } from '$lib/stores/theme';
+	import ThemeMenu from './ThemeMenu.svelte';
 	import Icon from '$lib/icons/Icon.svelte';
 	import { ICONS } from '$lib/icons';
 	import Logo from '$lib/icons/Logo.svelte';
@@ -62,13 +62,7 @@
 		<span>TagStudio</span>
 	</div>
 
-	<button class="toolbar-btn theme-toggle-btn" onclick={toggleTheme} title="Switch Dark/Light Theme" aria-label="Toggle theme">
-		{#if $themeMode === 'dark'}
-			<Icon path={ICONS.sun} size={16} label="Switch to light theme" />
-		{:else}
-			<Icon path={ICONS.moon} size={16} label="Switch to dark theme" />
-		{/if}
-	</button>
+	<ThemeMenu />
 
 	<UserMenu {onManageUsers} />
 </div>
@@ -128,6 +122,7 @@
 		display: flex;
 		align-items: center;
 		gap: 6px;
+		font-family: var(--font-display);
 		font-size: 11px;
 		font-weight: 600;
 		color: var(--text-muted);
@@ -155,14 +150,5 @@
 		.toolbar-title {
 			display: none;
 		}
-	}
-
-	.theme-toggle-btn {
-		margin-right: 6px;
-		padding: 4px 6px;
-		border-radius: var(--radius-sm);
-		display: flex;
-		align-items: center;
-		justify-content: center;
 	}
 </style>

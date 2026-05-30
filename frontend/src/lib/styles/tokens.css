@@ -136,3 +136,236 @@
 	--radius-md: 4px;
 	--radius-lg: 6px;
 }
+
+/* ============================== EDITORIAL ============================== */
+/* Warm, crafted: espresso/cream surfaces, terracotta accent, Fraunces wordmark. */
+
+[data-theme="editorial"][data-mode="dark"] {
+	--bg-base: #1a1613;
+	--bg-surface: #221d18;
+	--bg-elevated: #2a231c;
+	--bg-hover: #322a22;
+	--bg-selected: rgba(210, 115, 74, 0.14);
+	--bg-selected-strong: rgba(210, 115, 74, 0.22);
+
+	--text-primary: #ece3d8;
+	--text-secondary: #b3a596;
+	--text-muted: #877a6c;
+	--text-placeholder: #6e6253;
+	--text-on-accent: #1a1613;
+
+	--border: #352c24;
+	--border-subtle: #2a221c;
+	--grid-border: #2e261f;
+	--grid-header-bg: #221d18;
+	--grid-row-alt: rgba(255, 255, 255, 0.012);
+	--grid-row-hover: rgba(255, 255, 255, 0.035);
+
+	--accent: #d2734a;
+	--accent-hover: #e0855c;
+	--accent-muted: rgba(210, 115, 74, 0.25);
+	--accent-subtle: rgba(210, 115, 74, 0.08);
+
+	--state-dirty: #e3b04e;
+	--state-dirty-bg: rgba(227, 176, 78, 0.12);
+	--state-matched: #8aa85f;
+	--state-matched-bg: rgba(138, 168, 95, 0.12);
+	--state-conflict: #d8584f;
+	--state-conflict-bg: rgba(216, 88, 79, 0.12);
+	--state-info: #c98f5a;
+
+	--modified: var(--state-dirty);
+	--success: var(--state-matched);
+	--warning: var(--state-dirty);
+	--error: var(--state-conflict);
+	--accent-15: rgba(210, 115, 74, 0.15);
+	--error-10: rgba(216, 88, 79, 0.1);
+
+	--backdrop: rgba(0, 0, 0, 0.55);
+	--shadow-modal: 0 8px 32px rgba(0, 0, 0, 0.5);
+	--shadow-dropdown: 0 4px 12px rgba(0, 0, 0, 0.4);
+	--shadow-context: 0 4px 16px rgba(0, 0, 0, 0.5);
+	--shadow-inset: inset 0 1px 3px rgba(0, 0, 0, 0.4);
+
+	--font-ui: 'Hanken Grotesk', -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
+	--font-mono: 'IBM Plex Mono', ui-monospace, 'SF Mono', Menlo, monospace;
+	--font-display: 'Fraunces', Georgia, 'Times New Roman', serif;
+
+	--radius-sm: 2px;
+	--radius-md: 4px;
+	--radius-lg: 6px;
+}
+
+[data-theme="editorial"][data-mode="light"] {
+	--bg-base: #f3ede3;
+	--bg-surface: #fbf7f0;
+	--bg-elevated: #fffdf9;
+	--bg-hover: #ece3d4;
+	--bg-selected: rgba(166, 79, 43, 0.10);
+	--bg-selected-strong: rgba(166, 79, 43, 0.18);
+
+	--text-primary: #2c2620;
+	--text-secondary: #6b5f50;
+	--text-muted: #978a78;
+	--text-placeholder: #b3a794;
+	--text-on-accent: #ffffff;
+
+	--border: #ddd2c1;
+	--border-subtle: #e8dfd0;
+	--grid-border: #e2d8c8;
+	--grid-header-bg: #ece3d4;
+	--grid-row-alt: rgba(0, 0, 0, 0.012);
+	--grid-row-hover: rgba(0, 0, 0, 0.03);
+
+	--accent: #a64f2b;
+	--accent-hover: #8f4324;
+	--accent-muted: rgba(166, 79, 43, 0.20);
+	--accent-subtle: rgba(166, 79, 43, 0.07);
+
+	--state-dirty: #9c6b1c;
+	--state-dirty-bg: rgba(156, 107, 28, 0.12);
+	--state-matched: #5f7d3a;
+	--state-matched-bg: rgba(95, 125, 58, 0.12);
+	--state-conflict: #bf4339;
+	--state-conflict-bg: rgba(191, 67, 57, 0.10);
+	--state-info: #9a6a33;
+
+	--modified: var(--state-dirty);
+	--success: var(--state-matched);
+	--warning: var(--state-dirty);
+	--error: var(--state-conflict);
+	--accent-15: rgba(166, 79, 43, 0.15);
+	--error-10: rgba(191, 67, 57, 0.05);
+
+	--backdrop: rgba(40, 30, 20, 0.4);
+	--shadow-modal: 0 8px 32px rgba(80, 60, 40, 0.15);
+	--shadow-dropdown: 0 4px 12px rgba(80, 60, 40, 0.1);
+	--shadow-context: 0 4px 16px rgba(80, 60, 40, 0.15);
+	--shadow-inset: inset 0 1px 3px rgba(80, 60, 40, 0.08);
+
+	--font-ui: 'Hanken Grotesk', -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
+	--font-mono: 'IBM Plex Mono', ui-monospace, 'SF Mono', Menlo, monospace;
+	--font-display: 'Fraunces', Georgia, 'Times New Roman', serif;
+
+	--radius-sm: 2px;
+	--radius-md: 4px;
+	--radius-lg: 6px;
+}
+
+/* ============================== TERMINAL ============================== */
+/* Dark-native: amber-on-black, monospace throughout. */
+
+[data-theme="terminal"] {
+	--bg-base: #0a0b0a;
+	--bg-surface: #0f110f;
+	--bg-elevated: #15140f;
+	--bg-hover: #1c1810;
+	--bg-selected: rgba(240, 168, 48, 0.14);
+	--bg-selected-strong: rgba(240, 168, 48, 0.24);
+
+	--text-primary: #d7d2c8;
+	--text-secondary: #8a8472;
+	--text-muted: #6a6555;
+	--text-placeholder: #4f4a3d;
+	--text-on-accent: #0a0b0a;
+
+	--border: #241f17;
+	--border-subtle: #15140f;
+	--grid-border: #1c1810;
+	--grid-header-bg: #0f110f;
+	--grid-row-alt: rgba(255, 255, 255, 0.012);
+	--grid-row-hover: rgba(240, 168, 48, 0.05);
+
+	--accent: #f0a830;
+	--accent-hover: #ffbe4d;
+	--accent-muted: rgba(240, 168, 48, 0.25);
+	--accent-subtle: rgba(240, 168, 48, 0.08);
+
+	--state-dirty: #ffcf6b;
+	--state-dirty-bg: rgba(255, 207, 107, 0.12);
+	--state-matched: #8bd450;
+	--state-matched-bg: rgba(139, 212, 80, 0.12);
+	--state-conflict: #ff5f56;
+	--state-conflict-bg: rgba(255, 95, 86, 0.12);
+	--state-info: #5fb0c9;
+
+	--modified: var(--state-dirty);
+	--success: var(--state-matched);
+	--warning: var(--state-dirty);
+	--error: var(--state-conflict);
+	--accent-15: rgba(240, 168, 48, 0.15);
+	--error-10: rgba(255, 95, 86, 0.1);
+
+	--backdrop: rgba(0, 0, 0, 0.7);
+	--shadow-modal: 0 8px 32px rgba(0, 0, 0, 0.6);
+	--shadow-dropdown: 0 4px 12px rgba(0, 0, 0, 0.5);
+	--shadow-context: 0 4px 16px rgba(0, 0, 0, 0.6);
+	--shadow-inset: inset 0 1px 3px rgba(0, 0, 0, 0.5);
+
+	--font-ui: 'IBM Plex Mono', ui-monospace, 'SF Mono', Menlo, monospace;
+	--font-mono: 'IBM Plex Mono', ui-monospace, 'SF Mono', Menlo, monospace;
+	--font-display: 'IBM Plex Mono', ui-monospace, monospace;
+
+	--radius-sm: 2px;
+	--radius-md: 3px;
+	--radius-lg: 4px;
+}
+
+/* ============================== DAW ============================== */
+/* Dark-native: deep panels, electric cyan + hot-orange "dirty" accent. */
+
+[data-theme="daw"] {
+	--bg-base: #0c0d10;
+	--bg-surface: #14161b;
+	--bg-elevated: #1b1f27;
+	--bg-hover: #232733;
+	--bg-selected: rgba(52, 224, 224, 0.12);
+	--bg-selected-strong: rgba(52, 224, 224, 0.20);
+
+	--text-primary: #e6e8ec;
+	--text-secondary: #9aa3b2;
+	--text-muted: #5f6877;
+	--text-placeholder: #474f5c;
+	--text-on-accent: #08191a;
+
+	--border: #232733;
+	--border-subtle: #16181f;
+	--grid-border: #1b1f27;
+	--grid-header-bg: #101218;
+	--grid-row-alt: rgba(255, 255, 255, 0.012);
+	--grid-row-hover: rgba(255, 255, 255, 0.035);
+
+	--accent: #34e0e0;
+	--accent-hover: #5fecec;
+	--accent-muted: rgba(52, 224, 224, 0.22);
+	--accent-subtle: rgba(52, 224, 224, 0.08);
+
+	--state-dirty: #ff764d;
+	--state-dirty-bg: rgba(255, 118, 77, 0.14);
+	--state-matched: #57d977;
+	--state-matched-bg: rgba(87, 217, 119, 0.12);
+	--state-conflict: #ff5470;
+	--state-conflict-bg: rgba(255, 84, 112, 0.12);
+	--state-info: #6aa6ff;
+
+	--modified: var(--state-dirty);
+	--success: var(--state-matched);
+	--warning: var(--state-dirty);
+	--error: var(--state-conflict);
+	--accent-15: rgba(52, 224, 224, 0.15);
+	--error-10: rgba(255, 84, 112, 0.1);
+
+	--backdrop: rgba(0, 0, 0, 0.65);
+	--shadow-modal: 0 8px 32px rgba(0, 0, 0, 0.55);
+	--shadow-dropdown: 0 4px 12px rgba(0, 0, 0, 0.45);
+	--shadow-context: 0 4px 16px rgba(0, 0, 0, 0.55);
+	--shadow-inset: inset 0 1px 3px rgba(0, 0, 0, 0.45);
+
+	--font-ui: 'Hanken Grotesk', -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
+	--font-mono: 'IBM Plex Mono', ui-monospace, 'SF Mono', Menlo, monospace;
+	--font-display: 'Hanken Grotesk', -apple-system, system-ui, sans-serif;
+
+	--radius-sm: 2px;
+	--radius-md: 4px;
+	--radius-lg: 6px;
+}
