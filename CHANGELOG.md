@@ -2,6 +2,21 @@
 
 All notable changes to TagStudio are documented here.
 
+## [0.5.1] - 2026-05-30
+
+### Added
+
+- **Editorial, Terminal, and DAW Themes** - Three new theme families alongside Console, selectable from a new toolbar theme switcher (family picker plus a light/dark toggle). Terminal and DAW are dark-native and present a "Dark only" appearance.
+- **Per-Theme Font Loading** - Editorial and DAW load their typefaces (Fraunces, Hanken Grotesk) on demand, keeping the default Console theme lean.
+
+### Fixed
+
+- **No Theme Flash on Load** - The saved theme is applied before first paint, eliminating a flash of the default theme for non-default selections.
+- **Resilient Theme Storage** - All `localStorage` and `matchMedia` access is guarded, so a browser with storage blocked (for example, private mode) can no longer hang the app on load.
+- **Preserved Appearance Choice** - Switching through a dark-native theme and back no longer discards a saved light-mode preference.
+- **Accessibility** - The Editorial light accent now meets WCAG AA contrast.
+- **Font Loading** - A failed lazy font load retries on re-activation instead of remaining on fallback fonts.
+
 ## [0.5.0] - 2026-05-29
 
 ### Added

@@ -5,7 +5,7 @@ use serde::Deserialize;
 use std::collections::HashMap;
 
 const MB_BASE: &str = "https://musicbrainz.org/ws/2";
-const USER_AGENT: &str = "TagStudio/0.5.0 (https://github.com/tagstudio)";
+const USER_AGENT: &str = "TagStudio/0.5.1 (https://github.com/tagstudio)";
 const MB_HEADERS: &[(&str, &str)] = &[("User-Agent", USER_AGENT), ("Accept", "application/json")];
 
 // CoverArtArchive JSON API types
