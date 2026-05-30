@@ -228,9 +228,7 @@ pub fn write_tags(path: &Path, changes: &TagWriteChanges) -> Result<(), TagStudi
         tag.set_comment(v.clone());
     }
     if let Some(v) = changes.year {
-        // RecordingDate is the canonical date key that maps to every format
-        // (ID3v2 TDRC, MP4 ©day, Vorbis DATE, RIFF ICRD, APE). ItemKey::Year
-        // does NOT map to ID3v2/MP4/RIFF, so writing it would be dropped there.
+        // RecordingDate is the cross-format date key; ItemKey::Year isn't mapped for ID3v2.
         tag.remove_key(ItemKey::Year);
         tag.remove_key(ItemKey::RecordingDate);
         tag.push(TagItem::new(
@@ -273,8 +271,6 @@ pub fn write_tags(path: &Path, changes: &TagWriteChanges) -> Result<(), TagStudi
     // Write extra/custom tag fields
     if let Some(ref extra) = changes.extra {
         for (key, value) in extra {
-            // lofty 0.24's generic `Tag` only holds known `ItemKey`s, so keys
-            // outside the known set can't be written back and are skipped.
             let Some(item_key) = string_to_item_key(key) else {
                 continue;
             };
@@ -332,16 +328,14 @@ fn first_item_value(tags: &[&Tag], key: ItemKey) -> Option<String> {
         .map(|s| s.to_string())
 }
 
-/// Read the year from a tag, checking `RecordingDate` (the cross-format date key)
-/// first, then `Year`, and parsing the leading year out of the value.
+/// Read the year, preferring `RecordingDate` (cross-format) then `Year`.
 fn read_year(tag: &Tag) -> Option<u32> {
     tag.get_string(ItemKey::RecordingDate)
         .or_else(|| tag.get_string(ItemKey::Year))
         .and_then(parse_year)
 }
 
-/// Extract a leading year (up to 4 digits) from a date-ish string
-/// (e.g. "2021", "2021-05-30", "2021.05.30").
+/// Parse the leading year from a date string, e.g. "2021-05-30" -> 2021.
 fn parse_year(s: &str) -> Option<u32> {
     let digits: String = s
         .trim()

@@ -9,7 +9,8 @@ COPY frontend/ ./
 RUN pnpm run build
 
 # Stage 2: Build Rust backend
-FROM rust:1.86-bookworm AS backend-builder
+# Track latest stable Rust (matches the stable CI job; avoids MSRV-pin breakage).
+FROM rust:1-bookworm AS backend-builder
 WORKDIR /app
 
 COPY Cargo.toml Cargo.lock* ./
