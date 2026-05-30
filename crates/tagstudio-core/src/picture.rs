@@ -83,12 +83,10 @@ pub fn embed_cover_art(path: &Path, image_data: &[u8]) -> Result<(), TagStudioEr
         MimeType::Jpeg // fallback
     };
 
-    let picture = Picture::new_unchecked(
-        PictureType::CoverFront,
-        Some(mime),
-        None,
-        image_data.to_vec(),
-    );
+    let picture = Picture::unchecked(image_data.to_vec())
+        .pic_type(PictureType::CoverFront)
+        .mime_type(mime)
+        .build();
 
     // Get primary tag type
     let primary_type = tagged

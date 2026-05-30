@@ -48,16 +48,14 @@ pub fn read_tags_fast(path: &Path) -> Result<TagData, TagStudioError> {
     let album = first_string(&tags, |t| t.album());
     let genre = first_string(&tags, |t| t.genre());
     let comment = first_string(&tags, |t| t.comment());
-    let year = tags.iter().find_map(|t| t.year());
+    let year = tags.iter().find_map(|t| read_year(t));
     let track_number = tags.iter().find_map(|t| t.track());
     let track_total = tags.iter().find_map(|t| t.track_total());
     let disc_number = tags.iter().find_map(|t| t.disk());
     let disc_total = tags.iter().find_map(|t| t.disk_total());
 
-    let album_artist = first_item_value(&tags, "ALBUMARTIST")
-        .or_else(|| first_item_value(&tags, "ALBUM ARTIST"))
-        .or_else(|| first_item_value(&tags, "TPE2"));
-    let composer = first_item_value(&tags, "COMPOSER").or_else(|| first_item_value(&tags, "TCOM"));
+    let album_artist = first_item_value(&tags, ItemKey::AlbumArtist);
+    let composer = first_item_value(&tags, ItemKey::Composer);
 
     // Check picture count without loading picture data
     let has_cover = tags.iter().any(|t| !t.pictures().is_empty());
@@ -119,16 +117,14 @@ pub fn read_tags_full(path: &Path) -> Result<TagData, TagStudioError> {
     let album = first_string(&tags, |t| t.album());
     let genre = first_string(&tags, |t| t.genre());
     let comment = first_string(&tags, |t| t.comment());
-    let year = tags.iter().find_map(|t| t.year());
+    let year = tags.iter().find_map(|t| read_year(t));
     let track_number = tags.iter().find_map(|t| t.track());
     let track_total = tags.iter().find_map(|t| t.track_total());
     let disc_number = tags.iter().find_map(|t| t.disk());
     let disc_total = tags.iter().find_map(|t| t.disk_total());
 
-    let album_artist = first_item_value(&tags, "ALBUMARTIST")
-        .or_else(|| first_item_value(&tags, "ALBUM ARTIST"))
-        .or_else(|| first_item_value(&tags, "TPE2"));
-    let composer = first_item_value(&tags, "COMPOSER").or_else(|| first_item_value(&tags, "TCOM"));
+    let album_artist = first_item_value(&tags, ItemKey::AlbumArtist);
+    let composer = first_item_value(&tags, ItemKey::Composer);
 
     let has_cover = tags.iter().any(|t| !t.pictures().is_empty());
 
@@ -232,7 +228,15 @@ pub fn write_tags(path: &Path, changes: &TagWriteChanges) -> Result<(), TagStudi
         tag.set_comment(v.clone());
     }
     if let Some(v) = changes.year {
-        tag.set_year(v);
+        // RecordingDate is the canonical date key that maps to every format
+        // (ID3v2 TDRC, MP4 ©day, Vorbis DATE, RIFF ICRD, APE). ItemKey::Year
+        // does NOT map to ID3v2/MP4/RIFF, so writing it would be dropped there.
+        tag.remove_key(ItemKey::Year);
+        tag.remove_key(ItemKey::RecordingDate);
+        tag.push(TagItem::new(
+            ItemKey::RecordingDate,
+            ItemValue::Text(v.to_string()),
+        ));
     }
     if let Some(v) = changes.track_number {
         tag.set_track(v);
@@ -249,7 +253,7 @@ pub fn write_tags(path: &Path, changes: &TagWriteChanges) -> Result<(), TagStudi
 
     // Write album_artist via TagItem (not available on Accessor trait)
     if let Some(ref v) = changes.album_artist {
-        tag.remove_key(&ItemKey::AlbumArtist);
+        tag.remove_key(ItemKey::AlbumArtist);
         if !v.is_empty() {
             tag.push(TagItem::new(
                 ItemKey::AlbumArtist,
@@ -260,7 +264,7 @@ pub fn write_tags(path: &Path, changes: &TagWriteChanges) -> Result<(), TagStudi
 
     // Write composer via TagItem
     if let Some(ref v) = changes.composer {
-        tag.remove_key(&ItemKey::Composer);
+        tag.remove_key(ItemKey::Composer);
         if !v.is_empty() {
             tag.push(TagItem::new(ItemKey::Composer, ItemValue::Text(v.clone())));
         }
@@ -269,8 +273,12 @@ pub fn write_tags(path: &Path, changes: &TagWriteChanges) -> Result<(), TagStudi
     // Write extra/custom tag fields
     if let Some(ref extra) = changes.extra {
         for (key, value) in extra {
-            let item_key = string_to_item_key(key);
-            tag.remove_key(&item_key);
+            // lofty 0.24's generic `Tag` only holds known `ItemKey`s, so keys
+            // outside the known set can't be written back and are skipped.
+            let Some(item_key) = string_to_item_key(key) else {
+                continue;
+            };
+            tag.remove_key(item_key);
             if !value.is_empty() {
                 tag.push(TagItem::new(item_key, ItemValue::Text(value.clone())));
             }
@@ -318,27 +326,34 @@ where
         .filter(|s| !s.is_empty())
 }
 
-fn first_item_value(tags: &[&Tag], key: &str) -> Option<String> {
-    for tag in tags {
-        for item in tag.items() {
-            let item_key = match item.key() {
-                ItemKey::Unknown(k) => k.to_string(),
-                other => format!("{:?}", other),
-            };
-            if item_key.eq_ignore_ascii_case(key) {
-                if let ItemValue::Text(val) = item.value() {
-                    if !val.is_empty() {
-                        return Some(val.to_string());
-                    }
-                }
-            }
-        }
-    }
-    None
+fn first_item_value(tags: &[&Tag], key: ItemKey) -> Option<String> {
+    tags.iter()
+        .find_map(|t| t.get_string(key).filter(|s| !s.is_empty()))
+        .map(|s| s.to_string())
+}
+
+/// Read the year from a tag, checking `RecordingDate` (the cross-format date key)
+/// first, then `Year`, and parsing the leading year out of the value.
+fn read_year(tag: &Tag) -> Option<u32> {
+    tag.get_string(ItemKey::RecordingDate)
+        .or_else(|| tag.get_string(ItemKey::Year))
+        .and_then(parse_year)
+}
+
+/// Extract a leading year (up to 4 digits) from a date-ish string
+/// (e.g. "2021", "2021-05-30", "2021.05.30").
+fn parse_year(s: &str) -> Option<u32> {
+    let digits: String = s
+        .trim()
+        .chars()
+        .take_while(|c| c.is_ascii_digit())
+        .take(4)
+        .collect();
+    digits.parse::<u32>().ok().filter(|&y| y > 0)
 }
 
 /// Fields already handled by the standard TagData fields
-fn is_standard_key(key: &ItemKey) -> bool {
+fn is_standard_key(key: ItemKey) -> bool {
     matches!(
         key,
         ItemKey::TrackTitle
@@ -358,16 +373,13 @@ fn is_standard_key(key: &ItemKey) -> bool {
 }
 
 /// Convert an ItemKey to a canonical string key for the extra tags map
-fn item_key_to_string(key: &ItemKey) -> String {
-    match key {
-        ItemKey::Unknown(s) => s.to_string(),
-        other => format!("{:?}", other),
-    }
+fn item_key_to_string(key: ItemKey) -> String {
+    format!("{:?}", key)
 }
 
 /// Convert a string key back to an ItemKey for writing
-fn string_to_item_key(key: &str) -> ItemKey {
-    match key {
+fn string_to_item_key(key: &str) -> Option<ItemKey> {
+    Some(match key {
         "Lyrics" => ItemKey::Lyrics,
         "Bpm" => ItemKey::Bpm,
         "CopyrightMessage" => ItemKey::CopyrightMessage,
@@ -389,8 +401,8 @@ fn string_to_item_key(key: &str) -> ItemKey {
         "ReplayGainTrackPeak" => ItemKey::ReplayGainTrackPeak,
         "ReplayGainAlbumGain" => ItemKey::ReplayGainAlbumGain,
         "ReplayGainAlbumPeak" => ItemKey::ReplayGainAlbumPeak,
-        _ => ItemKey::Unknown(key.to_string()),
-    }
+        _ => return None,
+    })
 }
 
 /// Collect all non-standard tag items into a HashMap
@@ -413,4 +425,38 @@ fn collect_extra_tags(tags: &[&Tag]) -> HashMap<String, String> {
         }
     }
     extra
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{parse_year, read_year};
+    use lofty::tag::{ItemKey, ItemValue, Tag, TagItem, TagType};
+
+    #[test]
+    fn parse_year_extracts_leading_year() {
+        assert_eq!(parse_year("2021"), Some(2021));
+        assert_eq!(parse_year("2021-05-30"), Some(2021));
+        assert_eq!(parse_year("2021.05.30"), Some(2021));
+        assert_eq!(parse_year(" 1998 "), Some(1998));
+        assert_eq!(parse_year(""), None);
+        assert_eq!(parse_year("n/a"), None);
+        assert_eq!(parse_year("0"), None);
+    }
+
+    #[test]
+    fn read_year_prefers_recording_date() {
+        let mut tag = Tag::new(TagType::Id3v2);
+        tag.push(TagItem::new(
+            ItemKey::RecordingDate,
+            ItemValue::Text("2019-01-02".into()),
+        ));
+        assert_eq!(read_year(&tag), Some(2019));
+    }
+
+    #[test]
+    fn read_year_falls_back_to_year_key() {
+        let mut tag = Tag::new(TagType::VorbisComments);
+        tag.push(TagItem::new(ItemKey::Year, ItemValue::Text("2005".into())));
+        assert_eq!(read_year(&tag), Some(2005));
+    }
 }
