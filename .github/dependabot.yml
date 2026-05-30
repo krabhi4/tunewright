@@ -1,0 +1,47 @@
+# Dependabot config: version-update PRs with a supply-chain "cooldown".
+# Cooldown delays only ROUTINE version updates. Security updates (CVE fixes)
+# are exempt and still open immediately, so enable Dependabot security updates
+# + alerts in repo Settings -> Code security.
+#
+# Rationale for the asymmetric windows:
+#   - npm/pnpm: 30 days. The npm registry sees frequent supply-chain attacks;
+#     malicious or compromised releases usually get reported and yanked well
+#     within a month, so we wait for the dust to settle.
+#   - cargo: 7 days. crates.io has had far fewer such incidents; a shorter
+#     window keeps Rust deps reasonably current without much added risk.
+version: 2
+updates:
+  # --- Rust workspace (root Cargo.toml + crates/*) ---
+  - package-ecosystem: "cargo"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    cooldown:
+      default-days: 7
+    open-pull-requests-limit: 5
+    groups:
+      rust:
+        patterns: ["*"]   # one grouped PR instead of N separate ones
+
+  # --- SvelteKit frontend (pnpm, npm ecosystem) ---
+  - package-ecosystem: "npm"
+    directory: "/frontend"
+    schedule:
+      interval: "weekly"
+    cooldown:
+      default-days: 30
+    open-pull-requests-limit: 5
+    groups:
+      frontend:
+        patterns: ["*"]
+
+  # --- GitHub Actions used by ci.yml / release.yml ---
+  # Actions have also seen high-profile supply-chain compromises
+  # (e.g. tj-actions/changed-files, 2025), so treat them like npm.
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    cooldown:
+      default-days: 30
+    open-pull-requests-limit: 5

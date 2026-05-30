@@ -1,2 +1,11 @@
 allowBuilds:
   esbuild: true
+
+# Install-time supply-chain floor: refuse to install ANY version (including
+# transitive deps) younger than this many MINUTES. Catches smash-and-grab
+# attacks at resolution time, which the Dependabot cooldown does not cover for
+# transitive deps. Kept at 7 days (not 30): unlike the Dependabot cooldown this
+# gate is CVE-blind, so a long floor would also block legitimate security fixes
+# at `pnpm update`. Does not affect CI (--frozen-lockfile skips resolution).
+# 10080 = 7 days. Use `minimumReleaseAgeExclude` to fast-track a specific pkg.
+minimumReleaseAge: 10080
