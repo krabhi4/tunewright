@@ -1,4 +1,4 @@
-use crate::types::TagStudioError;
+use crate::types::TunewrightError;
 use image::imageops::FilterType;
 use lofty::config::{ParseOptions, WriteOptions};
 use lofty::file::{AudioFile, TaggedFileExt};
@@ -8,13 +8,13 @@ use std::io::Cursor;
 use std::path::Path;
 
 /// Extract the first embedded cover art from an audio file
-pub fn extract_cover_art(path: &Path) -> Result<Option<(Vec<u8>, String)>, TagStudioError> {
+pub fn extract_cover_art(path: &Path) -> Result<Option<(Vec<u8>, String)>, TunewrightError> {
     // We only want the cover picture, not audio properties — skip parsing those.
     let tagged = Probe::open(path)
-        .map_err(|e| TagStudioError::TagReadError(format!("{}: {}", path.display(), e)))?
+        .map_err(|e| TunewrightError::TagReadError(format!("{}: {}", path.display(), e)))?
         .options(ParseOptions::new().read_properties(false))
         .read()
-        .map_err(|e| TagStudioError::TagReadError(format!("{}: {}", path.display(), e)))?;
+        .map_err(|e| TunewrightError::TagReadError(format!("{}: {}", path.display(), e)))?;
 
     for tag in tagged.tags() {
         if let Some(pic) = tag.pictures().first() {
@@ -37,21 +37,21 @@ pub fn extract_cover_art(path: &Path) -> Result<Option<(Vec<u8>, String)>, TagSt
 pub fn extract_cover_art_thumbnail(
     path: &Path,
     max_size: u32,
-) -> Result<Option<(Vec<u8>, String)>, TagStudioError> {
+) -> Result<Option<(Vec<u8>, String)>, TunewrightError> {
     let art = extract_cover_art(path)?;
     match art {
         None => Ok(None),
         Some((data, mime)) if max_size == 0 => Ok(Some((data, mime))),
         Some((data, _mime)) => {
             let img = image::load_from_memory(&data)
-                .map_err(|e| TagStudioError::ImageError(e.to_string()))?;
+                .map_err(|e| TunewrightError::ImageError(e.to_string()))?;
 
             if img.width() <= max_size && img.height() <= max_size {
                 // Already small enough, return as JPEG
                 let mut buf = Vec::new();
                 let mut cursor = Cursor::new(&mut buf);
                 img.write_to(&mut cursor, image::ImageFormat::Jpeg)
-                    .map_err(|e| TagStudioError::ImageError(e.to_string()))?;
+                    .map_err(|e| TunewrightError::ImageError(e.to_string()))?;
                 return Ok(Some((buf, "image/jpeg".to_string())));
             }
 
@@ -60,7 +60,7 @@ pub fn extract_cover_art_thumbnail(
             let mut cursor = Cursor::new(&mut buf);
             thumb
                 .write_to(&mut cursor, image::ImageFormat::Jpeg)
-                .map_err(|e| TagStudioError::ImageError(e.to_string()))?;
+                .map_err(|e| TunewrightError::ImageError(e.to_string()))?;
 
             Ok(Some((buf, "image/jpeg".to_string())))
         }
@@ -68,11 +68,11 @@ pub fn extract_cover_art_thumbnail(
 }
 
 /// Embed cover art into an audio file
-pub fn embed_cover_art(path: &Path, image_data: &[u8]) -> Result<(), TagStudioError> {
+pub fn embed_cover_art(path: &Path, image_data: &[u8]) -> Result<(), TunewrightError> {
     let mut tagged = Probe::open(path)
-        .map_err(|e| TagStudioError::TagWriteError(format!("{}: {}", path.display(), e)))?
+        .map_err(|e| TunewrightError::TagWriteError(format!("{}: {}", path.display(), e)))?
         .read()
-        .map_err(|e| TagStudioError::TagWriteError(format!("{}: {}", path.display(), e)))?;
+        .map_err(|e| TunewrightError::TagWriteError(format!("{}: {}", path.display(), e)))?;
 
     // Detect mime type
     let mime = if image_data.starts_with(&[0xFF, 0xD8]) {
@@ -108,17 +108,17 @@ pub fn embed_cover_art(path: &Path, image_data: &[u8]) -> Result<(), TagStudioEr
 
     tagged
         .save_to_path(path, WriteOptions::default())
-        .map_err(|e| TagStudioError::TagWriteError(format!("{}: {}", path.display(), e)))?;
+        .map_err(|e| TunewrightError::TagWriteError(format!("{}: {}", path.display(), e)))?;
 
     Ok(())
 }
 
 /// Remove all cover art from an audio file
-pub fn remove_cover_art(path: &Path) -> Result<(), TagStudioError> {
+pub fn remove_cover_art(path: &Path) -> Result<(), TunewrightError> {
     let mut tagged = Probe::open(path)
-        .map_err(|e| TagStudioError::TagWriteError(format!("{}: {}", path.display(), e)))?
+        .map_err(|e| TunewrightError::TagWriteError(format!("{}: {}", path.display(), e)))?
         .read()
-        .map_err(|e| TagStudioError::TagWriteError(format!("{}: {}", path.display(), e)))?;
+        .map_err(|e| TunewrightError::TagWriteError(format!("{}: {}", path.display(), e)))?;
 
     let primary_type = tagged
         .primary_tag()
@@ -134,7 +134,7 @@ pub fn remove_cover_art(path: &Path) -> Result<(), TagStudioError> {
 
     tagged
         .save_to_path(path, WriteOptions::default())
-        .map_err(|e| TagStudioError::TagWriteError(format!("{}: {}", path.display(), e)))?;
+        .map_err(|e| TunewrightError::TagWriteError(format!("{}: {}", path.display(), e)))?;
 
     Ok(())
 }

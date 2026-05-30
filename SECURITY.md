@@ -2,7 +2,7 @@
 
 ## Reporting a Vulnerability
 
-If you discover a security vulnerability in TagStudio, please report it responsibly.
+If you discover a security vulnerability in Tunewright, please report it responsibly.
 
 **Do not open a public GitHub issue for security vulnerabilities.**
 
@@ -18,7 +18,7 @@ You should receive a response within 72 hours. We will work with you to understa
 
 ## Scope
 
-TagStudio is a self-hosted application typically run on a private network. The threat model assumes:
+Tunewright is a self-hosted application typically run on a private network. The threat model assumes:
 
 - The server is behind a VPN, reverse proxy, or firewall
 - Users with access are semi-trusted

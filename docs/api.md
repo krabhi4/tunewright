@@ -1,6 +1,6 @@
-# TagStudio REST API Reference
+# Tunewright REST API Reference
 
-All TagStudio endpoints are prefixed with `/api/v1/` unless specified otherwise. In-flight requests are authenticated via a cookie named `tagstudio_session`.
+All Tunewright endpoints are prefixed with `/api/v1/` unless specified otherwise. In-flight requests are authenticated via a cookie named `tunewright_session`.
 
 ---
 
@@ -296,7 +296,7 @@ All TagStudio endpoints are prefixed with `/api/v1/` unless specified otherwise.
   }
   ```
 * **Description:** Creates the first user account, which automatically receives the `super_admin` role. Once a user is created, this endpoint will return `400 Bad Request`.
-* **Response:** `200 OK` (application/json) - sets the `tagstudio_session` cookie.
+* **Response:** `200 OK` (application/json) - sets the `tunewright_session` cookie.
   ```json
   {
     "user": {
@@ -319,7 +319,7 @@ All TagStudio endpoints are prefixed with `/api/v1/` unless specified otherwise.
   }
   ```
 * **Description:** Verifies credentials and creates a session.
-* **Response:** `200 OK` (application/json) - sets the `tagstudio_session` cookie.
+* **Response:** `200 OK` (application/json) - sets the `tunewright_session` cookie.
   ```json
   {
     "user": {

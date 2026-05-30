@@ -67,6 +67,6 @@ jobs:
         with:
           context: .
           push: false
-          tags: tagstudio:ci
+          tags: tunewright:ci
           cache-from: type=gha
           cache-to: type=gha,mode=max

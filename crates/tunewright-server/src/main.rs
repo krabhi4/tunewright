@@ -20,7 +20,7 @@ async fn main() {
 
     let config = Config::from_env();
 
-    tracing::info!("TagStudio v{}", env!("CARGO_PKG_VERSION"));
+    tracing::info!("Tunewright v{}", env!("CARGO_PKG_VERSION"));
     tracing::info!("Data directory: {:?}", config.data_dir);
     tracing::info!("Static directory: {:?}", config.static_dir);
 

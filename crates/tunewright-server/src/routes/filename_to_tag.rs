@@ -1,8 +1,8 @@
 use axum::extract::State;
 use axum::Json;
 use serde::{Deserialize, Serialize};
-use tagstudio_core::filename_to_tag::{self, FilenameTagPreview};
-use tagstudio_core::scanner;
+use tunewright_core::filename_to_tag::{self, FilenameTagPreview};
+use tunewright_core::scanner;
 
 use crate::error::AppError;
 use crate::state::AppState;

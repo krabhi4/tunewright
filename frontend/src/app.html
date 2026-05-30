@@ -12,9 +12,9 @@
 				try {
 					var families = ['console', 'editorial', 'terminal', 'daw'];
 					var darkNative = { terminal: 1, daw: 1 };
-					var fam = localStorage.getItem('tagstudio-theme-family');
-					var mode = localStorage.getItem('tagstudio-theme-mode');
-					var legacy = localStorage.getItem('tagstudio-theme');
+					var fam = localStorage.getItem('tunewright-theme-family');
+					var mode = localStorage.getItem('tunewright-theme-mode');
+					var legacy = localStorage.getItem('tunewright-theme');
 					if (families.indexOf(fam) < 0) fam = 'console';
 					if (mode !== 'dark' && mode !== 'light') {
 						if (legacy === 'dark' || legacy === 'light') mode = legacy;
@@ -29,7 +29,7 @@
 				}
 			})();
 		</script>
-		<title>TagStudio</title>
+		<title>Tunewright</title>
 		%sveltekit.head%
 	</head>
 	<body data-sveltekit-preload-data="hover">

@@ -1,12 +1,12 @@
 [package]
-name = "tagstudio-server"
+name = "tunewright-server"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
 
 [dependencies]
-tagstudio-core = { path = "../tagstudio-core" }
-tagstudio-lookup = { path = "../tagstudio-lookup" }
+tunewright-core = { path = "../tunewright-core" }
+tunewright-lookup = { path = "../tunewright-lookup" }
 axum = { version = "0.8", features = ["multipart"] }
 axum-extra = { version = "0.12", features = ["typed-header"] }
 tokio = { workspace = true }

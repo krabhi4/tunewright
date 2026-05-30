@@ -62,7 +62,7 @@
 					<rect x="18.25" y="17.5" width="1.5" height="5" rx="0.75" fill="currentColor"/>
 				</svg>
 			</div>
-			<h1 class="login-title">Join TagStudio</h1>
+			<h1 class="login-title">Join Tunewright</h1>
 			<p class="login-subtitle">You've been invited. Create your account.</p>
 		</div>
 

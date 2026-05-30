@@ -192,9 +192,9 @@ pub struct WriteResult {
     pub error: Option<String>,
 }
 
-/// Error types for tagstudio-core
+/// Error types for tunewright-core
 #[derive(Debug, thiserror::Error)]
-pub enum TagStudioError {
+pub enum TunewrightError {
     #[error("File not found: {0}")]
     FileNotFound(PathBuf),
 

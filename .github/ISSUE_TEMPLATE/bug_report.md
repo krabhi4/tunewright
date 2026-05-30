@@ -27,9 +27,9 @@ If applicable, add screenshots.
 - Docker version: [e.g., 27.0]
 - Browser: [e.g., Chrome 120, Firefox 130]
 - Music directory size: [e.g., ~5000 files, ~200 GB]
-- TagStudio version: [e.g., 0.1.0]
+- Tunewright version: [e.g., 0.1.0]
 
 **Container logs**
 ```
-docker logs tagstudio 2>&1 | tail -50
+docker logs tunewright 2>&1 | tail -50
 ```

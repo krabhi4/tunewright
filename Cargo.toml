@@ -1,18 +1,18 @@
 [workspace]
 resolver = "2"
 members = [
-    "crates/tagstudio-core",
-    "crates/tagstudio-lookup",
-    "crates/tagstudio-server",
+    "crates/tunewright-core",
+    "crates/tunewright-lookup",
+    "crates/tunewright-server",
 ]
 
 [workspace.package]
-version = "0.5.1"
+version = "0.6.0"
 edition = "2021"
 license = "MIT"
 description = "A self-hosted web application for editing audio file metadata"
-repository = "https://github.com/krabhi4/tagstudio"
-homepage = "https://github.com/krabhi4/tagstudio"
+repository = "https://github.com/krabhi4/tunewright"
+homepage = "https://github.com/krabhi4/tunewright"
 readme = "README.md"
 
 [workspace.dependencies]

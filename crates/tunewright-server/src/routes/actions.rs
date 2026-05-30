@@ -2,10 +2,10 @@ use axum::extract::State;
 use axum::Json;
 use serde::{Deserialize, Serialize};
 use rayon::prelude::*;
-use tagstudio_core::actions::{Action, ActionContext};
-use tagstudio_core::audio;
-use tagstudio_core::scanner;
-use tagstudio_core::types::{TagData, TagWriteChanges, WriteResult};
+use tunewright_core::actions::{Action, ActionContext};
+use tunewright_core::audio;
+use tunewright_core::scanner;
+use tunewright_core::types::{TagData, TagWriteChanges, WriteResult};
 
 use crate::error::{join_error, AppError};
 use crate::state::AppState;
@@ -198,8 +198,8 @@ pub async fn preview(
 
 /// Compare two TagData and return a list of changed fields.
 fn diff_tags(
-    a: &tagstudio_core::types::TagData,
-    b: &tagstudio_core::types::TagData,
+    a: &tunewright_core::types::TagData,
+    b: &tunewright_core::types::TagData,
 ) -> Vec<FieldChange> {
     let mut changes = Vec::new();
 

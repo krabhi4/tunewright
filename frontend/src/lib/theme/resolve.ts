@@ -41,7 +41,7 @@ export function resolveTheme(
 	return { family, mode: coerceMode(family, mode) };
 }
 
-/** Translate the old single `tagstudio-theme` value into the new shape. */
+/** Translate the old single `tunewright-theme` value into the new shape. */
 export function migrateLegacy(legacy: string | null): StoredTheme | null {
 	if (legacy === 'light') return { family: 'console', mode: 'light' };
 	if (legacy === 'dark') return { family: 'console', mode: 'dark' };

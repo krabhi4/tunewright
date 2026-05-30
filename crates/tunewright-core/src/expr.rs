@@ -1,4 +1,4 @@
-//! Expression engine for TagStudio format strings and scripting.
+//! Expression engine for Tunewright format strings and scripting.
 //!
 //! Supports:
 //! - `%variable%` placeholders resolved against TagData

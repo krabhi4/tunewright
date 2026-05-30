@@ -2,19 +2,19 @@ use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use axum::Json;
 use serde_json::json;
-use tagstudio_core::types::TagStudioError;
+use tunewright_core::types::TunewrightError;
 
-pub struct AppError(pub TagStudioError);
+pub struct AppError(pub TunewrightError);
 
-impl From<TagStudioError> for AppError {
-    fn from(err: TagStudioError) -> Self {
+impl From<TunewrightError> for AppError {
+    fn from(err: TunewrightError) -> Self {
         Self(err)
     }
 }
 
 /// Map a blocking-task join failure (panic or cancellation) into an `AppError`.
 pub fn join_error(e: tokio::task::JoinError) -> AppError {
-    AppError(TagStudioError::TagReadError(format!("Task join error: {e}")))
+    AppError(TunewrightError::TagReadError(format!("Task join error: {e}")))
 }
 
 impl IntoResponse for AppError {
@@ -24,17 +24,17 @@ impl IntoResponse for AppError {
 
         // Return sanitized messages to the client (no internal paths)
         let (status, message) = match &self.0 {
-            TagStudioError::FileNotFound(_) => (StatusCode::NOT_FOUND, "File not found"),
-            TagStudioError::PermissionDenied(_) => (StatusCode::FORBIDDEN, "Permission denied"),
-            TagStudioError::PathTraversal(_) => (StatusCode::BAD_REQUEST, "Invalid path"),
-            TagStudioError::UnsupportedFormat(_) => {
+            TunewrightError::FileNotFound(_) => (StatusCode::NOT_FOUND, "File not found"),
+            TunewrightError::PermissionDenied(_) => (StatusCode::FORBIDDEN, "Permission denied"),
+            TunewrightError::PathTraversal(_) => (StatusCode::BAD_REQUEST, "Invalid path"),
+            TunewrightError::UnsupportedFormat(_) => {
                 (StatusCode::UNPROCESSABLE_ENTITY, "Unsupported audio format")
             }
-            TagStudioError::ImageError(_) => (StatusCode::BAD_REQUEST, "Image processing error"),
-            TagStudioError::TagReadError(_) => {
+            TunewrightError::ImageError(_) => (StatusCode::BAD_REQUEST, "Image processing error"),
+            TunewrightError::TagReadError(_) => {
                 (StatusCode::INTERNAL_SERVER_ERROR, "Failed to read tags")
             }
-            TagStudioError::TagWriteError(_) => {
+            TunewrightError::TagWriteError(_) => {
                 (StatusCode::INTERNAL_SERVER_ERROR, "Failed to write tags")
             }
             _ => (StatusCode::INTERNAL_SERVER_ERROR, "Internal error"),

@@ -4,8 +4,8 @@ use axum::response::{IntoResponse, Response};
 use axum::Json;
 use serde::Deserialize;
 use std::time::Duration;
-use tagstudio_lookup::types::{ReleaseDetail, ReleaseSearchResult};
-use tagstudio_lookup::{applemusic, musicbrainz};
+use tunewright_lookup::types::{ReleaseDetail, ReleaseSearchResult};
+use tunewright_lookup::{applemusic, musicbrainz};
 
 use crate::state::AppState;
 

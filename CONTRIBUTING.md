@@ -1,4 +1,4 @@
-# Contributing to TagStudio
+# Contributing to Tunewright
 
 Thanks for your interest in contributing. This document covers how to get started.
 
@@ -13,8 +13,8 @@ Thanks for your interest in contributing. This document covers how to get starte
 ### Clone and Build
 
 ```bash
-git clone https://github.com/YOUR_USERNAME/tagstudio.git
-cd tagstudio
+git clone https://github.com/YOUR_USERNAME/tunewright.git
+cd tunewright
 
 # Backend
 cargo build
@@ -32,7 +32,7 @@ Terminal 1 — backend:
 ```bash
 mkdir -p test-music
 # Put some audio files in test-music/
-TAGSTUDIO_DATA_DIR=./test-music TAGSTUDIO_STATIC_DIR=./frontend/build cargo run -p tagstudio-server
+TUNEWRIGHT_DATA_DIR=./test-music TUNEWRIGHT_STATIC_DIR=./frontend/build cargo run -p tunewright-server
 ```
 
 Terminal 2 — frontend dev server (hot reload):
@@ -47,7 +47,7 @@ The Vite dev server proxies `/api` requests to `localhost:8080`.
 
 ```
 crates/
-  tagstudio-core/       Pure Rust library (no HTTP)
+  tunewright-core/       Pure Rust library (no HTTP)
     src/
       audio.rs          Tag reading/writing (lofty wrapper)
       picture.rs        Cover art extraction/embedding
@@ -56,11 +56,11 @@ crates/
       rename.rs         File renaming with collision detection
       types.rs          Shared types and error enum
 
-  tagstudio-lookup/     External API clients
+  tunewright-lookup/     External API clients
     src/
       musicbrainz.rs    MusicBrainz search + release lookup
 
-  tagstudio-server/     Axum HTTP server
+  tunewright-server/     Axum HTTP server
     src/
       main.rs           Entry point
       routes/           API endpoint handlers
@@ -81,11 +81,11 @@ frontend/               SvelteKit SPA
 
 ### Backend
 
-- `tagstudio-core` contains all domain logic and should have no HTTP awareness
+- `tunewright-core` contains all domain logic and should have no HTTP awareness
 - All filesystem operations must go through `resolve_safe_path()` to prevent path traversal
 - Blocking I/O in route handlers must use `tokio::task::spawn_blocking`
 - Use `read_tags_fast()` for grid display, `read_tags_full()` only when audio properties are needed
-- Add tests for new functionality in `tagstudio-core`
+- Add tests for new functionality in `tunewright-core`
 
 ### Frontend
 
@@ -129,7 +129,7 @@ Open an issue with:
 - What actually happened
 - Steps to reproduce
 - Your setup (Docker version, architecture, browser, music directory size)
-- Container logs if relevant (`docker logs tagstudio`)
+- Container logs if relevant (`docker logs tunewright`)
 
 ## Feature Requests
 

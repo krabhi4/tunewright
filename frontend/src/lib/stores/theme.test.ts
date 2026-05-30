@@ -47,15 +47,15 @@ describe('theme store', () => {
 		setThemeMode('light');
 		expect(get(themeMode)).toBe('light');
 		expect(attrs['data-mode']).toBe('light');
-		expect(storage['tagstudio-theme-mode']).toBe('light');
+		expect(storage['tunewright-theme-mode']).toBe('light');
 
 		// Visit a dark-native family: display goes dark, but the stored choice stays.
 		setThemeFamily('terminal');
 		expect(attrs['data-theme']).toBe('terminal');
 		expect(attrs['data-mode']).toBe('dark');
 		expect(get(themeMode)).toBe('dark');
-		expect(storage['tagstudio-theme-mode']).toBe('light'); // NOT clobbered
-		expect(storage['tagstudio-theme-family']).toBe('terminal');
+		expect(storage['tunewright-theme-mode']).toBe('light'); // NOT clobbered
+		expect(storage['tunewright-theme-family']).toBe('terminal');
 
 		// Return to a light-capable family: the light preference is restored.
 		setThemeFamily('console');
@@ -68,13 +68,13 @@ describe('theme store', () => {
 		setThemeMode('light');
 		expect(get(themeMode)).toBe('dark');
 		expect(attrs['data-mode']).toBe('dark');
-		expect(storage['tagstudio-theme-mode']).toBeUndefined();
+		expect(storage['tunewright-theme-mode']).toBeUndefined();
 	});
 
 	it('setThemeFamily persists family without writing the mode key', () => {
 		setThemeFamily('terminal');
-		expect(storage['tagstudio-theme-family']).toBe('terminal');
-		expect(storage['tagstudio-theme-mode']).toBeUndefined();
+		expect(storage['tunewright-theme-family']).toBe('terminal');
+		expect(storage['tunewright-theme-mode']).toBeUndefined();
 		expect(attrs['data-mode']).toBe('dark');
 	});
 

@@ -59,7 +59,7 @@
 
 	<div class="toolbar-title">
 		<span class="toolbar-logo"><Logo size={16} /></span>
-		<span>TagStudio</span>
+		<span>Tunewright</span>
 	</div>
 
 	<ThemeMenu />

@@ -1,4 +1,4 @@
-use crate::types::{AudioFormat, DirNode, FileEntry, FileListResult, TagStudioError};
+use crate::types::{AudioFormat, DirNode, FileEntry, FileListResult, TunewrightError};
 use sha2::{Digest, Sha256};
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -13,18 +13,18 @@ pub fn file_id(relative_path: &str) -> String {
 
 /// Resolve a user-provided path safely within the data root.
 /// Prevents path traversal attacks.
-pub fn resolve_safe_path(data_root: &Path, requested: &str) -> Result<PathBuf, TagStudioError> {
+pub fn resolve_safe_path(data_root: &Path, requested: &str) -> Result<PathBuf, TunewrightError> {
     let clean = requested.trim_start_matches('/');
     let candidate = data_root.join(clean);
 
     let resolved = candidate
         .canonicalize()
-        .map_err(|_| TagStudioError::FileNotFound(candidate.clone()))?;
+        .map_err(|_| TunewrightError::FileNotFound(candidate.clone()))?;
 
-    let root_canonical = data_root.canonicalize().map_err(TagStudioError::Io)?;
+    let root_canonical = data_root.canonicalize().map_err(TunewrightError::Io)?;
 
     if !resolved.starts_with(&root_canonical) {
-        return Err(TagStudioError::PathTraversal(requested.to_string()));
+        return Err(TunewrightError::PathTraversal(requested.to_string()));
     }
 
     Ok(resolved)
@@ -36,11 +36,11 @@ pub fn scan_directory(
     relative_path: &str,
     offset: usize,
     limit: usize,
-) -> Result<FileListResult, TagStudioError> {
+) -> Result<FileListResult, TunewrightError> {
     let dir = resolve_safe_path(data_root, relative_path)?;
 
     if !dir.is_dir() {
-        return Err(TagStudioError::FileNotFound(dir));
+        return Err(TunewrightError::FileNotFound(dir));
     }
 
     let root_canonical = data_root.canonicalize()?;
@@ -145,7 +145,7 @@ pub fn scan_directory(
 }
 
 /// Build a directory tree starting from data_root
-pub fn build_dir_tree(data_root: &Path, max_depth: usize) -> Result<DirNode, TagStudioError> {
+pub fn build_dir_tree(data_root: &Path, max_depth: usize) -> Result<DirNode, TunewrightError> {
     let root_canonical = data_root.canonicalize()?;
     let root_name = root_canonical
         .file_name()

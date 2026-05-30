@@ -1,12 +1,12 @@
 {
-  "name": "tagstudio-frontend",
-  "version": "0.5.1",
+  "name": "tunewright-frontend",
+  "version": "0.6.0",
   "private": true,
-  "description": "TagStudio web frontend (SvelteKit SPA)",
+  "description": "Tunewright web frontend (SvelteKit SPA)",
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/krabhi4/tagstudio.git"
+    "url": "https://github.com/krabhi4/tunewright.git"
   },
   "type": "module",
   "scripts": {

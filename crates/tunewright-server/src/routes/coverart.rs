@@ -5,9 +5,9 @@ use axum::response::Response;
 use axum::Json;
 use reqwest::Url;
 use serde::Deserialize;
-use tagstudio_core::picture;
-use tagstudio_core::scanner;
-use tagstudio_core::types::TagStudioError;
+use tunewright_core::picture;
+use tunewright_core::scanner;
+use tunewright_core::types::TunewrightError;
 
 use crate::error::AppError;
 use crate::state::AppState;
@@ -93,14 +93,14 @@ pub async fn embed_cover_art_from_url(
         .and_then(|u| u.host_str().map(is_allowed_cover_host))
         .unwrap_or(false);
     if !parsed_ok {
-        return Err(AppError(TagStudioError::Io(std::io::Error::new(
+        return Err(AppError(TunewrightError::Io(std::io::Error::new(
             std::io::ErrorKind::InvalidInput,
             "only coverartarchive.org and mzstatic.com URLs are allowed",
         ))));
     }
 
     if body.paths.is_empty() {
-        return Err(AppError(TagStudioError::Io(std::io::Error::new(
+        return Err(AppError(TunewrightError::Io(std::io::Error::new(
             std::io::ErrorKind::InvalidInput,
             "no file paths provided",
         ))));
@@ -108,7 +108,7 @@ pub async fn embed_cover_art_from_url(
 
     // Fetch the image once, restricting redirects to known hosts
     let client = reqwest::Client::builder()
-        .user_agent("Mozilla/5.0 (compatible; TagStudio/0.5.1; +https://github.com/tagstudio)")
+        .user_agent("Mozilla/5.0 (compatible; Tunewright/0.5.1; +https://github.com/tunewright)")
         .redirect(reqwest::redirect::Policy::custom(|attempt| {
             if is_allowed_cover_host(attempt.url().host_str().unwrap_or("")) {
                 attempt.follow()
@@ -118,27 +118,27 @@ pub async fn embed_cover_art_from_url(
         }))
         .build()
         .map_err(|e| {
-            AppError(TagStudioError::Io(std::io::Error::other(format!(
+            AppError(TunewrightError::Io(std::io::Error::other(format!(
                 "failed to build HTTP client: {}",
                 e
             ))))
         })?;
 
     let mut response = client.get(&body.url).send().await.map_err(|e| {
-        AppError(TagStudioError::Io(std::io::Error::other(format!(
+        AppError(TunewrightError::Io(std::io::Error::other(format!(
             "failed to fetch cover art: {}",
             e
         ))))
     })?;
 
     if !response.status().is_success() {
-        return Err(AppError(TagStudioError::Io(std::io::Error::other(
+        return Err(AppError(TunewrightError::Io(std::io::Error::other(
             format!("cover art fetch returned {}", response.status()),
         ))));
     }
 
     let too_large = || {
-        AppError(TagStudioError::Io(std::io::Error::new(
+        AppError(TunewrightError::Io(std::io::Error::new(
             std::io::ErrorKind::InvalidData,
             "cover art too large (max 10MB)",
         )))
@@ -154,7 +154,7 @@ pub async fn embed_cover_art_from_url(
     // Stream with size limit to handle chunked responses without Content-Length
     let mut image_data = Vec::new();
     while let Some(chunk) = response.chunk().await.map_err(|e| {
-        AppError(TagStudioError::Io(std::io::Error::other(format!(
+        AppError(TunewrightError::Io(std::io::Error::other(format!(
             "failed to read cover art bytes: {}",
             e
         ))))
@@ -166,7 +166,7 @@ pub async fn embed_cover_art_from_url(
     }
 
     if !has_image_magic(&image_data) {
-        return Err(AppError(TagStudioError::Io(std::io::Error::new(
+        return Err(AppError(TunewrightError::Io(std::io::Error::new(
             std::io::ErrorKind::InvalidData,
             "invalid image format (JPEG or PNG only)",
         ))));
@@ -218,7 +218,7 @@ pub async fn upload_cover_art(
     let mut image_data: Option<Vec<u8>> = None;
 
     fn multipart_err(msg: &str) -> AppError {
-        AppError(TagStudioError::Io(std::io::Error::new(
+        AppError(TunewrightError::Io(std::io::Error::new(
             std::io::ErrorKind::InvalidData,
             msg.to_string(),
         )))
