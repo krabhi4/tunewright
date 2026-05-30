@@ -7,7 +7,7 @@ on:
 
 jobs:
   docker:
-    uses: docker/github-builder/.github/workflows/build.yml@v1
+    uses: docker/github-builder/.github/workflows/build.yml@v1.6.0
     permissions:
       contents: read
       id-token: write
