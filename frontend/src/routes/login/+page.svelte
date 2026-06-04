@@ -2,6 +2,7 @@
 	import { goto } from '$app/navigation';
 	import { login } from '$lib/api/auth';
 	import { auth } from '$lib/stores/auth';
+	import Logo from '$lib/icons/Logo.svelte';
 
 	let username = $state('');
 	let password = $state('');
@@ -35,13 +36,7 @@
 	<div class="login-card">
 		<div class="login-header">
 			<div class="login-logo">
-				<svg class="tag-logo" viewBox="0 0 32 32" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
-					<path d="M10 12 L16 6 L22 12 L22 25 A 2 2 0 0 1 20 27 L12 27 A 2 2 0 0 1 10 25 Z"/>
-					<circle cx="16" cy="12" r="1.5" fill="currentColor"/>
-					<rect x="12.25" y="16.5" width="1.5" height="6" rx="0.75" fill="currentColor"/>
-					<rect x="15.25" y="14" width="1.5" height="10" rx="0.75" fill="currentColor"/>
-					<rect x="18.25" y="17.5" width="1.5" height="5" rx="0.75" fill="currentColor"/>
-				</svg>
+				<Logo size={48} />
 			</div>
 			<h1 class="login-title">Tunewright</h1>
 		</div>
@@ -127,7 +122,7 @@
 		color: var(--accent);
 		margin-bottom: 12px;
 	}
-	.login-logo :global(.tag-logo) {
+	.login-logo :global(svg) {
 		width: 100%;
 		height: 100%;
 	}
