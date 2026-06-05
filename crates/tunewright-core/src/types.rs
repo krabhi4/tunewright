@@ -126,7 +126,7 @@ pub struct FileListResult {
 }
 
 /// Changes to write to a single file's tags
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct TagWriteChanges {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub title: Option<String>,

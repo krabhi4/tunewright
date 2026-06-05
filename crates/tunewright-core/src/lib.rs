@@ -7,3 +7,4 @@ pub mod picture;
 pub mod rename;
 pub mod scanner;
 pub mod types;
+pub mod locks;

@@ -194,6 +194,7 @@ pub fn batch_read_tags_full(
 
 /// Write tag changes to a single audio file
 pub fn write_tags(path: &Path, changes: &TagWriteChanges) -> Result<(), TunewrightError> {
+    let _lock = crate::locks::lock_file(path);
     let mut tagged = Probe::open(path)
         .map_err(|e| TunewrightError::TagWriteError(format!("{}: {}", path.display(), e)))?
         .read()
@@ -202,7 +203,7 @@ pub fn write_tags(path: &Path, changes: &TagWriteChanges) -> Result<(), Tunewrig
     let primary_type = tagged
         .primary_tag()
         .map(|t| t.tag_type())
-        .unwrap_or(lofty::tag::TagType::Id3v2);
+        .unwrap_or_else(|| tagged.primary_tag_type());
 
     let tag = match tagged.tag_mut(primary_type) {
         Some(t) => t,

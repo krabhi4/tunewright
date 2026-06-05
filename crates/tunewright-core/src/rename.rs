@@ -294,6 +294,70 @@ mod tests {
         let _ = std::fs::remove_dir_all(&temp_dir);
     }
 
+    #[test]
+    fn test_execute_renames_mixed() {
+        let temp_dir = std::env::temp_dir().join(format!("tunewright_test_{}", rand_num()));
+        std::fs::create_dir_all(&temp_dir).unwrap();
+
+        let file1 = "song1.flac";
+        let file2 = "song2.flac";
+        let file3 = "song3.flac";
+
+        use std::io::Write;
+        let flac_bytes = b"fLaC\x80\x00\x00\x22\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00";
+
+        let mut f1 = File::create(temp_dir.join(file1)).unwrap();
+        f1.write_all(flac_bytes).unwrap();
+
+        let mut f2 = File::create(temp_dir.join(file2)).unwrap();
+        f2.write_all(flac_bytes).unwrap();
+
+        let mut f3 = File::create(temp_dir.join(file3)).unwrap();
+        f3.write_all(flac_bytes).unwrap();
+
+        // Staging a target file that will cause a collision for song2
+        File::create(temp_dir.join("collision.flac")).unwrap();
+
+        // Write tags so we can use a format string that resolves differently for each file
+        let mut changes1 = crate::types::TagWriteChanges::default();
+        changes1.title = Some("new_song1".to_string());
+        crate::audio::write_tags(&temp_dir.join(file1), &changes1).unwrap();
+
+        let mut changes2 = crate::types::TagWriteChanges::default();
+        changes2.title = Some("collision".to_string());
+        crate::audio::write_tags(&temp_dir.join(file2), &changes2).unwrap();
+
+        let mut changes3 = crate::types::TagWriteChanges::default();
+        changes3.title = Some("song3".to_string());
+        crate::audio::write_tags(&temp_dir.join(file3), &changes3).unwrap();
+
+        let files = vec![
+            ("1".to_string(), file1.to_string()), // will rename to "new_song1.flac" (success)
+            ("2".to_string(), file2.to_string()), // will try to rename to "collision.flac" (collision error)
+            ("3".to_string(), file3.to_string()), // will rename to "song3.flac" (skipped because unchanged)
+        ];
+
+        let results = execute_renames(&temp_dir, &files, "%title%");
+
+        assert_eq!(results.len(), 3);
+
+        // Result 1: ok
+        let r1 = results.iter().find(|r| r.id == "1").unwrap();
+        assert_eq!(r1.status, "ok");
+        assert_eq!(r1.new_relative_path, "new_song1.flac");
+
+        // Result 2: error (Target file already exists)
+        let r2 = results.iter().find(|r| r.id == "2").unwrap();
+        assert_eq!(r2.status, "error");
+        assert!(r2.error.as_ref().unwrap().contains("Target file already exists"));
+
+        // Result 3: skipped (unchanged)
+        let r3 = results.iter().find(|r| r.id == "3").unwrap();
+        assert_eq!(r3.status, "skipped");
+
+        let _ = std::fs::remove_dir_all(&temp_dir);
+    }
+
     fn rand_num() -> u64 {
         use std::time::{SystemTime, UNIX_EPOCH};
         SystemTime::now()

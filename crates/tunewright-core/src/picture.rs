@@ -69,6 +69,7 @@ pub fn extract_cover_art_thumbnail(
 
 /// Embed cover art into an audio file
 pub fn embed_cover_art(path: &Path, image_data: &[u8]) -> Result<(), TunewrightError> {
+    let _lock = crate::locks::lock_file(path);
     let mut tagged = Probe::open(path)
         .map_err(|e| TunewrightError::TagWriteError(format!("{}: {}", path.display(), e)))?
         .read()
@@ -92,7 +93,7 @@ pub fn embed_cover_art(path: &Path, image_data: &[u8]) -> Result<(), TunewrightE
     let primary_type = tagged
         .primary_tag()
         .map(|t| t.tag_type())
-        .unwrap_or(lofty::tag::TagType::Id3v2);
+        .unwrap_or_else(|| tagged.primary_tag_type());
 
     let tag = match tagged.tag_mut(primary_type) {
         Some(t) => t,
@@ -115,6 +116,7 @@ pub fn embed_cover_art(path: &Path, image_data: &[u8]) -> Result<(), TunewrightE
 
 /// Remove all cover art from an audio file
 pub fn remove_cover_art(path: &Path) -> Result<(), TunewrightError> {
+    let _lock = crate::locks::lock_file(path);
     let mut tagged = Probe::open(path)
         .map_err(|e| TunewrightError::TagWriteError(format!("{}: {}", path.display(), e)))?
         .read()

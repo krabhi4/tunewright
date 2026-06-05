@@ -49,6 +49,7 @@ impl<'a> ExprContext<'a> {
 struct Parser {
     chars: Vec<char>,
     pos: usize,
+    depth: usize,
 }
 
 impl Parser {
@@ -56,6 +57,7 @@ impl Parser {
         Self {
             chars: input.chars().collect(),
             pos: 0,
+            depth: 0,
         }
     }
 
@@ -73,6 +75,20 @@ impl Parser {
 
     /// Parse an expression until one of the stop characters is reached.
     fn parse_expr(&mut self, stop_chars: &[char]) -> Vec<Node> {
+        self.depth += 1;
+        if self.depth > 256 {
+            self.depth -= 1;
+            let mut literal = String::new();
+            while let Some(c) = self.peek() {
+                if stop_chars.contains(&c) {
+                    break;
+                }
+                literal.push(c);
+                self.pos += 1;
+            }
+            return vec![Node::Literal(literal)];
+        }
+
         let mut nodes = Vec::new();
         let mut literal = String::new();
 
@@ -118,6 +134,7 @@ impl Parser {
         if !literal.is_empty() {
             nodes.push(Node::Literal(literal));
         }
+        self.depth -= 1;
         nodes
     }
 
@@ -264,8 +281,22 @@ fn call_function(name: &str, args: &[String], ctx: &ExprContext) -> String {
         "add" => fn_math(args, i64::saturating_add),
         "sub" => fn_math(args, i64::saturating_sub),
         "mul" => fn_math(args, i64::saturating_mul),
-        "div" => fn_math(args, |a, b| if b != 0 { a / b } else { 0 }),
-        "mod" => fn_math(args, |a, b| if b != 0 { a % b } else { 0 }),
+        "div" => fn_math(args, |a, b| {
+            if b == 0 {
+                0
+            } else if a == i64::MIN && b == -1 {
+                i64::MAX
+            } else {
+                a / b
+            }
+        }),
+        "mod" => fn_math(args, |a, b| {
+            if b == 0 || (a == i64::MIN && b == -1) {
+                0
+            } else {
+                a % b
+            }
+        }),
         "num" => fn_num(args),
 
         // Logic
@@ -614,6 +645,23 @@ mod tests {
     }
 
     #[test]
+    fn test_parse_deeply_nested_recursion_limit() {
+        // Construct a string with 300 levels of nested function calls
+        let mut input = String::new();
+        for _ in 0..300 {
+            input.push_str("$a(");
+        }
+        input.push_str("x");
+        for _ in 0..300 {
+            input.push(')');
+        }
+
+        // Parsing should succeed without stack overflow
+        let nodes = parse(&input);
+        assert!(!nodes.is_empty());
+    }
+
+    #[test]
     fn test_parse_dollar_not_function() {
         assert_eq!(parse("$50"), vec![Node::Literal("$50".to_string())]);
     }
@@ -766,6 +814,57 @@ mod tests {
     fn test_fn_div_by_zero() {
         let t = TagData::default();
         assert_eq!(evaluate("$div(10,0)", &make_ctx(&t)), "0");
+    }
+
+    #[test]
+    fn test_fn_div_mod_overflow() {
+        let t = TagData::default();
+        // i64::MIN is -9223372036854775808
+        // dividing it by -1 should saturate to i64::MAX (9223372036854775807)
+        assert_eq!(evaluate("$div(-9223372036854775808,-1)", &make_ctx(&t)), "9223372036854775807");
+        // modulo should return 0
+        assert_eq!(evaluate("$mod(-9223372036854775808,-1)", &make_ctx(&t)), "0");
+    }
+
+    #[test]
+    fn test_recursion_limit_boundary() {
+        let t = TagData::default();
+        let make_expr = |depth: usize| {
+            let mut s = String::new();
+            for _ in 0..depth {
+                s.push_str("$upper(");
+            }
+            s.push_str("a");
+            for _ in 0..depth {
+                s.push(')');
+            }
+            s
+        };
+
+        // Under the limit (255): should evaluate to "A" (since $upper is applied 255 times)
+        let under = make_expr(255);
+        assert_eq!(evaluate(&under, &make_ctx(&t)), "A");
+
+        // Over the limit (260): should not panic and should evaluate gracefully
+        let over = make_expr(260);
+        let result = evaluate(&over, &make_ctx(&t));
+        assert!(!result.is_empty());
+    }
+
+    #[test]
+    fn test_fn_math_safety_bounds() {
+        let t = TagData::default();
+        // Division by zero
+        assert_eq!(evaluate("$div(5,0)", &make_ctx(&t)), "0");
+        assert_eq!(evaluate("$mod(5,0)", &make_ctx(&t)), "0");
+
+        // Addition overflow
+        assert_eq!(evaluate("$add(9223372036854775807,1)", &make_ctx(&t)), "9223372036854775807");
+        // Subtraction underflow
+        assert_eq!(evaluate("$sub(-9223372036854775808,1)", &make_ctx(&t)), "-9223372036854775808");
+        // Multiplication overflow
+        assert_eq!(evaluate("$mul(4611686018427387904,2)", &make_ctx(&t)), "9223372036854775807");
+        assert_eq!(evaluate("$mul(-4611686018427387904,3)", &make_ctx(&t)), "-9223372036854775808");
     }
 
     // --- Evaluation: logic functions ---
