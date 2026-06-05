@@ -16,7 +16,9 @@ fn detect_mime(data: &[u8]) -> Option<&'static str> {
         Some("image/gif")
     } else if data.starts_with(b"BM") {
         Some("image/bmp")
-    } else if data.starts_with(&[0x49, 0x49, 0x2A, 0x00]) || data.starts_with(&[0x4D, 0x4D, 0x00, 0x2A]) {
+    } else if data.starts_with(&[0x49, 0x49, 0x2A, 0x00])
+        || data.starts_with(&[0x4D, 0x4D, 0x00, 0x2A])
+    {
         Some("image/tiff")
     } else if data.starts_with(b"RIFF") && data.len() > 12 && &data[8..12] == b"WEBP" {
         Some("image/webp")
@@ -98,9 +100,15 @@ pub fn extract_cover_art_thumbnail(
     }
 }
 
-/// Embed cover art into an audio file
+/// Embed cover art into an audio file.
+///
+/// Crash-safe: mutates a temp copy and atomically renames it over the original.
 pub fn embed_cover_art(path: &Path, image_data: &[u8]) -> Result<(), TunewrightError> {
     let _lock = crate::locks::lock_file(path);
+    crate::fsutil::atomic_file_update(path, |tmp| embed_cover_art_inner(tmp, image_data))
+}
+
+fn embed_cover_art_inner(path: &Path, image_data: &[u8]) -> Result<(), TunewrightError> {
     let mut tagged = Probe::open(path)
         .map_err(|e| TunewrightError::TagWriteError(format!("{}: {}", path.display(), e)))?
         .read()
@@ -145,9 +153,15 @@ pub fn embed_cover_art(path: &Path, image_data: &[u8]) -> Result<(), TunewrightE
     Ok(())
 }
 
-/// Remove all cover art from an audio file
+/// Remove all cover art from an audio file.
+///
+/// Crash-safe: mutates a temp copy and atomically renames it over the original.
 pub fn remove_cover_art(path: &Path) -> Result<(), TunewrightError> {
     let _lock = crate::locks::lock_file(path);
+    crate::fsutil::atomic_file_update(path, remove_cover_art_inner)
+}
+
+fn remove_cover_art_inner(path: &Path) -> Result<(), TunewrightError> {
     let mut tagged = Probe::open(path)
         .map_err(|e| TunewrightError::TagWriteError(format!("{}: {}", path.display(), e)))?
         .read()
@@ -196,7 +210,10 @@ mod tests {
         assert_eq!(detect_mime(&[0x89, 0x50, 0x4E, 0x47]), Some("image/png"));
         assert_eq!(detect_mime(b"GIF89a..."), Some("image/gif"));
         assert_eq!(detect_mime(b"BM..."), Some("image/bmp"));
-        assert_eq!(detect_mime(b"RIFF\x00\x00\x00\x00WEBP..."), Some("image/webp"));
+        assert_eq!(
+            detect_mime(b"RIFF\x00\x00\x00\x00WEBP..."),
+            Some("image/webp")
+        );
         assert_eq!(detect_mime(&[0x00, 0x01]), None);
     }
 
@@ -208,7 +225,10 @@ mod tests {
 
         // Create a dummy flac file
         let flac_bytes = b"fLaC\x80\x00\x00\x22\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00";
-        File::create(&audio_path).unwrap().write_all(flac_bytes).unwrap();
+        File::create(&audio_path)
+            .unwrap()
+            .write_all(flac_bytes)
+            .unwrap();
 
         // 1. JPEG image data
         let jpeg_data = vec![0xFF, 0xD8, 0xFF, 0xE0, 0x00, 0x10, 0x4A, 0x46, 0x49, 0x46];

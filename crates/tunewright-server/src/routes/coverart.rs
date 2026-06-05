@@ -33,8 +33,6 @@ fn default_size() -> u32 {
 /// Maximum accepted cover-art payload size.
 const MAX_IMAGE_SIZE: u64 = 10 * 1024 * 1024;
 
-
-
 /// JPEG (`FF D8`) or PNG (`89 50 4E 47`) magic-byte check.
 fn has_image_magic(data: &[u8]) -> bool {
     data.starts_with(&[0xFF, 0xD8]) || data.starts_with(&[0x89, 0x50, 0x4E, 0x47])

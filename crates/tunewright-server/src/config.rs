@@ -7,6 +7,9 @@ pub struct Config {
     pub port: u16,
     pub host: String,
     pub cookie_secure: bool,
+    /// Optional token required by /auth/setup to claim the first admin
+    /// account. Protects the setup window on network-exposed deployments.
+    pub setup_token: Option<String>,
 }
 
 impl Config {
@@ -40,6 +43,10 @@ impl Config {
             cookie_secure: std::env::var("TUNEWRIGHT_COOKIE_SECURE")
                 .map(|v| v == "true" || v == "1")
                 .unwrap_or(false),
+            setup_token: std::env::var("TUNEWRIGHT_SETUP_TOKEN")
+                .ok()
+                .map(|s| s.trim().to_string())
+                .filter(|s| !s.is_empty()),
         }
     }
 }
@@ -68,6 +75,24 @@ mod tests {
         // Cleanup env
         std::env::remove_var("TUNEWRIGHT_HOST");
         std::env::remove_var("TUNEWRIGHT_COOKIE_SECURE");
+    }
+
+    #[test]
+    fn test_setup_token_from_env() {
+        std::env::remove_var("TUNEWRIGHT_SETUP_TOKEN");
+        let config = Config::from_env();
+        assert!(config.setup_token.is_none());
+
+        std::env::set_var("TUNEWRIGHT_SETUP_TOKEN", "sekret123");
+        let config2 = Config::from_env();
+        assert_eq!(config2.setup_token.as_deref(), Some("sekret123"));
+
+        // Empty/whitespace value behaves as unset
+        std::env::set_var("TUNEWRIGHT_SETUP_TOKEN", "  ");
+        let config3 = Config::from_env();
+        assert!(config3.setup_token.is_none());
+
+        std::env::remove_var("TUNEWRIGHT_SETUP_TOKEN");
     }
 
     #[test]

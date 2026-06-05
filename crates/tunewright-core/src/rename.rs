@@ -22,7 +22,7 @@ pub fn preview_renames(
 ) -> Result<Vec<RenamePreview>, TunewrightError> {
     // Reads are independent, so compute (id, old_name, new_name) in parallel.
     // Conflict detection is order-dependent, so it runs as a sequential pass below.
-    let computed: Vec<(String, String, String)> = files
+    let computed: Vec<(String, String, String, PathBuf)> = files
         .par_iter()
         .map(|(id, _rel_path, canonical_path)| {
             let old_name = canonical_path
@@ -49,22 +49,48 @@ pub fn preview_renames(
                 format!("{}.{}", new_stem, sanitized_ext)
             };
 
-            (id.clone(), old_name, new_name)
+            (id.clone(), old_name, new_name, canonical_path.clone())
         })
         .collect();
 
     let mut previews = Vec::with_capacity(computed.len());
     let mut used_names: HashSet<String> = HashSet::new();
+    // Old paths freed by earlier batch items (execute_renames runs in the
+    // same order), so a later item may legally target them.
+    let mut vacated: HashSet<PathBuf> = HashSet::new();
     let case_sensitive = is_case_sensitive(_data_root);
 
-    for (id, old_name, new_name) in computed {
+    for (id, old_name, new_name, canonical_path) in computed {
         let key = if case_sensitive {
             new_name.clone()
         } else {
             new_name.to_lowercase()
         };
-        let conflict = used_names.contains(&key);
+        let mut conflict = used_names.contains(&key);
         used_names.insert(key);
+
+        // Also flag targets that already exist on disk (and aren't this very
+        // file via a case-only rename, or a path vacated earlier in the batch).
+        // Invalid names are skipped here so execute_renames reports the more
+        // precise "Invalid target filename" error for them.
+        if !conflict
+            && new_name != old_name
+            && is_valid_filename(&new_name)
+            && !new_name.contains('/')
+            && !new_name.contains('\\')
+        {
+            let new_path = canonical_path.with_file_name(&new_name);
+            if new_path.try_exists().unwrap_or(false)
+                && !is_same_file(&canonical_path, &new_path)
+                && !vacated.contains(&new_path)
+            {
+                conflict = true;
+            }
+        }
+
+        if !conflict && new_name != old_name {
+            vacated.insert(canonical_path.clone());
+        }
 
         previews.push(RenamePreview {
             id,
@@ -109,13 +135,22 @@ pub fn execute_renames(
             let unchanged_rel = rel_path.clone();
 
             if preview.conflict {
+                // Distinguish an on-disk collision from an in-batch duplicate.
+                let conflict_path = canonical_path.with_file_name(&preview.new_name);
+                let msg = if conflict_path.try_exists().unwrap_or(false)
+                    && !is_same_file(canonical_path, &conflict_path)
+                {
+                    "Target file already exists"
+                } else {
+                    "Duplicate filename conflict"
+                };
                 return RenameResult {
                     id: preview.id,
                     status: "error".to_string(),
                     old_name: preview.old_name,
                     new_name: preview.new_name,
                     new_relative_path: unchanged_rel,
-                    error: Some("Duplicate filename conflict".to_string()),
+                    error: Some(msg.to_string()),
                 };
             }
 
@@ -300,7 +335,6 @@ fn is_valid_filename(name: &str) -> bool {
     true
 }
 
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -392,6 +426,97 @@ mod tests {
             // Under case-insensitive OS, they must conflict!
             assert!(previews[1].conflict);
         }
+
+        let _ = std::fs::remove_dir_all(&temp_dir);
+    }
+
+    #[test]
+    fn test_preview_renames_existing_on_disk_target_conflict() {
+        let temp_dir = std::env::temp_dir().join(format!("tunewright_test_{}", rand_num()));
+        std::fs::create_dir_all(&temp_dir).unwrap();
+
+        use std::io::Write;
+        let flac_bytes = b"fLaC\x80\x00\x00\x22\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00";
+
+        // a.flac will rename to "Target.flac"; Target.flac already exists on
+        // disk and is not part of the batch -> must be flagged as a conflict.
+        let path_a = temp_dir.join("a.flac");
+        File::create(&path_a)
+            .unwrap()
+            .write_all(flac_bytes)
+            .unwrap();
+        let mut changes = crate::types::TagWriteChanges::default();
+        changes.title = Some("Target".to_string());
+        crate::audio::write_tags(&path_a, &changes).unwrap();
+
+        let existing = temp_dir.join("Target.flac");
+        File::create(&existing)
+            .unwrap()
+            .write_all(flac_bytes)
+            .unwrap();
+
+        let files = vec![("1".to_string(), "a.flac".to_string(), path_a.clone())];
+        let previews = preview_renames(&temp_dir, &files, "%title%").unwrap();
+        assert_eq!(previews.len(), 1);
+        assert!(
+            previews[0].conflict,
+            "target existing on disk must be reported as a conflict in preview"
+        );
+
+        let _ = std::fs::remove_dir_all(&temp_dir);
+    }
+
+    #[test]
+    fn test_preview_renames_vacated_target_not_conflict() {
+        let temp_dir = std::env::temp_dir().join(format!("tunewright_test_{}", rand_num()));
+        std::fs::create_dir_all(&temp_dir).unwrap();
+
+        use std::io::Write;
+        let flac_bytes = b"fLaC\x80\x00\x00\x22\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00";
+
+        // b.flac -> c.flac (vacates b.flac), then a.flac -> b.flac: in this
+        // order the target of the second rename is freed by the first, so the
+        // preview must NOT flag a conflict.
+        let path_b = temp_dir.join("b.flac");
+        File::create(&path_b)
+            .unwrap()
+            .write_all(flac_bytes)
+            .unwrap();
+        let mut changes_b = crate::types::TagWriteChanges::default();
+        changes_b.title = Some("c".to_string());
+        crate::audio::write_tags(&path_b, &changes_b).unwrap();
+
+        let path_a = temp_dir.join("a.flac");
+        File::create(&path_a)
+            .unwrap()
+            .write_all(flac_bytes)
+            .unwrap();
+        let mut changes_a = crate::types::TagWriteChanges::default();
+        changes_a.title = Some("b".to_string());
+        crate::audio::write_tags(&path_a, &changes_a).unwrap();
+
+        let files = vec![
+            ("1".to_string(), "b.flac".to_string(), path_b.clone()),
+            ("2".to_string(), "a.flac".to_string(), path_a.clone()),
+        ];
+        let previews = preview_renames(&temp_dir, &files, "%title%").unwrap();
+        assert!(!previews[0].conflict, "b.flac -> c.flac has no conflict");
+        assert!(
+            !previews[1].conflict,
+            "a.flac -> b.flac is fine because b.flac is vacated earlier in the batch"
+        );
+
+        // Reversed order: a.flac -> b.flac runs while b.flac still occupies
+        // the target on disk -> conflict (matches execute_renames' serial order).
+        let files_rev = vec![
+            ("2".to_string(), "a.flac".to_string(), path_a.clone()),
+            ("1".to_string(), "b.flac".to_string(), path_b.clone()),
+        ];
+        let previews_rev = preview_renames(&temp_dir, &files_rev, "%title%").unwrap();
+        assert!(
+            previews_rev[0].conflict,
+            "a.flac -> b.flac must conflict while b.flac has not yet been renamed away"
+        );
 
         let _ = std::fs::remove_dir_all(&temp_dir);
     }

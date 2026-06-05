@@ -126,6 +126,7 @@ mod tests {
             port: 8080,
             host: "127.0.0.1".to_string(),
             cookie_secure: false,
+            setup_token: None,
         };
         let state = AppState::new(config, user_manager);
 

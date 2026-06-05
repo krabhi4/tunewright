@@ -259,20 +259,39 @@
 		applying = true;
 		try {
 			const coverArtUrl = selectedRelease.cover_art_url;
-			const coverPaths = await applyReleaseToFiles(selectedRelease, matchedFiles, {
+			const result = await applyReleaseToFiles(selectedRelease, matchedFiles, {
 				rename: renameFiles
 			});
+			const coverPaths = result.coverPaths;
+
+			if (result.saveFailed > 0 || result.renameFailed > 0) {
+				const parts: string[] = [];
+				if (result.saveFailed > 0) parts.push(`${result.saveFailed} file(s) failed to save tags`);
+				if (result.renameFailed > 0) parts.push(`${result.renameFailed} file(s) failed to rename`);
+				alert(`Applied with errors: ${parts.join('; ')}.`);
+			}
 
 			onClose();
 
 			// Embed cover art in the background after the modal closes
 			if (coverArtUrl && coverPaths.length > 0) {
 				embedCoverArtFromUrl(coverArtUrl, coverPaths)
-					.then(() => bumpCoverArt())
-					.catch((err) => console.error('Cover art embed failed:', err));
+					.then((res) => {
+						bumpCoverArt();
+						if (res.errors && res.errors.length > 0) {
+							alert(
+								`Cover art embedded for ${res.embedded} of ${coverPaths.length} file(s); ${res.errors.length} failed.`
+							);
+						}
+					})
+					.catch((err) => {
+						console.error('Cover art embed failed:', err);
+						alert('Cover art embed failed. No covers were updated.');
+					});
 			}
 		} catch (err) {
 			console.error('Apply failed:', err);
+			alert('Apply failed. See console for details.');
 		} finally {
 			applying = false;
 		}

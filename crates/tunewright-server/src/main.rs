@@ -34,6 +34,23 @@ async fn main() {
     let users = UserManager::load(users_path);
     tracing::info!("Setup required: {}", !users.has_users());
 
+    // Setup-window exposure warning: with no users yet, /auth/setup hands the
+    // first caller the super-admin account. Binding beyond loopback without a
+    // setup token leaves that window open to the whole network.
+    let is_loopback = matches!(
+        config.host.as_str(),
+        "127.0.0.1" | "localhost" | "::1" | "[::1]"
+    );
+    if !users.has_users() && !is_loopback && config.setup_token.is_none() {
+        tracing::warn!(
+            "SECURITY: listening on non-loopback address {} while initial setup is incomplete. \
+             Anyone who can reach this port can claim the admin account via /api/v1/auth/setup. \
+             Set TUNEWRIGHT_SETUP_TOKEN to require a token during setup, or bind TUNEWRIGHT_HOST \
+             to 127.0.0.1 until setup is complete.",
+            config.host
+        );
+    }
+
     let host = if config.host.contains(':') && !config.host.starts_with('[') {
         format!("[{}]", config.host)
     } else {

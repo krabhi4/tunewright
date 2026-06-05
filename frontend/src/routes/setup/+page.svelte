@@ -7,6 +7,7 @@
 	let username = $state('');
 	let password = $state('');
 	let confirmPassword = $state('');
+	let setupToken = $state('');
 	let error = $state('');
 	let loading = $state(false);
 
@@ -25,10 +26,14 @@
 			error = 'Passwords do not match';
 			return;
 		}
+		if ($auth.setupTokenRequired && !setupToken.trim()) {
+			error = 'Setup token is required';
+			return;
+		}
 
 		loading = true;
 		try {
-			const result = await setup(username, password);
+			const result = await setup(username, password, setupToken.trim() || undefined);
 			if (result.user) {
 				auth.set({ checked: true, setupRequired: false, authenticated: true, user: result.user });
 			}
@@ -101,6 +106,24 @@
 					class="login-input"
 				/>
 			</div>
+
+			{#if $auth.setupTokenRequired}
+				<div class="field">
+					<label for="setup-token" class="field-label">Setup Token</label>
+					<input
+						id="setup-token"
+						type="password"
+						bind:value={setupToken}
+						placeholder="Setup token (from TUNEWRIGHT_SETUP_TOKEN)"
+						autocomplete="off"
+						required
+						aria-required="true"
+						aria-describedby={error ? 'setup-error' : undefined}
+						onkeydown={handleKeydown}
+						class="login-input"
+					/>
+				</div>
+			{/if}
 
 			{#if error}
 				<div id="setup-error" class="login-error" role="alert">{error}</div>

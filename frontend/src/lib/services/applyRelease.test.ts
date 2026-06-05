@@ -144,7 +144,7 @@ describe('applyReleaseToFiles', () => {
 			{ id: 'file-2', status: 'ok', old_name: 'old2.mp3', new_name: '02 - Track 2.mp3', new_relative_path: '02 - Track 2.mp3' }
 		]);
 
-		const coverPaths = await applyReleaseToFiles(mockRelease, matchedFiles, { rename: true });
+		const result = await applyReleaseToFiles(mockRelease, matchedFiles, { rename: true });
 
 		expect(saveAllEdits).toHaveBeenCalled();
 		expect(executeRenames).toHaveBeenCalledWith(
@@ -154,7 +154,9 @@ describe('applyReleaseToFiles', () => {
 			],
 			'%track% - %title%'
 		);
-		expect(coverPaths).toEqual(['01 - Track 1.mp3', '02 - Track 2.mp3']);
+		expect(result.coverPaths).toEqual(['01 - Track 1.mp3', '02 - Track 2.mp3']);
+		expect(result.saveFailed).toBe(0);
+		expect(result.renameFailed).toBe(0);
 	});
 
 	it('skips renaming and filters coverPaths for files that fail saving', async () => {
@@ -166,7 +168,7 @@ describe('applyReleaseToFiles', () => {
 			{ id: 'file-2', status: 'ok', old_name: 'old2.mp3', new_name: '02 - Track 2.mp3', new_relative_path: '02 - Track 2.mp3' }
 		]);
 
-		const coverPaths = await applyReleaseToFiles(mockRelease, matchedFiles, { rename: true });
+		const result = await applyReleaseToFiles(mockRelease, matchedFiles, { rename: true });
 
 		expect(saveAllEdits).toHaveBeenCalled();
 		// executeRenames should ONLY be called with file-2
@@ -175,7 +177,10 @@ describe('applyReleaseToFiles', () => {
 			'%track% - %title%'
 		);
 		// coverPaths should ONLY contain the successfully saved and renamed/original path of file-2
-		expect(coverPaths).toEqual(['02 - Track 2.mp3']);
+		expect(result.coverPaths).toEqual(['02 - Track 2.mp3']);
+		// The save failure must be reported to the caller
+		expect(result.saveFailed).toBe(1);
+		expect(result.renameFailed).toBe(0);
 	});
 
 	it('handles the case where all files fail saving', async () => {
@@ -183,13 +188,14 @@ describe('applyReleaseToFiles', () => {
 
 		vi.mocked(saveAllEdits).mockResolvedValue({ success: 0, failed: 2, failedIds: ['file-1', 'file-2'] });
 
-		const coverPaths = await applyReleaseToFiles(mockRelease, matchedFiles, { rename: true });
+		const result = await applyReleaseToFiles(mockRelease, matchedFiles, { rename: true });
 
 		expect(saveAllEdits).toHaveBeenCalled();
 		// executeRenames should not be called at all
 		expect(executeRenames).not.toHaveBeenCalled();
 		// coverPaths should be empty since all files failed
-		expect(coverPaths).toEqual([]);
+		expect(result.coverPaths).toEqual([]);
+		expect(result.saveFailed).toBe(2);
 	});
 
 	it('handles rename execution failure gracefully', async () => {
@@ -198,11 +204,13 @@ describe('applyReleaseToFiles', () => {
 		vi.mocked(saveAllEdits).mockResolvedValue({ success: 2, failed: 0, failedIds: [] });
 		vi.mocked(executeRenames).mockRejectedValue(new Error('Network error'));
 
-		const coverPaths = await applyReleaseToFiles(mockRelease, matchedFiles, { rename: true });
+		const result = await applyReleaseToFiles(mockRelease, matchedFiles, { rename: true });
 
 		expect(saveAllEdits).toHaveBeenCalled();
 		expect(executeRenames).toHaveBeenCalled();
 		// Should fall back to the original paths of the successfully saved files
-		expect(coverPaths).toEqual(['old1.mp3', 'old2.mp3']);
+		expect(result.coverPaths).toEqual(['old1.mp3', 'old2.mp3']);
+		// A thrown rename marks every attempted file as failed
+		expect(result.renameFailed).toBe(2);
 	});
 });

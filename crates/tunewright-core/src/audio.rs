@@ -187,9 +187,16 @@ pub fn batch_read_tags_full(paths: &[(String, PathBuf)]) -> HashMap<String, TagD
         .collect()
 }
 
-/// Write tag changes to a single audio file
+/// Write tag changes to a single audio file.
+///
+/// Crash-safe: the mutation runs against a temp copy which is atomically
+/// renamed over the original, so a crash mid-write cannot truncate the file.
 pub fn write_tags(path: &Path, changes: &TagWriteChanges) -> Result<(), TunewrightError> {
     let _lock = crate::locks::lock_file(path);
+    crate::fsutil::atomic_file_update(path, |tmp| apply_tag_changes(tmp, changes))
+}
+
+fn apply_tag_changes(path: &Path, changes: &TagWriteChanges) -> Result<(), TunewrightError> {
     let mut tagged = Probe::open(path)
         .map_err(|e| TunewrightError::TagWriteError(format!("{}: {}", path.display(), e)))?
         .read()

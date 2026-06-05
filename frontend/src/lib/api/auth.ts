@@ -2,6 +2,7 @@ import { apiFetch } from './client';
 
 export interface AuthCheck {
 	setup_required?: boolean;
+	setup_token_required?: boolean;
 	authenticated?: boolean;
 	user?: { username: string; role: 'super_admin' | 'admin' };
 }
@@ -51,10 +52,10 @@ export function logout() {
 	return apiFetch<{ status: string }>('/auth/logout', { method: 'POST' });
 }
 
-export function setup(username: string, password: string) {
+export function setup(username: string, password: string, setupToken?: string) {
 	return apiFetch<AuthResponse>('/auth/setup', {
 		method: 'POST',
-		body: JSON.stringify({ username, password })
+		body: JSON.stringify({ username, password, setup_token: setupToken })
 	});
 }
 

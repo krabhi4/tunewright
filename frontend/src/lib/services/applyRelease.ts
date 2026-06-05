@@ -6,10 +6,20 @@ import type { FileEntry } from '$lib/types/audio';
 /** Filename format used when renaming files to match a looked-up release. */
 const RENAME_FORMAT = '%track% - %title%';
 
+export interface ApplyReleaseResult {
+	/** Relative paths cover art should be embedded into (post-rename). */
+	coverPaths: string[];
+	/** Files whose tag save failed; rename and cover embed were skipped for them. */
+	saveFailed: number;
+	/** Files whose rename failed. */
+	renameFailed: number;
+}
+
 /**
  * Apply a looked-up release's track metadata to the positionally-matched files:
  * stage the tag edits, optionally save + rename, and return the (possibly
- * post-rename) relative paths that cover art should be embedded into.
+ * post-rename) relative paths that cover art should be embedded into, plus
+ * per-stage failure counts for the caller to surface.
  *
  * `matchedFiles[i]` is the file matched to `release.tracks[i]` (or `null`).
  */
@@ -17,7 +27,7 @@ export async function applyReleaseToFiles(
 	release: ReleaseDetail,
 	matchedFiles: (FileEntry | null)[],
 	opts: { rename: boolean }
-): Promise<string[]> {
+): Promise<ApplyReleaseResult> {
 	const tracks = release.tracks;
 	const filesToRename: { id: string; path: string }[] = [];
 
@@ -49,15 +59,19 @@ export async function applyReleaseToFiles(
 
 	const matched = matchedFiles.filter((f): f is FileEntry => f !== null);
 	let coverPaths = matched.map((f) => f.relative_path);
+	let saveFailed = 0;
+	let renameFailed = 0;
 
 	if (opts.rename && filesToRename.length > 0) {
 		const saveRes = await saveAllEdits();
+		saveFailed = saveRes.failed;
 		const failedSet = new Set(saveRes.failedIds);
 		const filesToRenameFiltered = filesToRename.filter((f) => !failedSet.has(f.id));
 
 		if (filesToRenameFiltered.length > 0) {
 			try {
 				const results = await executeRenames(filesToRenameFiltered, RENAME_FORMAT);
+				renameFailed = results.filter((r) => r.status === 'error').length;
 				// Use the server-reported new path instead of re-deriving it client-side.
 				const newPaths = new Map<string, string>();
 				for (const res of results) {
@@ -68,6 +82,7 @@ export async function applyReleaseToFiles(
 					.map((f) => newPaths.get(f.id) ?? f.relative_path);
 			} catch (err) {
 				console.error('Rename failed:', err);
+				renameFailed = filesToRenameFiltered.length;
 				coverPaths = matched.filter((f) => !failedSet.has(f.id)).map((f) => f.relative_path);
 			}
 		} else {
@@ -75,5 +90,5 @@ export async function applyReleaseToFiles(
 		}
 	}
 
-	return coverPaths;
+	return { coverPaths, saveFailed, renameFailed };
 }

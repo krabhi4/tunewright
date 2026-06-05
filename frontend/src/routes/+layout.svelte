@@ -20,7 +20,13 @@
 			const data = await checkAuth();
 
 			if (data.setup_required) {
-				auth.set({ checked: true, setupRequired: true, authenticated: false, user: null });
+				auth.set({
+					checked: true,
+					setupRequired: true,
+					setupTokenRequired: data.setup_token_required ?? false,
+					authenticated: false,
+					user: null
+				});
 			} else if (data.authenticated && data.user) {
 				auth.set({ checked: true, setupRequired: false, authenticated: true, user: data.user });
 			} else {

@@ -63,6 +63,15 @@ pub fn scan_directory(
             continue;
         }
 
+        // Skip hidden files (including transient .tw-tmp-* atomic-write copies)
+        if path
+            .file_name()
+            .and_then(|n| n.to_str())
+            .is_some_and(|n| n.starts_with('.'))
+        {
+            continue;
+        }
+
         let ext = match path.extension().and_then(|e| e.to_str()) {
             Some(e) => e,
             None => continue,

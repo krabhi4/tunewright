@@ -8,4 +8,7 @@ services:
       - ${MUSIC_DIR:-./music}:/data:rw
     environment:
       TUNEWRIGHT_HOST: 0.0.0.0
+      # Recommended: require a token to claim the first admin account, since
+      # the container is reachable on the network during initial setup.
+      # TUNEWRIGHT_SETUP_TOKEN: choose-a-secret-value
     restart: unless-stopped

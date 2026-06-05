@@ -96,9 +96,23 @@ async fn validate_and_hash(username: &str, password: &str) -> Result<(String, St
 pub struct SetupRequest {
     pub username: String,
     pub password: String,
+    #[serde(default)]
+    pub setup_token: Option<String>,
 }
 
 pub async fn setup(State(state): State<AppState>, Json(body): Json<SetupRequest>) -> Response {
+    // When configured, the setup token gates first-admin creation so a
+    // network-exposed instance can't be claimed by whoever connects first.
+    if let Some(required) = &state.config.setup_token {
+        if body.setup_token.as_deref() != Some(required.as_str()) {
+            return (
+                StatusCode::FORBIDDEN,
+                Json(serde_json::json!({ "error": "Invalid setup token" })),
+            )
+                .into_response();
+        }
+    }
+
     let (username, hash) = match validate_and_hash(&body.username, &body.password).await {
         Ok(ok) => ok,
         Err(resp) => return resp,
@@ -130,22 +144,54 @@ pub struct LoginRequest {
     pub password: String,
 }
 
+/// Upper bound on tracked failed-login usernames; prevents unbounded memory
+/// growth from spraying random usernames. Decayed entries are dropped first,
+/// then the stalest entry if the map is still full.
+const MAX_FAILED_LOGIN_ENTRIES: usize = 1000;
+/// A username's failure counter resets after this much quiet time.
+const FAILED_LOGIN_DECAY_SECS: u64 = 60;
+
+fn record_failed_login(
+    map: &mut std::collections::HashMap<String, (u32, std::time::Instant)>,
+    key: String,
+) {
+    if !map.contains_key(&key) && map.len() >= MAX_FAILED_LOGIN_ENTRIES {
+        map.retain(|_, (_, last)| last.elapsed().as_secs() <= FAILED_LOGIN_DECAY_SECS);
+        while map.len() >= MAX_FAILED_LOGIN_ENTRIES {
+            let Some(oldest) = map
+                .iter()
+                .min_by_key(|(_, (_, last))| *last)
+                .map(|(k, _)| k.clone())
+            else {
+                break;
+            };
+            map.remove(&oldest);
+        }
+    }
+    let entry = map.entry(key).or_insert((0, std::time::Instant::now()));
+    entry.0 = entry.0.saturating_add(1);
+    entry.1 = std::time::Instant::now();
+}
+
 pub async fn login(State(state): State<AppState>, Json(body): Json<LoginRequest>) -> Response {
-    // Brute-force throttling (per-username)
+    // Brute-force throttling, keyed per normalized username (matches the
+    // normalization applied at account creation).
+    let throttle_key = body.username.trim().to_lowercase();
     let delay = {
         let mut guard = state
             .failed_logins
             .lock()
             .unwrap_or_else(|e| e.into_inner());
-        let entry = guard
-            .entry(body.username.clone())
-            .or_insert((0, std::time::Instant::now()));
-        let (count, last_failure) = entry;
-        if *count > 0 && last_failure.elapsed().as_secs() > 60 {
-            *count = 0;
+        match guard.get_mut(&throttle_key) {
+            Some(entry) => {
+                if entry.0 > 0 && entry.1.elapsed().as_secs() > FAILED_LOGIN_DECAY_SECS {
+                    entry.0 = 0;
+                }
+                let secs = (entry.0 as u64).min(10);
+                std::time::Duration::from_millis(secs * 500)
+            }
+            None => std::time::Duration::ZERO,
         }
-        let secs = (*count as u64).min(10);
-        std::time::Duration::from_millis(secs * 500)
     };
     if !delay.is_zero() {
         tokio::time::sleep(delay).await;
@@ -177,7 +223,7 @@ pub async fn login(State(state): State<AppState>, Json(body): Json<LoginRequest>
             .failed_logins
             .lock()
             .unwrap_or_else(|e| e.into_inner());
-        guard.remove(&body.username);
+        guard.remove(&throttle_key);
         drop(guard);
         create_session_response(&state, &user.id, &user.username, user.role)
     } else {
@@ -185,11 +231,7 @@ pub async fn login(State(state): State<AppState>, Json(body): Json<LoginRequest>
             .failed_logins
             .lock()
             .unwrap_or_else(|e| e.into_inner());
-        let entry = guard
-            .entry(body.username.clone())
-            .or_insert((0, std::time::Instant::now()));
-        entry.0 = entry.0.saturating_add(1);
-        entry.1 = std::time::Instant::now();
+        record_failed_login(&mut guard, throttle_key);
         drop(guard);
         (
             StatusCode::UNAUTHORIZED,
@@ -223,7 +265,10 @@ pub async fn check(State(state): State<AppState>, req: Request<Body>) -> Respons
     if !state.users.has_users() {
         return (
             StatusCode::OK,
-            Json(serde_json::json!({ "setup_required": true })),
+            Json(serde_json::json!({
+                "setup_required": true,
+                "setup_token_required": state.config.setup_token.is_some()
+            })),
         )
             .into_response();
     }
@@ -553,6 +598,7 @@ mod tests {
             port: 8080,
             host: "127.0.0.1".to_string(),
             cookie_secure: false,
+            setup_token: None,
         };
         let state = AppState::new(config, user_manager);
 
@@ -623,6 +669,7 @@ mod tests {
             port: 8080,
             host: "127.0.0.1".to_string(),
             cookie_secure: false,
+            setup_token: None,
         };
         let state = AppState::new(config, user_manager);
 
@@ -675,6 +722,166 @@ mod tests {
                 "Path {} should require authentication",
                 private_path
             );
+        }
+
+        let _ = std::fs::remove_dir_all(&temp_dir);
+    }
+
+    #[tokio::test]
+    async fn test_setup_token_enforced() {
+        let temp_dir = std::env::temp_dir().join(format!("tunewright_srv_test_{}", rand_num()));
+        std::fs::create_dir_all(&temp_dir).unwrap();
+        let users_path = temp_dir.join("users.json");
+
+        let user_manager = UserManager::load(users_path);
+        let config = Config {
+            data_dir: temp_dir.clone(),
+            static_dir: temp_dir.clone(),
+            port: 8080,
+            host: "127.0.0.1".to_string(),
+            cookie_secure: false,
+            setup_token: Some("sekret123".to_string()),
+        };
+        let state = AppState::new(config, user_manager);
+
+        // Missing token -> forbidden, no user created
+        let resp = setup(
+            State(state.clone()),
+            Json(SetupRequest {
+                username: "admin".to_string(),
+                password: "password123".to_string(),
+                setup_token: None,
+            }),
+        )
+        .await;
+        assert_eq!(resp.status(), StatusCode::FORBIDDEN);
+        assert!(!state.users.has_users());
+
+        // Wrong token -> forbidden
+        let resp = setup(
+            State(state.clone()),
+            Json(SetupRequest {
+                username: "admin".to_string(),
+                password: "password123".to_string(),
+                setup_token: Some("wrong".to_string()),
+            }),
+        )
+        .await;
+        assert_eq!(resp.status(), StatusCode::FORBIDDEN);
+        assert!(!state.users.has_users());
+
+        // Correct token -> setup succeeds
+        let resp = setup(
+            State(state.clone()),
+            Json(SetupRequest {
+                username: "admin".to_string(),
+                password: "password123".to_string(),
+                setup_token: Some("sekret123".to_string()),
+            }),
+        )
+        .await;
+        assert_eq!(resp.status(), StatusCode::OK);
+        assert!(state.users.has_users());
+
+        let _ = std::fs::remove_dir_all(&temp_dir);
+    }
+
+    #[tokio::test]
+    async fn test_check_reports_setup_token_required() {
+        let temp_dir = std::env::temp_dir().join(format!("tunewright_srv_test_{}", rand_num()));
+        std::fs::create_dir_all(&temp_dir).unwrap();
+        let users_path = temp_dir.join("users.json");
+
+        let user_manager = UserManager::load(users_path);
+        let config = Config {
+            data_dir: temp_dir.clone(),
+            static_dir: temp_dir.clone(),
+            port: 8080,
+            host: "127.0.0.1".to_string(),
+            cookie_secure: false,
+            setup_token: Some("sekret123".to_string()),
+        };
+        let state = AppState::new(config, user_manager);
+
+        let req = Request::builder()
+            .uri("/auth/check")
+            .body(Body::empty())
+            .unwrap();
+        let resp = check(State(state), req).await;
+        assert_eq!(resp.status(), StatusCode::OK);
+
+        let bytes = axum::body::to_bytes(resp.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let body: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+        assert_eq!(body["setup_required"], true);
+        assert_eq!(body["setup_token_required"], true);
+
+        let _ = std::fs::remove_dir_all(&temp_dir);
+    }
+
+    #[test]
+    fn test_record_failed_login_bounded() {
+        let mut map = std::collections::HashMap::new();
+        for i in 0..(MAX_FAILED_LOGIN_ENTRIES + 100) {
+            record_failed_login(&mut map, format!("user{}", i));
+        }
+        assert!(
+            map.len() <= MAX_FAILED_LOGIN_ENTRIES,
+            "failed-login map must be bounded, got {} entries",
+            map.len()
+        );
+        // The most recent key must still be present
+        assert!(map.contains_key(&format!("user{}", MAX_FAILED_LOGIN_ENTRIES + 99)));
+
+        // Repeat failures increment the counter, not duplicate the entry
+        record_failed_login(&mut map, "repeat".to_string());
+        record_failed_login(&mut map, "repeat".to_string());
+        assert_eq!(map.get("repeat").unwrap().0, 2);
+    }
+
+    #[tokio::test]
+    async fn test_failed_login_key_normalized() {
+        let temp_dir = std::env::temp_dir().join(format!("tunewright_srv_test_{}", rand_num()));
+        std::fs::create_dir_all(&temp_dir).unwrap();
+        let users_path = temp_dir.join("users.json");
+
+        let user_manager = UserManager::load(users_path);
+        let config = Config {
+            data_dir: temp_dir.clone(),
+            static_dir: temp_dir.clone(),
+            port: 8080,
+            host: "127.0.0.1".to_string(),
+            cookie_secure: false,
+            setup_token: None,
+        };
+        let state = AppState::new(config, user_manager);
+
+        // Case/whitespace variants of the same username share one throttle entry
+        let resp = login(
+            State(state.clone()),
+            Json(LoginRequest {
+                username: "  User1 ".to_string(),
+                password: "wrong_password".to_string(),
+            }),
+        )
+        .await;
+        assert_eq!(resp.status(), StatusCode::UNAUTHORIZED);
+
+        let resp = login(
+            State(state.clone()),
+            Json(LoginRequest {
+                username: "user1".to_string(),
+                password: "wrong_password".to_string(),
+            }),
+        )
+        .await;
+        assert_eq!(resp.status(), StatusCode::UNAUTHORIZED);
+
+        {
+            let guard = state.failed_logins.lock().unwrap();
+            assert_eq!(guard.len(), 1, "variants must share a single entry");
+            assert_eq!(guard.get("user1").unwrap().0, 2);
         }
 
         let _ = std::fs::remove_dir_all(&temp_dir);

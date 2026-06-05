@@ -218,7 +218,9 @@ mod tests {
         let mut temp_tracks: Vec<(u32, u32, TrackInfo)> = response
             .results
             .iter()
-            .filter(|r| r.wrapper_type.as_deref() == Some("track") && r.kind.as_deref() == Some("song"))
+            .filter(|r| {
+                r.wrapper_type.as_deref() == Some("track") && r.kind.as_deref() == Some("song")
+            })
             .filter_map(|r| {
                 let disc = r.disc_number.unwrap_or(1);
                 let track = r.track_number?;

@@ -3,6 +3,7 @@ pub mod audio;
 pub mod expr;
 pub mod filename_to_tag;
 pub mod format_string;
+pub mod fsutil;
 pub mod locks;
 pub mod picture;
 pub mod rename;

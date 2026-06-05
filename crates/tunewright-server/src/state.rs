@@ -59,7 +59,9 @@ impl AppState {
             .unwrap_or_else(|_| reqwest::Client::new());
 
         let coverart_client = reqwest::Client::builder()
-            .user_agent("Mozilla/5.0 (compatible; Tunewright/0.5.1; +https://github.com/tunewright)")
+            .user_agent(
+                "Mozilla/5.0 (compatible; Tunewright/0.5.1; +https://github.com/tunewright)",
+            )
             .redirect(reqwest::redirect::Policy::custom(|attempt| {
                 let host = attempt.url().host_str().unwrap_or("");
                 if attempt.previous().len() > 5 {
@@ -134,6 +136,7 @@ mod tests {
             port: 8080,
             host: "127.0.0.1".to_string(),
             cookie_secure: false,
+            setup_token: None,
         };
         let users =
             UserManager::load(std::env::temp_dir().join(format!("users_{}.json", rand_num())));

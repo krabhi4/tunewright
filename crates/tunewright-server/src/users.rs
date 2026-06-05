@@ -79,7 +79,8 @@ impl UserManager {
                             "FATAL: users.json at {:?} exists but contains invalid JSON: {}. \
                              Refusing to start to prevent data loss. \
                              Fix or remove the file manually.",
-                            path, e
+                            path,
+                            e
                         );
                         std::process::exit(1);
                     }
@@ -88,7 +89,8 @@ impl UserManager {
                     tracing::error!(
                         "FATAL: Cannot read users file {:?}: {}. \
                          Refusing to start to prevent data loss.",
-                        path, e
+                        path,
+                        e
                     );
                     std::process::exit(1);
                 }
