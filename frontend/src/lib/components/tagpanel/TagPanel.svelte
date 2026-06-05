@@ -119,13 +119,47 @@
 		const target = e.target as HTMLInputElement;
 		const val = target.value;
 		if (key === 'year' || key === 'track_number' || key === 'track_total' || key === 'disc_number' || key === 'disc_total') {
-			let num = parseInt(val, 10);
-			if (!isNaN(num)) {
+			const trimmed = val.trim();
+			if (trimmed === '') {
+				setPendingEdit(key, undefined);
+				return;
+			}
+
+			// Check for A/B format (e.g. 5/10) for track/disc number inputs
+			if ((key === 'track_number' || key === 'disc_number') && /^\d+\/\d+$/.test(trimmed)) {
+				const parts = trimmed.split('/');
+				let numA = parseInt(parts[0], 10);
+				let numB = parseInt(parts[1], 10);
+				if (numA < 0) numA = 0;
+				if (numA > 4294967295) numA = 4294967295;
+				if (numB < 0) numB = 0;
+				if (numB > 4294967295) numB = 4294967295;
+
+				target.value = String(numA);
+				setPendingEdit(key, numA);
+
+				const totalKey = key === 'track_number' ? 'track_total' : 'disc_total';
+				setPendingEdit(totalKey, numB);
+				return;
+			}
+
+			// Otherwise, must be a clean integer
+			if (/^\d+$/.test(trimmed)) {
+				let num = parseInt(trimmed, 10);
 				if (num < 0) num = 0;
 				if (num > 4294967295) num = 4294967295;
 				target.value = String(num);
+				setPendingEdit(key, num);
+			} else {
+				// Revert invalid string in UI and clear pending edit
+				setPendingEdit(key, undefined);
+				const st = fieldStates[key];
+				if (st) {
+					target.value = st.keep ? '' : st.value;
+				} else {
+					target.value = '';
+				}
 			}
-			setPendingEdit(key, isNaN(num) ? undefined : num);
 		} else {
 			setPendingEdit(key, val);
 		}

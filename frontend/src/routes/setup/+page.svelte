@@ -41,7 +41,7 @@
 	}
 
 	function handleKeydown(e: KeyboardEvent) {
-		if (e.key === 'Enter') handleSetup();
+		if (e.key === 'Enter' && !loading) handleSetup();
 	}
 </script>
 

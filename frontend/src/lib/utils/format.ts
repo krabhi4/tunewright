@@ -6,6 +6,9 @@ export function formatDuration(secs: number | null | undefined): string {
 }
 
 export function formatTotalDuration(secs: number): string {
+	if (secs > 0 && secs < 60) {
+		return `${Math.round(secs)}s`;
+	}
 	const h = Math.floor(secs / 3600);
 	const m = Math.floor((secs % 3600) / 60);
 	if (h > 0) return `${h}h ${m}m`;

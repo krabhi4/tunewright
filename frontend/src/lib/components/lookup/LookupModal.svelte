@@ -85,6 +85,16 @@
 		}
 	});
 
+	// Clear stale results when provider changes
+	$effect(() => {
+		provider;
+		if (!searching && !loadingRelease) {
+			searchResults = [];
+			searchError = '';
+			selectedRelease = null;
+		}
+	});
+
 	async function handleSearch() {
 		if (!searchQuery.trim()) return;
 		const query = searchQuery;

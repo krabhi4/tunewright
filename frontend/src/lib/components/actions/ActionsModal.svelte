@@ -32,6 +32,25 @@
 	let autoStart = $state(1);
 	let autoPadding = $state(2);
 
+	$effect(() => {
+		if (open) {
+			actions = [];
+			previews = [];
+			loading = false;
+			executing = false;
+			actionType = 'case_conversion';
+			actionField = 'title';
+			caseMode = 'title';
+			searchText = '';
+			replaceText = '';
+			useRegex = false;
+			formatStr = '';
+			setValue = '';
+			autoStart = 1;
+			autoPadding = 2;
+		}
+	});
+
 	function addAction() {
 		let action: Action;
 		switch (actionType) {

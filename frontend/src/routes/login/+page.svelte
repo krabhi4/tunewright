@@ -28,7 +28,7 @@
 	}
 
 	function handleKeydown(e: KeyboardEvent) {
-		if (e.key === 'Enter') handleLogin();
+		if (e.key === 'Enter' && !loading) handleLogin();
 	}
 </script>
 

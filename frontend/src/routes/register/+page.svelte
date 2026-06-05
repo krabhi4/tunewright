@@ -47,7 +47,7 @@
 	}
 
 	function handleKeydown(e: KeyboardEvent) {
-		if (e.key === 'Enter') handleRegister();
+		if (e.key === 'Enter' && !loading) handleRegister();
 	}
 </script>
 
