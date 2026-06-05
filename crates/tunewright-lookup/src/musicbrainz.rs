@@ -80,7 +80,7 @@ struct MbArtistCredit {
 
 #[derive(Debug, Deserialize)]
 struct MbArtist {
-    name: String,
+    name: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -99,9 +99,10 @@ struct MbMedia {
 }
 
 #[derive(Debug, Deserialize)]
+#[allow(dead_code)]
 struct MbTrack {
     position: u32,
-    title: String,
+    title: Option<String>,
     #[serde(rename = "artist-credit")]
     artist_credit: Option<Vec<MbArtistCredit>>,
     length: Option<u64>,
@@ -111,7 +112,7 @@ fn extract_artist(credits: &Option<Vec<MbArtistCredit>>) -> String {
     credits
         .as_ref()
         .and_then(|c| c.first())
-        .map(|c| c.artist.name.clone())
+        .and_then(|c| c.artist.name.clone())
         .unwrap_or_default()
 }
 
@@ -174,9 +175,10 @@ pub async fn get_release(client: &Client, mbid: &str) -> Result<ReleaseDetail, S
         .unwrap_or_default()
         .into_iter()
         .flat_map(|m| m.tracks.unwrap_or_default())
-        .map(|t| TrackInfo {
-            position: t.position,
-            title: t.title,
+        .enumerate()
+        .map(|(i, t)| TrackInfo {
+            position: (i + 1) as u32,
+            title: t.title.unwrap_or_else(|| "Unknown Track".to_string()),
             artist: Some(extract_artist(&t.artist_credit)),
             duration_secs: t.length.map(|ms| ms as f64 / 1000.0),
         })
@@ -192,4 +194,87 @@ pub async fn get_release(client: &Client, mbid: &str) -> Result<ReleaseDetail, S
         source: LookupSource::MusicBrainz,
         cover_art_url,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_musicbrainz_multi_disc_and_missing_artist() {
+        let json_data = r#"{
+            "id": "release-id-123",
+            "title": "Double Album",
+            "artist-credit": [
+                {
+                    "artist": {
+                        "name": "Cool Artist"
+                    }
+                }
+            ],
+            "date": "2024-03-20",
+            "media": [
+                {
+                    "tracks": [
+                        {
+                            "position": 1,
+                            "title": "Disc 1 Song 1",
+                            "artist-credit": [
+                                {
+                                    "artist": {
+                                        "name": null
+                                    }
+                                }
+                            ]
+                        },
+                        {
+                            "position": 2,
+                            "title": null,
+                            "artist-credit": []
+                        }
+                    ]
+                },
+                {
+                    "tracks": [
+                        {
+                            "position": 1,
+                            "title": "Disc 2 Song 1"
+                        }
+                    ]
+                }
+            ]
+        }"#;
+
+        let detail: MbReleaseDetail = serde_json::from_str(json_data).unwrap();
+        assert_eq!(detail.title, "Double Album");
+
+        let tracks: Vec<TrackInfo> = detail
+            .media
+            .unwrap_or_default()
+            .into_iter()
+            .flat_map(|m| m.tracks.unwrap_or_default())
+            .enumerate()
+            .map(|(i, t)| TrackInfo {
+                position: (i + 1) as u32,
+                title: t.title.unwrap_or_else(|| "Unknown Track".to_string()),
+                artist: Some(extract_artist(&t.artist_credit)),
+                duration_secs: t.length.map(|ms| ms as f64 / 1000.0),
+            })
+            .collect();
+
+        assert_eq!(tracks.len(), 3);
+
+        // Track 1
+        assert_eq!(tracks[0].title, "Disc 1 Song 1");
+        assert_eq!(tracks[0].position, 1);
+        assert_eq!(tracks[0].artist, Some("".to_string())); // null name falls back to empty
+
+        // Track 2
+        assert_eq!(tracks[1].title, "Unknown Track"); // null title falls back
+        assert_eq!(tracks[1].position, 2);
+
+        // Track 3
+        assert_eq!(tracks[2].title, "Disc 2 Song 1");
+        assert_eq!(tracks[2].position, 3);
+    }
 }

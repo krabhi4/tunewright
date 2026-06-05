@@ -24,3 +24,6 @@ hex = "0.4"
 argon2 = "0.5"
 uuid = { version = "1", features = ["v4"] }
 chrono = { version = "0.4", features = ["serde"] }
+
+[dev-dependencies]
+tower = { version = "0.5", features = ["util"] }

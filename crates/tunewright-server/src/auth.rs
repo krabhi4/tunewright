@@ -402,8 +402,16 @@ pub async fn require_auth(
 ) -> Response {
     let path = req.uri().path();
 
-    // Allow auth endpoints and health through unconditionally
-    if path.starts_with("/auth/") || path == "/health" {
+    // Allow only the specific public auth endpoints and health unconditionally.
+    // This provides defense-in-depth for private /auth/ endpoints.
+    let is_public = path == "/auth/setup"
+        || path == "/auth/login"
+        || path == "/auth/logout"
+        || path == "/auth/check"
+        || path == "/auth/register"
+        || path == "/health";
+
+    if is_public {
         return next.run(req).await;
     }
 
@@ -537,6 +545,90 @@ mod tests {
             let guard = state.failed_logins.lock().unwrap();
             assert_eq!(guard.get("user1").unwrap().0, 1);
             assert_eq!(guard.get("user2").unwrap().0, 1);
+        }
+
+        let _ = std::fs::remove_dir_all(&temp_dir);
+    }
+
+    #[tokio::test]
+    async fn test_require_auth_middleware() {
+        use axum::body::Body;
+        use axum::http::Request;
+        use axum::middleware::from_fn_with_state;
+        use axum::routing::get;
+        use axum::Router;
+        use tower::ServiceExt;
+
+        let temp_dir = std::env::temp_dir().join(format!("tunewright_srv_test_{}", rand_num()));
+        std::fs::create_dir_all(&temp_dir).unwrap();
+
+        // Write a user to users.json so that has_users() returns true
+        let users_path = temp_dir.join("users.json");
+        std::fs::write(
+            &users_path,
+            r#"{"users":[{"id":"admin-id","username":"admin","password_hash":"nonsense","role":"super_admin","created_at":"2026-06-05T07:00:00Z"}],"invites":[]}"#,
+        )
+        .unwrap();
+
+        let user_manager = UserManager::load(users_path);
+        let config = Config {
+            data_dir: temp_dir.clone(),
+            static_dir: temp_dir.clone(),
+            port: 8080,
+            host: "127.0.0.1".to_string(),
+            cookie_secure: false,
+        };
+        let state = AppState::new(config, user_manager);
+
+        // Build a router with the middleware
+        let app = Router::new()
+            .route("/auth/setup", get(|| async { "setup" }))
+            .route("/auth/login", get(|| async { "login" }))
+            .route("/auth/logout", get(|| async { "logout" }))
+            .route("/auth/check", get(|| async { "check" }))
+            .route("/auth/register", get(|| async { "register" }))
+            .route("/health", get(|| async { "health" }))
+            .route("/auth/invites", get(|| async { "invites" }))
+            .route("/auth/users", get(|| async { "users" }))
+            .route("/files", get(|| async { "files" }))
+            .layer(from_fn_with_state(state.clone(), require_auth))
+            .with_state(state);
+
+        // 1. Check public endpoints (should pass and return OK)
+        for public_path in &[
+            "/auth/setup",
+            "/auth/login",
+            "/auth/logout",
+            "/auth/check",
+            "/auth/register",
+            "/health",
+        ] {
+            let req = Request::builder()
+                .uri(*public_path)
+                .body(Body::empty())
+                .unwrap();
+            let resp = app.clone().oneshot(req).await.unwrap();
+            assert_eq!(
+                resp.status(),
+                StatusCode::OK,
+                "Path {} should be public",
+                public_path
+            );
+        }
+
+        // 2. Check protected endpoints without session (should return UNAUTHORIZED)
+        for private_path in &["/auth/invites", "/auth/users", "/files"] {
+            let req = Request::builder()
+                .uri(*private_path)
+                .body(Body::empty())
+                .unwrap();
+            let resp = app.clone().oneshot(req).await.unwrap();
+            assert_eq!(
+                resp.status(),
+                StatusCode::UNAUTHORIZED,
+                "Path {} should require authentication",
+                private_path
+            );
         }
 
         let _ = std::fs::remove_dir_all(&temp_dir);

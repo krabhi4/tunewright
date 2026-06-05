@@ -18,7 +18,7 @@ struct AppleSearchResult {
     #[serde(rename = "collectionName")]
     collection_name: String,
     #[serde(rename = "artistName")]
-    artist_name: String,
+    artist_name: Option<String>,
     #[serde(rename = "releaseDate")]
     release_date: Option<String>,
     #[serde(rename = "trackCount")]
@@ -40,7 +40,7 @@ struct AppleLookupResult {
     #[serde(rename = "collectionName")]
     collection_name: Option<String>,
     #[serde(rename = "artistName")]
-    artist_name: String,
+    artist_name: Option<String>,
     #[serde(rename = "releaseDate")]
     release_date: Option<String>,
     #[serde(rename = "primaryGenreName")]
@@ -81,7 +81,9 @@ pub async fn search_releases(
         .map(|r| ReleaseSearchResult {
             id: r.collection_id.to_string(),
             title: r.collection_name,
-            artist: r.artist_name,
+            artist: r
+                .artist_name
+                .unwrap_or_else(|| "Unknown Artist".to_string()),
             year: extract_year(&r.release_date),
             track_count: r.track_count,
             source: LookupSource::AppleMusic,
@@ -125,7 +127,7 @@ pub async fn get_release(client: &Client, id: &str) -> Result<ReleaseDetail, Str
                 TrackInfo {
                     position: track,
                     title,
-                    artist: Some(r.artist_name.clone()),
+                    artist: r.artist_name.clone(),
                     duration_secs: r.track_time_millis.map(|ms| ms as f64 / 1000.0),
                 },
             ))
@@ -148,7 +150,10 @@ pub async fn get_release(client: &Client, id: &str) -> Result<ReleaseDetail, Str
     Ok(ReleaseDetail {
         id: id.to_string(),
         title: collection.collection_name.clone().unwrap_or_default(),
-        artist: collection.artist_name.clone(),
+        artist: collection
+            .artist_name
+            .clone()
+            .unwrap_or_else(|| "Unknown Artist".to_string()),
         year: extract_year(&collection.release_date),
         genre: collection.primary_genre_name.clone(),
         tracks,
@@ -220,7 +225,7 @@ mod tests {
                     TrackInfo {
                         position: track,
                         title,
-                        artist: Some(r.artist_name.clone()),
+                        artist: r.artist_name.clone(),
                         duration_secs: r.track_time_millis.map(|ms| ms as f64 / 1000.0),
                     },
                 ))
