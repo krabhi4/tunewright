@@ -7,6 +7,7 @@ pub mod lookup;
 pub mod rename;
 pub mod tags;
 
+use axum::extract::DefaultBodyLimit;
 use axum::middleware;
 use axum::routing::{delete, get, post};
 use axum::Router;
@@ -40,7 +41,8 @@ pub fn create_router(state: AppState) -> Router {
             "/coverart",
             get(coverart::get_cover_art)
                 .delete(coverart::delete_cover_art)
-                .post(coverart::upload_cover_art),
+                .post(coverart::upload_cover_art)
+                .layer(DefaultBodyLimit::max(10 * 1024 * 1024)),
         )
         .route(
             "/coverart/from-url",

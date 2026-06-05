@@ -56,7 +56,12 @@ pub async fn get_cover_art(
 
     let max_size = if params.size == 0 { 0 } else { params.size };
 
-    let result = picture::extract_cover_art_thumbnail(&safe_path, max_size).map_err(AppError)?;
+    let result = tokio::task::spawn_blocking(move || {
+        picture::extract_cover_art_thumbnail(&safe_path, max_size)
+    })
+    .await
+    .map_err(|e| AppError(TunewrightError::Io(std::io::Error::other(e.to_string()))))?
+    .map_err(AppError)?;
 
     match result {
         Some((data, mime)) => Ok(Response::builder()
@@ -78,7 +83,10 @@ pub async fn delete_cover_art(
 ) -> Result<Json<serde_json::Value>, AppError> {
     let safe_path = scanner::resolve_safe_path(&state.data_root, &params.path)?;
 
-    picture::remove_cover_art(&safe_path).map_err(AppError)?;
+    tokio::task::spawn_blocking(move || picture::remove_cover_art(&safe_path))
+        .await
+        .map_err(|e| AppError(TunewrightError::Io(std::io::Error::other(e.to_string()))))?
+        .map_err(AppError)?;
 
     Ok(Json(serde_json::json!({ "status": "ok" })))
 }
