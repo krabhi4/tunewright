@@ -129,7 +129,9 @@ pub async fn login(State(state): State<AppState>, Json(body): Json<LoginRequest>
             .failed_logins
             .lock()
             .unwrap_or_else(|e| e.into_inner());
-        let entry = guard.entry(body.username.clone()).or_insert((0, std::time::Instant::now()));
+        let entry = guard
+            .entry(body.username.clone())
+            .or_insert((0, std::time::Instant::now()));
         let (count, last_failure) = entry;
         if *count > 0 && last_failure.elapsed().as_secs() > 60 {
             *count = 0;
@@ -175,7 +177,9 @@ pub async fn login(State(state): State<AppState>, Json(body): Json<LoginRequest>
             .failed_logins
             .lock()
             .unwrap_or_else(|e| e.into_inner());
-        let entry = guard.entry(body.username.clone()).or_insert((0, std::time::Instant::now()));
+        let entry = guard
+            .entry(body.username.clone())
+            .or_insert((0, std::time::Instant::now()));
         entry.0 = entry.0.saturating_add(1);
         entry.1 = std::time::Instant::now();
         drop(guard);

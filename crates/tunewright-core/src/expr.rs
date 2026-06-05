@@ -825,9 +825,15 @@ mod tests {
         let t = TagData::default();
         // i64::MIN is -9223372036854775808
         // dividing it by -1 should saturate to i64::MAX (9223372036854775807)
-        assert_eq!(evaluate("$div(-9223372036854775808,-1)", &make_ctx(&t)), "9223372036854775807");
+        assert_eq!(
+            evaluate("$div(-9223372036854775808,-1)", &make_ctx(&t)),
+            "9223372036854775807"
+        );
         // modulo should return 0
-        assert_eq!(evaluate("$mod(-9223372036854775808,-1)", &make_ctx(&t)), "0");
+        assert_eq!(
+            evaluate("$mod(-9223372036854775808,-1)", &make_ctx(&t)),
+            "0"
+        );
     }
 
     #[test]
@@ -863,12 +869,24 @@ mod tests {
         assert_eq!(evaluate("$mod(5,0)", &make_ctx(&t)), "0");
 
         // Addition overflow
-        assert_eq!(evaluate("$add(9223372036854775807,1)", &make_ctx(&t)), "9223372036854775807");
+        assert_eq!(
+            evaluate("$add(9223372036854775807,1)", &make_ctx(&t)),
+            "9223372036854775807"
+        );
         // Subtraction underflow
-        assert_eq!(evaluate("$sub(-9223372036854775808,1)", &make_ctx(&t)), "-9223372036854775808");
+        assert_eq!(
+            evaluate("$sub(-9223372036854775808,1)", &make_ctx(&t)),
+            "-9223372036854775808"
+        );
         // Multiplication overflow
-        assert_eq!(evaluate("$mul(4611686018427387904,2)", &make_ctx(&t)), "9223372036854775807");
-        assert_eq!(evaluate("$mul(-4611686018427387904,3)", &make_ctx(&t)), "-9223372036854775808");
+        assert_eq!(
+            evaluate("$mul(4611686018427387904,2)", &make_ctx(&t)),
+            "9223372036854775807"
+        );
+        assert_eq!(
+            evaluate("$mul(-4611686018427387904,3)", &make_ctx(&t)),
+            "-9223372036854775808"
+        );
     }
 
     // --- Evaluation: logic functions ---

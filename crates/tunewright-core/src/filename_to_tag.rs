@@ -4,7 +4,7 @@
 //! `%artist% - %track% - %title%` and a filename like
 //! `The Band - 03 - First Song.mp3`, extract tag values.
 
-use crate::types::{TunewrightError, TagWriteChanges};
+use crate::types::{TagWriteChanges, TunewrightError};
 use serde::Serialize;
 use std::collections::HashMap;
 
