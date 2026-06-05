@@ -10,6 +10,7 @@
 
 	let { children }: { children: Snippet } = $props();
 	let authChecked = $state(false);
+	let serverError = $state(false);
 
 	const authPages = ['/login', '/setup', '/register'];
 
@@ -25,10 +26,10 @@
 			} else {
 				auth.set({ checked: true, setupRequired: false, authenticated: false, user: null });
 			}
-		} catch {
-			auth.set({ checked: true, setupRequired: false, authenticated: false, user: null });
-		} finally {
 			authChecked = true;
+		} catch (err) {
+			console.error('Auth check failed:', err);
+			serverError = true;
 		}
 	});
 
@@ -56,7 +57,11 @@
 </script>
 
 <div class="app-root">
-	{#if authChecked}
+	{#if serverError}
+		<div class="error-screen">
+			<span>Server is unreachable. Please try again later.</span>
+		</div>
+	{:else if authChecked}
 		{@render children()}
 	{:else}
 		<div class="loading-screen">
@@ -74,12 +79,21 @@
 		overflow: hidden;
 	}
 
-	.loading-screen {
+	.loading-screen,
+	.error-screen {
 		display: flex;
 		align-items: center;
 		justify-content: center;
 		height: 100%;
-		color: var(--text-muted);
 		font-size: 13px;
+	}
+
+	.loading-screen {
+		color: var(--text-muted);
+	}
+
+	.error-screen {
+		color: var(--text-error, #ff4d4f);
+		font-weight: 500;
 	}
 </style>

@@ -22,6 +22,16 @@ export interface InviteInfo {
 
 export async function checkAuth(): Promise<AuthCheck> {
 	const res = await fetch('/api/v1/auth/check');
+	if (!res.ok) {
+		if (res.status === 401) {
+			try {
+				return await res.json();
+			} catch {
+				return { authenticated: false };
+			}
+		}
+		throw new Error(`Auth check failed with status: ${res.status}`);
+	}
 	return res.json();
 }
 

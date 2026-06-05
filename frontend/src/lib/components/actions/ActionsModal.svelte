@@ -18,6 +18,7 @@
 	let previews = $state<ActionPreview[]>([]);
 	let loading = $state(false);
 	let executing = $state(false);
+	let previewTaskId = 0;
 
 	// New action form
 	let actionType = $state('case_conversion');
@@ -73,15 +74,23 @@
 			previews = [];
 			return;
 		}
+		const taskId = ++previewTaskId;
 		loading = true;
 		try {
 			const fileEntries = files.map((f) => ({ id: f.id, path: f.relative_path }));
-			previews = await previewActions(fileEntries, actions);
+			const results = await previewActions(fileEntries, actions);
+			if (taskId === previewTaskId) {
+				previews = results;
+			}
 		} catch (err) {
 			console.error('Actions preview failed:', err);
-			previews = [];
+			if (taskId === previewTaskId) {
+				previews = [];
+			}
 		} finally {
-			loading = false;
+			if (taskId === previewTaskId) {
+				loading = false;
+			}
 		}
 	}
 

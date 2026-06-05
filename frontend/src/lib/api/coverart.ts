@@ -10,11 +10,21 @@ export function getCoverArtUrl(relativePath: string, size: number = 250): string
 	return `${BASE}/coverart?${params}`;
 }
 
-export async function embedCoverArtFromUrl(url: string, paths: string[]): Promise<void> {
-	await apiFetch<void>('/coverart/from-url', {
+export interface EmbedCoverArtResponse {
+	status: string;
+	embedded: number;
+	errors: string[];
+}
+
+export async function embedCoverArtFromUrl(url: string, paths: string[]): Promise<EmbedCoverArtResponse> {
+	const res = await apiFetch<EmbedCoverArtResponse>('/coverart/from-url', {
 		method: 'POST',
 		body: JSON.stringify({ url, paths })
 	});
+	if (res.embedded === 0 && res.errors && res.errors.length > 0) {
+		throw new Error(`Failed to embed cover art: ${res.errors.join(', ')}`);
+	}
+	return res;
 }
 
 export async function uploadCoverArt(relativePath: string, imageData: Blob): Promise<void> {

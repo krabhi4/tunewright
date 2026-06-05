@@ -17,6 +17,7 @@
 	let previews = $state<RenamePreview[]>([]);
 	let loading = $state(false);
 	let executing = $state(false);
+	let previewTaskId = 0;
 
 	$effect(() => {
 		if (open && files.length > 0) {
@@ -29,15 +30,23 @@
 			previews = [];
 			return;
 		}
+		const taskId = ++previewTaskId;
 		loading = true;
 		try {
 			const fileEntries = files.map((f) => ({ id: f.id, path: f.relative_path }));
-			previews = await previewRenames(fileEntries, format);
+			const results = await previewRenames(fileEntries, format);
+			if (taskId === previewTaskId) {
+				previews = results;
+			}
 		} catch (err) {
 			console.error('Preview failed:', err);
-			previews = [];
+			if (taskId === previewTaskId) {
+				previews = [];
+			}
 		} finally {
-			loading = false;
+			if (taskId === previewTaskId) {
+				loading = false;
+			}
 		}
 	}
 
