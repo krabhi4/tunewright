@@ -69,8 +69,12 @@
 		const first = files[0];
 		const tags = $mergedTags.get(first.id);
 		if (!tags?.has_cover && !first.has_cover && version === 0) return null;
-		coverArtError = false;
 		return getCoverArtUrl(first.relative_path, 250) + `&_=${version}`;
+	});
+
+	$effect(() => {
+		const _url = coverArtUrl;
+		coverArtError = false;
 	});
 
 	const fields = [
@@ -115,7 +119,12 @@
 		const target = e.target as HTMLInputElement;
 		const val = target.value;
 		if (key === 'year' || key === 'track_number' || key === 'track_total' || key === 'disc_number' || key === 'disc_total') {
-			const num = parseInt(val, 10);
+			let num = parseInt(val, 10);
+			if (!isNaN(num)) {
+				if (num < 0) num = 0;
+				if (num > 4294967295) num = 4294967295;
+				target.value = String(num);
+			}
 			setPendingEdit(key, isNaN(num) ? undefined : num);
 		} else {
 			setPendingEdit(key, val);
