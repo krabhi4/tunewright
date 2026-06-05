@@ -186,7 +186,11 @@ impl Action {
                 target,
             } => {
                 let val = get_field(tags, source);
-                let parts: Vec<&str> = val.split(separator.as_str()).collect();
+                let parts: Vec<&str> = if separator.is_empty() {
+                    val.split("").filter(|s| !s.is_empty()).collect()
+                } else {
+                    val.split(separator.as_str()).collect()
+                };
                 let result = parts.get(*part).unwrap_or(&"").trim().to_string();
                 set_field(tags, target, &result);
             }
@@ -476,6 +480,22 @@ mod tests {
         };
         action.apply(&mut tags, &ctx(0));
         assert_eq!(tags.album.as_deref(), Some("Part B"));
+    }
+
+    #[test]
+    fn test_split_field_empty_separator() {
+        let mut tags = TagData {
+            title: Some("Hello".to_string()),
+            ..Default::default()
+        };
+        let action = Action::SplitField {
+            source: "title".to_string(),
+            separator: "".to_string(),
+            part: 1,
+            target: "album".to_string(),
+        };
+        action.apply(&mut tags, &ctx(0));
+        assert_eq!(tags.album.as_deref(), Some("e"));
     }
 
     #[test]

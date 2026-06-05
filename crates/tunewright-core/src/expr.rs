@@ -353,17 +353,41 @@ fn fn_caps2(args: &[String]) -> String {
         "a", "an", "the", "and", "but", "or", "nor", "at", "by", "for", "in", "of", "on", "to",
         "up", "as", "is", "it",
     ];
-    let words: Vec<&str> = s.split_whitespace().collect();
-    let mut result = Vec::with_capacity(words.len());
-    for (i, word) in words.iter().enumerate() {
-        let lower = word.to_lowercase();
-        if i > 0 && small_words.contains(&lower.as_str()) {
-            result.push(lower);
+
+    let mut result = String::with_capacity(s.len());
+    let mut word = String::new();
+    let mut is_first_word = true;
+
+    let process_word = |w: &mut String, first: &mut bool| -> Option<String> {
+        if w.is_empty() {
+            return None;
+        }
+        let lower = w.to_lowercase();
+        let res = if !*first && small_words.contains(&lower.as_str()) {
+            lower
         } else {
-            result.push(capitalize_word(&lower));
+            *first = false;
+            capitalize_word(&lower)
+        };
+        w.clear();
+        Some(res)
+    };
+
+    for c in s.chars() {
+        if c.is_whitespace() {
+            if let Some(formatted) = process_word(&mut word, &mut is_first_word) {
+                result.push_str(&formatted);
+            }
+            result.push(c);
+        } else {
+            word.push(c);
         }
     }
-    result.join(" ")
+    if let Some(formatted) = process_word(&mut word, &mut is_first_word) {
+        result.push_str(&formatted);
+    }
+
+    result
 }
 
 fn capitalize_word(s: &str) -> String {
@@ -740,6 +764,15 @@ mod tests {
         assert_eq!(
             evaluate("$caps2(%title%)", &make_ctx(&t)),
             "The Lord of the Rings"
+        );
+
+        let t2 = TagData {
+            title: Some("  the   lord  of the rings  ".to_string()),
+            ..Default::default()
+        };
+        assert_eq!(
+            evaluate("$caps2(%title%)", &make_ctx(&t2)),
+            "  The   Lord  of the Rings  "
         );
     }
 

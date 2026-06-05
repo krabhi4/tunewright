@@ -6,7 +6,25 @@ on:
       - 'v*'
 
 jobs:
+  verify-version:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      - name: Verify version matches git tag
+        run: |
+          TAG_VERSION="${{ github.ref_name }}"
+          CLEAN_TAG_VERSION="${TAG_VERSION#v}"
+          CARGO_VERSION=$(awk -F '"' '/^version =/ {print $2}' Cargo.toml)
+          echo "Git tag version: $CLEAN_TAG_VERSION"
+          echo "Cargo.toml version: $CARGO_VERSION"
+          if [ "$CLEAN_TAG_VERSION" != "$CARGO_VERSION" ]; then
+            echo "Error: Git tag version ($CLEAN_TAG_VERSION) does not match Cargo.toml version ($CARGO_VERSION)"
+            exit 1
+          fi
+
   docker:
+    needs: verify-version
     uses: docker/github-builder/.github/workflows/build.yml@7d2a02426d4b989616ba5aaee4e879afd4134b0d # v1.6.0
     permissions:
       contents: read
