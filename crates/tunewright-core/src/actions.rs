@@ -110,7 +110,7 @@ impl Action {
                 regex,
             } => {
                 let val = get_field(tags, field);
-                if val.is_empty() {
+                if val.is_empty() || search.is_empty() {
                     return;
                 }
                 let result = if *regex {
@@ -173,7 +173,8 @@ impl Action {
                 start,
                 padding,
             } => {
-                let num = *start + ctx.index as u32;
+                let index_u32 = u32::try_from(ctx.index).unwrap_or(u32::MAX);
+                let num = start.saturating_add(index_u32);
                 let formatted = format!("{:0>width$}", num, width = *padding as usize);
                 set_field(tags, field, &formatted);
             }
@@ -538,5 +539,44 @@ mod tests {
         };
         action.apply(&mut tags, &ctx(0));
         assert!(!tags.extra.contains_key("BPM"));
+    }
+
+    #[test]
+    fn test_replace_empty_search() {
+        let mut tags = sample_tags();
+        let action = Action::Replace {
+            field: "title".to_string(),
+            search: "".to_string(),
+            replace: "X".to_string(),
+            regex: false,
+        };
+        action.apply(&mut tags, &ctx(0));
+        assert_eq!(tags.title.as_deref(), Some("hello world"));
+    }
+
+    #[test]
+    fn test_replace_empty_search_regex() {
+        let mut tags = sample_tags();
+        let action = Action::Replace {
+            field: "title".to_string(),
+            search: "".to_string(),
+            replace: "X".to_string(),
+            regex: true,
+        };
+        action.apply(&mut tags, &ctx(0));
+        assert_eq!(tags.title.as_deref(), Some("hello world"));
+    }
+
+    #[test]
+    fn test_auto_number_overflow() {
+        let mut tags = sample_tags();
+        let action = Action::AutoNumber {
+            field: "track_number".to_string(),
+            start: u32::MAX,
+            padding: 2,
+        };
+        action.apply(&mut tags, &ctx(1));
+        // u32::MAX + 1 saturates to u32::MAX rather than panicking or wrapping
+        assert_eq!(tags.track_number, Some(u32::MAX));
     }
 }

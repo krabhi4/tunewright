@@ -391,12 +391,18 @@ fn fn_replace(args: &[String]) -> String {
     if args.len() < 3 {
         return get_arg(args, 0);
     }
+    if args[1].is_empty() {
+        return args[0].clone();
+    }
     args[0].replace(args[1].as_str(), args[2].as_str())
 }
 
 fn fn_regex(args: &[String]) -> String {
     if args.len() < 3 {
         return get_arg(args, 0);
+    }
+    if args[1].is_empty() {
+        return args[0].clone();
     }
     match regex::Regex::new(&args[1]) {
         Ok(re) => re.replace_all(&args[0], args[2].as_str()).to_string(),
@@ -744,6 +750,10 @@ mod tests {
             evaluate("$replace(%artist%,Band,Group)", &make_ctx(&t)),
             "The Group"
         );
+        assert_eq!(
+            evaluate("$replace(%artist%,,Group)", &make_ctx(&t)),
+            "The Band"
+        );
     }
 
     #[test]
@@ -755,6 +765,7 @@ mod tests {
         // Note: ) in regex patterns conflicts with function call parsing,
         // so avoid literal ) in patterns passed to $regex().
         assert_eq!(evaluate("$regex(%title%, - .*,)", &make_ctx(&t)), "Song");
+        assert_eq!(evaluate("$regex(%title%,,Replacement)", &make_ctx(&t)), "Song - Remix");
     }
 
     #[test]

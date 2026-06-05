@@ -2,7 +2,7 @@ use crate::types::{TagData, TagWriteChanges, TunewrightError, WriteResult};
 use lofty::config::{ParseOptions, ParsingMode, WriteOptions};
 use lofty::file::{AudioFile, TaggedFileExt};
 use lofty::probe::Probe;
-use lofty::tag::{Accessor, ItemKey, ItemValue, Tag, TagItem};
+use lofty::tag::{Accessor, ItemKey, ItemValue, Tag, TagItem, TagType};
 use rayon::prelude::*;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -200,6 +200,23 @@ pub fn write_tags(path: &Path, changes: &TagWriteChanges) -> Result<(), Tunewrig
         .map(|t| t.tag_type())
         .unwrap_or_else(|| tagged.primary_tag_type());
 
+    // Collect and remove all secondary tags
+    let secondary_types: Vec<TagType> = tagged
+        .tags()
+        .iter()
+        .map(|t| t.tag_type())
+        .filter(|&t| t != primary_type)
+        .collect();
+
+    let mut secondary_tags = Vec::new();
+    for t_type in secondary_types {
+        if let Some(t) = tagged.remove(t_type) {
+            secondary_tags.push(t);
+        }
+        let _ = t_type.remove_from_path(path);
+    }
+
+    // Get the primary tag (inserting a new one if not present)
     let tag = match tagged.tag_mut(primary_type) {
         Some(t) => t,
         None => {
@@ -207,6 +224,20 @@ pub fn write_tags(path: &Path, changes: &TagWriteChanges) -> Result<(), Tunewrig
             tagged.tag_mut(primary_type).unwrap()
         }
     };
+
+    // Merge secondary tags' items into the primary tag
+    for sec_tag in &secondary_tags {
+        for item in sec_tag.items() {
+            if !tag.items().any(|i| i.key() == item.key()) {
+                tag.push(item.clone());
+            }
+        }
+        if tag.pictures().is_empty() && !sec_tag.pictures().is_empty() {
+            for pic in sec_tag.pictures() {
+                tag.push_picture(pic.clone());
+            }
+        }
+    }
 
     if let Some(ref v) = changes.title {
         tag.set_title(v.clone());
@@ -416,6 +447,7 @@ fn collect_extra_tags(tags: &[&Tag]) -> HashMap<String, String> {
 mod tests {
     use super::{parse_year, read_year};
     use lofty::tag::{ItemKey, ItemValue, Tag, TagItem, TagType};
+    use lofty::file::{AudioFile, TaggedFileExt};
 
     #[test]
     fn parse_year_extracts_leading_year() {
@@ -443,5 +475,82 @@ mod tests {
         let mut tag = Tag::new(TagType::VorbisComments);
         tag.push(TagItem::new(ItemKey::Year, ItemValue::Text("2005".into())));
         assert_eq!(read_year(&tag), Some(2005));
+    }
+
+    #[test]
+    fn test_write_tags_removes_and_merges_secondary_tags() {
+        use std::fs::File;
+        use std::io::Write;
+        use lofty::probe::Probe;
+        use lofty::tag::{Tag, TagItem, ItemKey, ItemValue, TagType};
+        use lofty::config::WriteOptions;
+        use crate::types::TagWriteChanges;
+
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let temp_dir = std::env::temp_dir().join(format!("tunewright_audio_test_{}", nanos));
+        std::fs::create_dir_all(&temp_dir).unwrap();
+        let file_path = temp_dir.join("test.wav");
+
+        // Minimal WAV file bytes (RIFF, WAVE, fmt , data chunks)
+        let wav_bytes = b"RIFF\x28\x00\x00\x00WAVEfmt \x10\x00\x00\x00\x01\x00\x01\x00\x44\xac\x00\x00\x88\x58\x01\x00\x02\x00\x10\x00data\x04\x00\x00\x00\x00\x00\x00\x00";
+        let mut f = File::create(&file_path).unwrap();
+        f.write_all(wav_bytes).unwrap();
+        drop(f);
+
+        // 1. Manually insert both RiffInfo (primary for WAV in some contexts) and ID3v2 tags
+        let mut tagged = Probe::open(&file_path).unwrap().read().unwrap();
+        
+        let primary_type = tagged.primary_tag_type();
+        let secondary_type = if primary_type == TagType::RiffInfo {
+            TagType::Id3v2
+        } else {
+            TagType::RiffInfo
+        };
+
+        let mut primary_tag = Tag::new(primary_type);
+        primary_tag.push(TagItem::new(ItemKey::TrackTitle, ItemValue::Text("Primary Title".to_string())));
+        primary_tag.push(TagItem::new(ItemKey::TrackArtist, ItemValue::Text("Primary Artist".to_string())));
+        tagged.insert_tag(primary_tag);
+
+        let mut secondary_tag = Tag::new(secondary_type);
+        secondary_tag.push(TagItem::new(ItemKey::TrackTitle, ItemValue::Text("Secondary Title".to_string())));
+        secondary_tag.push(TagItem::new(ItemKey::Composer, ItemValue::Text("Secondary Composer".to_string())));
+        tagged.insert_tag(secondary_tag);
+
+        tagged.save_to_path(&file_path, WriteOptions::default()).unwrap();
+
+        // 2. Call write_tags to write changes and merge secondary tags
+        let mut changes = TagWriteChanges::default();
+        changes.artist = Some("New Artist".to_string());
+        super::write_tags(&file_path, &changes).unwrap();
+
+        // 3. Verify the result
+        let tagged_after = Probe::open(&file_path).unwrap().read().unwrap();
+        
+        // Assert that the secondary tag was completely removed
+        assert!(tagged_after.tag(secondary_type).is_none());
+
+        // Assert that the primary tag exists and has the correct merged/updated fields
+        let primary_after = tagged_after.tag(primary_type).unwrap();
+        
+        assert_eq!(
+            primary_after.get_string(ItemKey::TrackTitle),
+            Some("Primary Title")
+        );
+
+        assert_eq!(
+            primary_after.get_string(ItemKey::TrackArtist),
+            Some("New Artist")
+        );
+
+        assert_eq!(
+            primary_after.get_string(ItemKey::Composer),
+            Some("Secondary Composer")
+        );
+
+        let _ = std::fs::remove_dir_all(&temp_dir);
     }
 }
