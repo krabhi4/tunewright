@@ -42,8 +42,11 @@ pub fn preview_renames(
 
             let new_name = if new_stem.is_empty() {
                 old_name.clone()
+            } else if extension.is_empty() {
+                new_stem
             } else {
-                format!("{}.{}", new_stem, extension)
+                let sanitized_ext = format_string::sanitize_filename(&extension);
+                format!("{}.{}", new_stem, sanitized_ext)
             };
 
             (id.clone(), old_name, new_name)
@@ -127,10 +130,9 @@ pub fn execute_renames(
                 };
             }
 
-            if preview.new_name.contains('/')
+            if !is_valid_filename(&preview.new_name)
+                || preview.new_name.contains('/')
                 || preview.new_name.contains('\\')
-                || preview.new_name == ".."
-                || preview.new_name == "."
             {
                 return RenameResult {
                     id: preview.id,
@@ -286,6 +288,18 @@ fn is_case_sensitive(path: &Path) -> bool {
     }
     !cfg!(any(target_os = "windows", target_os = "macos"))
 }
+
+fn is_valid_filename(name: &str) -> bool {
+    let trimmed = name.trim();
+    if trimmed.is_empty() {
+        return false;
+    }
+    if trimmed.chars().all(|c| c == '.') {
+        return false;
+    }
+    true
+}
+
 
 #[cfg(test)]
 mod tests {
@@ -631,6 +645,65 @@ mod tests {
 
         // Verify that target.flac exists and only one of the original source files was renamed to it
         assert!(temp_dir.join("target.flac").exists());
+
+        let _ = std::fs::remove_dir_all(&temp_dir);
+    }
+
+    #[test]
+    fn test_execute_renames_dot_only_rejected() {
+        let temp_dir = std::env::temp_dir().join(format!("tunewright_test_{}", rand_num()));
+        std::fs::create_dir_all(&temp_dir).unwrap();
+
+        let old_rel = "song";
+        let old_path = temp_dir.join(old_rel);
+        std::fs::File::create(&old_path).unwrap();
+
+        let files = vec![("1".to_string(), old_rel.to_string(), old_path.clone())];
+        let results = execute_renames(&temp_dir, &files, ".");
+
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].status, "error");
+        assert_eq!(results[0].error.as_deref(), Some("Invalid target filename"));
+
+        let _ = std::fs::remove_dir_all(&temp_dir);
+    }
+
+    #[test]
+    fn test_execute_renames_unsanitized_extension() {
+        let temp_dir = std::env::temp_dir().join(format!("tunewright_test_{}", rand_num()));
+        std::fs::create_dir_all(&temp_dir).unwrap();
+
+        // Src file has an extension with invalid characters: "song.mp?3"
+        let old_rel = "song.mp?3";
+        let old_path = temp_dir.join(old_rel);
+        std::fs::File::create(&old_path).unwrap();
+
+        let files = vec![("1".to_string(), old_rel.to_string(), old_path.clone())];
+        let results = execute_renames(&temp_dir, &files, "New Name");
+
+        assert_eq!(results.len(), 1);
+        // The extension "mp?3" should be sanitized to "mp_3"
+        assert_eq!(results[0].new_name, "New Name.mp_3");
+
+        let _ = std::fs::remove_dir_all(&temp_dir);
+    }
+
+    #[test]
+    fn test_execute_renames_no_extension_no_trailing_dot() {
+        let temp_dir = std::env::temp_dir().join(format!("tunewright_test_{}", rand_num()));
+        std::fs::create_dir_all(&temp_dir).unwrap();
+
+        // Src file has no extension: "README"
+        let old_rel = "README";
+        let old_path = temp_dir.join(old_rel);
+        std::fs::File::create(&old_path).unwrap();
+
+        let files = vec![("1".to_string(), old_rel.to_string(), old_path.clone())];
+        let results = execute_renames(&temp_dir, &files, "My Song");
+
+        assert_eq!(results.len(), 1);
+        // Should not have a trailing dot!
+        assert_eq!(results[0].new_name, "My Song");
 
         let _ = std::fs::remove_dir_all(&temp_dir);
     }

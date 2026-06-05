@@ -14,9 +14,9 @@ struct AppleSearchResponse {
 #[derive(Debug, Deserialize)]
 struct AppleSearchResult {
     #[serde(rename = "collectionId")]
-    collection_id: u64,
+    collection_id: Option<u64>,
     #[serde(rename = "collectionName")]
-    collection_name: String,
+    collection_name: Option<String>,
     #[serde(rename = "artistName")]
     artist_name: Option<String>,
     #[serde(rename = "releaseDate")]
@@ -35,7 +35,7 @@ struct AppleLookupResponse {
 #[derive(Debug, Deserialize)]
 struct AppleLookupResult {
     #[serde(rename = "wrapperType")]
-    wrapper_type: String,
+    wrapper_type: Option<String>,
     kind: Option<String>,
     #[serde(rename = "collectionName")]
     collection_name: Option<String>,
@@ -78,16 +78,20 @@ pub async fn search_releases(
     let results = body
         .results
         .into_iter()
-        .map(|r| ReleaseSearchResult {
-            id: r.collection_id.to_string(),
-            title: r.collection_name,
-            artist: r
-                .artist_name
-                .unwrap_or_else(|| "Unknown Artist".to_string()),
-            year: extract_year(&r.release_date),
-            track_count: r.track_count,
-            source: LookupSource::AppleMusic,
-            cover_art_url: upgrade_cover_url(&r.artwork_url_100),
+        .filter_map(|r| {
+            let id = r.collection_id?.to_string();
+            let title = r.collection_name?;
+            Some(ReleaseSearchResult {
+                id,
+                title,
+                artist: r
+                    .artist_name
+                    .unwrap_or_else(|| "Unknown Artist".to_string()),
+                year: extract_year(&r.release_date),
+                track_count: r.track_count,
+                source: LookupSource::AppleMusic,
+                cover_art_url: upgrade_cover_url(&r.artwork_url_100),
+            })
         })
         .collect();
 
@@ -109,14 +113,14 @@ pub async fn get_release(client: &Client, id: &str) -> Result<ReleaseDetail, Str
     let collection = body
         .results
         .iter()
-        .find(|r| r.wrapper_type == "collection")
+        .find(|r| r.wrapper_type.as_deref() == Some("collection"))
         .ok_or_else(|| "Album details not found in Apple Music response".to_string())?;
 
     // Extract all tracks (where wrapper_type is "track" and kind is "song")
     let mut temp_tracks: Vec<(u32, u32, TrackInfo)> = body
         .results
         .iter()
-        .filter(|r| r.wrapper_type == "track" && r.kind.as_deref() == Some("song"))
+        .filter(|r| r.wrapper_type.as_deref() == Some("track") && r.kind.as_deref() == Some("song"))
         .filter_map(|r| {
             let disc = r.disc_number.unwrap_or(1);
             let track = r.track_number?;
@@ -214,7 +218,7 @@ mod tests {
         let mut temp_tracks: Vec<(u32, u32, TrackInfo)> = response
             .results
             .iter()
-            .filter(|r| r.wrapper_type == "track" && r.kind.as_deref() == Some("song"))
+            .filter(|r| r.wrapper_type.as_deref() == Some("track") && r.kind.as_deref() == Some("song"))
             .filter_map(|r| {
                 let disc = r.disc_number.unwrap_or(1);
                 let track = r.track_number?;
@@ -253,5 +257,49 @@ mod tests {
         // Track 3: Disc 2 Track 1
         assert_eq!(tracks[2].title, "Disc 2 Track 1");
         assert_eq!(tracks[2].position, 3);
+    }
+
+    #[test]
+    fn test_apple_music_partial_garbage_response() {
+        let json_data = r#"{
+            "results": [
+                {
+                    "wrapperType": "collection",
+                    "collectionId": 12345,
+                    "collectionName": "Valid Album",
+                    "artistName": "Artist"
+                },
+                {
+                    "wrapperType": null,
+                    "collectionId": 67890
+                },
+                {
+                    "wrapperType": "track",
+                    "kind": "song",
+                    "trackName": "Valid Track",
+                    "trackNumber": 1,
+                    "discNumber": 1,
+                    "trackTimeMillis": 200000
+                }
+            ]
+        }"#;
+
+        let response: AppleLookupResponse = serde_json::from_str(json_data).unwrap();
+        assert_eq!(response.results.len(), 3);
+
+        let collection = response
+            .results
+            .iter()
+            .find(|r| r.wrapper_type.as_deref() == Some("collection"))
+            .unwrap();
+        assert_eq!(collection.collection_name.as_deref(), Some("Valid Album"));
+
+        let tracks: Vec<&AppleLookupResult> = response
+            .results
+            .iter()
+            .filter(|r| r.wrapper_type.as_deref() == Some("track"))
+            .collect();
+        assert_eq!(tracks.len(), 1);
+        assert_eq!(tracks[0].track_name.as_deref(), Some("Valid Track"));
     }
 }

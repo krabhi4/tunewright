@@ -17,7 +17,7 @@ pub fn evaluate_with_filename(format: &str, tags: &TagData, filename: &str) -> S
 }
 
 /// Remove or replace characters that are invalid in filenames
-fn sanitize_filename(name: &str) -> String {
+pub fn sanitize_filename(name: &str) -> String {
     name.chars()
         .map(|c| match c {
             '/' | '\\' | ':' | '*' | '?' | '"' | '<' | '>' | '|' => '_',
