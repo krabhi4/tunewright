@@ -166,6 +166,17 @@ pub fn execute_renames(
             }
 
             // Fallback: standard rename (cross-filesystem or unsupported hard_link)
+            if new_path.try_exists().unwrap_or(false) && !is_same_file(&old_path, &new_path) {
+                return RenameResult {
+                    id: preview.id,
+                    status: "error".to_string(),
+                    old_name: preview.old_name,
+                    new_name: preview.new_name,
+                    new_relative_path: unchanged_rel,
+                    error: Some("Target file already exists".to_string()),
+                };
+            }
+
             match std::fs::rename(&old_path, &new_path) {
                 Ok(()) => RenameResult {
                     id: preview.id,
@@ -209,5 +220,85 @@ fn rel_path_with_name(rel_path: &str, new_name: &str) -> String {
             format!("{}/{}", parent.to_string_lossy(), new_name)
         }
         _ => new_name.to_string(),
+    }
+}
+
+/// Check if two paths point to the same physical file.
+fn is_same_file(path1: &Path, path2: &Path) -> bool {
+    match (std::fs::canonicalize(path1), std::fs::canonicalize(path2)) {
+        (Ok(p1), Ok(p2)) => p1 == p2,
+        _ => false,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::fs::File;
+
+    #[test]
+    fn test_is_same_file() {
+        let temp_dir = std::env::temp_dir().join(format!("tunewright_test_{}", rand_num()));
+        std::fs::create_dir_all(&temp_dir).unwrap();
+
+        let path1 = temp_dir.join("file_a.txt");
+        let path2 = temp_dir.join("file_b.txt");
+
+        // Neither exists
+        assert!(!is_same_file(&path1, &path2));
+
+        // Create file A
+        File::create(&path1).unwrap();
+        assert!(is_same_file(&path1, &path1));
+        assert!(!is_same_file(&path1, &path2));
+
+        // Create file B
+        File::create(&path2).unwrap();
+        assert!(!is_same_file(&path1, &path2));
+
+        // Casing tests for case-insensitive OS
+        #[cfg(any(target_os = "macos", target_os = "windows"))]
+        {
+            let path_cased = temp_dir.join("Song_Case.txt");
+            let path_lower = temp_dir.join("song_case.txt");
+            File::create(&path_cased).unwrap();
+            assert!(is_same_file(&path_cased, &path_lower));
+        }
+
+        // Cleanup
+        let _ = std::fs::remove_dir_all(&temp_dir);
+    }
+
+    #[test]
+    fn test_execute_renames_collision() {
+        let temp_dir = std::env::temp_dir().join(format!("tunewright_test_{}", rand_num()));
+        std::fs::create_dir_all(&temp_dir).unwrap();
+
+        let old_rel = "old.mp3";
+        let target_rel = "target.mp3";
+
+        let old_path = temp_dir.join(old_rel);
+        let target_path = temp_dir.join(target_rel);
+
+        File::create(&old_path).unwrap();
+        File::create(&target_path).unwrap();
+
+        // Try renaming old.mp3 -> target.mp3
+        let files = vec![("1".to_string(), old_rel.to_string())];
+        let results = execute_renames(&temp_dir, &files, "target");
+
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].status, "error");
+        assert!(results[0].error.as_ref().unwrap().contains("Target file already exists"));
+
+        let _ = std::fs::remove_dir_all(&temp_dir);
+    }
+
+    fn rand_num() -> u64 {
+        use std::time::{SystemTime, UNIX_EPOCH};
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos() as u64
     }
 }
