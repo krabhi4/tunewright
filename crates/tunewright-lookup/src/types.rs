@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 
-/// A release found via MusicBrainz or Discogs search
+/// A release found via MusicBrainz or Apple Music search
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ReleaseSearchResult {
     pub id: String,
@@ -39,6 +39,5 @@ pub struct TrackInfo {
 #[serde(rename_all = "lowercase")]
 pub enum LookupSource {
     MusicBrainz,
-    Discogs,
     AppleMusic,
 }

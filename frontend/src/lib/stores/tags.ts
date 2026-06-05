@@ -120,16 +120,25 @@ const propertiesLoaded = new Set<string>();
 let propertiesTimer: ReturnType<typeof setTimeout> | null = null;
 let pendingPropertyIds: string[] = [];
 
+function processNextPropertiesBatch() {
+	const batch = pendingPropertyIds.splice(0, 50);
+	if (batch.length > 0) {
+		fetchPropertiesForFiles(batch);
+	}
+	if (pendingPropertyIds.length > 0) {
+		propertiesTimer = setTimeout(processNextPropertiesBatch, 50);
+	} else {
+		propertiesTimer = null;
+	}
+}
+
 export function queuePropertiesFetch(ids: string[]) {
 	const needed = ids.filter((id) => !propertiesLoaded.has(id));
 	if (needed.length === 0) return;
 	pendingPropertyIds = [...new Set([...pendingPropertyIds, ...needed])];
 
 	if (propertiesTimer) clearTimeout(propertiesTimer);
-	propertiesTimer = setTimeout(() => {
-		const batch = pendingPropertyIds.splice(0, 50); // fetch 50 at a time
-		if (batch.length > 0) fetchPropertiesForFiles(batch);
-	}, 200); // 200ms debounce
+	propertiesTimer = setTimeout(processNextPropertiesBatch, 200);
 }
 
 async function fetchPropertiesForFiles(ids: string[]) {

@@ -80,7 +80,13 @@
 	}
 
 	async function handleConfirmSave() {
-		await saveAllEdits();
+		const result = await saveAllEdits();
+		if (result.failed > 0) {
+			alert(`Failed to save edits for ${result.failed} file(s). Navigation cancelled.`);
+			pendingNavPath = null;
+			confirmOpen = false;
+			return;
+		}
 		confirmOpen = false;
 		if (pendingNavPath) doNavigate(pendingNavPath);
 		pendingNavPath = null;
@@ -172,7 +178,7 @@
 	async function handleSave() {
 		const result = await saveAllEdits();
 		if (result.failed > 0) {
-			console.warn(`Save: ${result.success} ok, ${result.failed} failed`);
+			alert(`Failed to save edits for ${result.failed} file(s).`);
 		}
 	}
 
