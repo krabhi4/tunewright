@@ -33,15 +33,7 @@ fn default_size() -> u32 {
 /// Maximum accepted cover-art payload size.
 const MAX_IMAGE_SIZE: u64 = 10 * 1024 * 1024;
 
-/// Hosts permitted as a cover-art source and as redirect targets.
-fn is_allowed_cover_host(host: &str) -> bool {
-    let host = host.trim_end_matches('.');
-    host == "coverartarchive.org"
-        || host == "archive.org"
-        || host.ends_with(".archive.org")
-        || host == "mzstatic.com"
-        || host.ends_with(".mzstatic.com")
-}
+
 
 /// JPEG (`FF D8`) or PNG (`89 50 4E 47`) magic-byte check.
 fn has_image_magic(data: &[u8]) -> bool {
@@ -98,7 +90,7 @@ pub async fn embed_cover_art_from_url(
     // Only allow CoverArtArchive or Apple Music URLs
     let parsed_ok = Url::parse(&body.url)
         .ok()
-        .and_then(|u| u.host_str().map(is_allowed_cover_host))
+        .and_then(|u| u.host_str().map(crate::state::is_allowed_cover_host_safe))
         .unwrap_or(false);
     if !parsed_ok {
         return Err(AppError(TunewrightError::Io(std::io::Error::new(
@@ -114,25 +106,8 @@ pub async fn embed_cover_art_from_url(
         ))));
     }
 
-    // Fetch the image once, restricting redirects to known hosts
-    let client = reqwest::Client::builder()
-        .user_agent("Mozilla/5.0 (compatible; Tunewright/0.5.1; +https://github.com/tunewright)")
-        .redirect(reqwest::redirect::Policy::custom(|attempt| {
-            if is_allowed_cover_host(attempt.url().host_str().unwrap_or("")) {
-                attempt.follow()
-            } else {
-                attempt.stop()
-            }
-        }))
-        .timeout(std::time::Duration::from_secs(10))
-        .connect_timeout(std::time::Duration::from_secs(10))
-        .build()
-        .map_err(|e| {
-            AppError(TunewrightError::Io(std::io::Error::other(format!(
-                "failed to build HTTP client: {}",
-                e
-            ))))
-        })?;
+    // Reuse the shared HTTP client with pre-configured redirects
+    let client = &state.coverart_client;
 
     let mut response = client.get(&body.url).send().await.map_err(|e| {
         AppError(TunewrightError::Io(std::io::Error::other(format!(

@@ -15,6 +15,25 @@ pub struct Session {
     pub created_at: Instant,
 }
 
+pub fn is_allowed_cover_host(host: &str) -> bool {
+    let host = host.trim_end_matches('.');
+    host == "coverartarchive.org"
+        || host == "archive.org"
+        || host.ends_with(".archive.org")
+        || host == "mzstatic.com"
+        || host.ends_with(".mzstatic.com")
+}
+
+pub fn is_allowed_cover_host_safe(host: &str) -> bool {
+    if host.is_empty() {
+        return false;
+    }
+    if host.parse::<std::net::IpAddr>().is_ok() || (host.starts_with('[') && host.ends_with(']')) {
+        return false;
+    }
+    is_allowed_cover_host(host)
+}
+
 #[derive(Debug, Clone)]
 pub struct AppState {
     pub config: Config,
@@ -26,11 +45,36 @@ pub struct AppState {
     /// Shared HTTP client for external lookups; reuses the connection pool
     /// across MusicBrainz/Apple Music requests (it is internally `Arc`-backed).
     pub http_client: reqwest::Client,
+    /// Shared dedicated client for cover art requests, with restricted redirects.
+    pub coverart_client: reqwest::Client,
 }
 
 impl AppState {
     pub fn new(config: Config, users: UserManager) -> Self {
         let data_root = config.data_dir.clone();
+        let http_client = reqwest::Client::builder()
+            .timeout(std::time::Duration::from_secs(10))
+            .connect_timeout(std::time::Duration::from_secs(10))
+            .build()
+            .unwrap_or_else(|_| reqwest::Client::new());
+
+        let coverart_client = reqwest::Client::builder()
+            .user_agent("Mozilla/5.0 (compatible; Tunewright/0.5.1; +https://github.com/tunewright)")
+            .redirect(reqwest::redirect::Policy::custom(|attempt| {
+                let host = attempt.url().host_str().unwrap_or("");
+                if attempt.previous().len() > 5 {
+                    attempt.stop()
+                } else if is_allowed_cover_host_safe(host) {
+                    attempt.follow()
+                } else {
+                    attempt.stop()
+                }
+            }))
+            .timeout(std::time::Duration::from_secs(10))
+            .connect_timeout(std::time::Duration::from_secs(10))
+            .build()
+            .unwrap_or_else(|_| reqwest::Client::new());
+
         Self {
             config,
             data_root,
@@ -38,11 +82,8 @@ impl AppState {
             sessions: Arc::new(Mutex::new(HashMap::new())),
             musicbrainz_next_allowed: Arc::new(Mutex::new(Instant::now())),
             failed_logins: Arc::new(Mutex::new(HashMap::new())),
-            http_client: reqwest::Client::builder()
-                .timeout(std::time::Duration::from_secs(10))
-                .connect_timeout(std::time::Duration::from_secs(10))
-                .build()
-                .unwrap_or_else(|_| reqwest::Client::new()),
+            http_client,
+            coverart_client,
         }
     }
 
@@ -123,5 +164,22 @@ mod tests {
             .duration_since(UNIX_EPOCH)
             .unwrap()
             .as_nanos() as u64
+    }
+
+    #[test]
+    fn test_cover_host_allowlist() {
+        assert!(is_allowed_cover_host_safe("coverartarchive.org"));
+        assert!(is_allowed_cover_host_safe("ia800201.us.archive.org"));
+        assert!(is_allowed_cover_host_safe("mzstatic.com"));
+        assert!(is_allowed_cover_host_safe("is1-ssl.mzstatic.com"));
+        // IP literals must be rejected
+        assert!(!is_allowed_cover_host_safe("192.168.1.1"));
+        assert!(!is_allowed_cover_host_safe("127.0.0.1"));
+        assert!(!is_allowed_cover_host_safe("::1"));
+        assert!(!is_allowed_cover_host_safe("[::1]"));
+        assert!(!is_allowed_cover_host_safe(""));
+        // Arbitrary domains not on allowlist
+        assert!(!is_allowed_cover_host_safe("evil.com"));
+        assert!(!is_allowed_cover_host_safe("archive.org.evil.com"));
     }
 }

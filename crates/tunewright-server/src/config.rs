@@ -19,10 +19,23 @@ impl Config {
                 std::env::var("TUNEWRIGHT_STATIC_DIR")
                     .unwrap_or_else(|_| "./frontend/build".to_string()),
             ),
-            port: std::env::var("TUNEWRIGHT_PORT")
-                .ok()
-                .and_then(|p| p.parse().ok())
-                .unwrap_or(8080),
+            port: {
+                if let Ok(p_str) = std::env::var("TUNEWRIGHT_PORT") {
+                    match p_str.parse::<u16>() {
+                        Ok(p) => p,
+                        Err(e) => {
+                            tracing::warn!(
+                                "TUNEWRIGHT_PORT environment variable '{}' is invalid ({}), falling back to 8080",
+                                p_str,
+                                e
+                            );
+                            8080
+                        }
+                    }
+                } else {
+                    8080
+                }
+            },
             host: std::env::var("TUNEWRIGHT_HOST").unwrap_or_else(|_| "127.0.0.1".to_string()),
             cookie_secure: std::env::var("TUNEWRIGHT_COOKIE_SECURE")
                 .map(|v| v == "true" || v == "1")
@@ -55,5 +68,21 @@ mod tests {
         // Cleanup env
         std::env::remove_var("TUNEWRIGHT_HOST");
         std::env::remove_var("TUNEWRIGHT_COOKIE_SECURE");
+    }
+
+    #[test]
+    fn test_invalid_port_falls_back_to_default() {
+        // Garbage string
+        std::env::set_var("TUNEWRIGHT_PORT", "not_a_port");
+        let config = Config::from_env();
+        assert_eq!(config.port, 8080);
+
+        // Out-of-range value
+        std::env::set_var("TUNEWRIGHT_PORT", "99999");
+        let config2 = Config::from_env();
+        assert_eq!(config2.port, 8080);
+
+        // Cleanup
+        std::env::remove_var("TUNEWRIGHT_PORT");
     }
 }

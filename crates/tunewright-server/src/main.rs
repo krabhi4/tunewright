@@ -34,15 +34,27 @@ async fn main() {
     let users = UserManager::load(users_path);
     tracing::info!("Setup required: {}", !users.has_users());
 
-    let bind_addr = format!("{}:{}", config.host, config.port);
+    let host = if config.host.contains(':') && !config.host.starts_with('[') {
+        format!("[{}]", config.host)
+    } else {
+        config.host.clone()
+    };
+    let bind_addr = format!("{}:{}", host, config.port);
     let state = AppState::new(config, users);
     let app = routes::create_router(state);
 
-    let listener = tokio::net::TcpListener::bind(&bind_addr)
-        .await
-        .expect("Failed to bind address");
+    let listener = match tokio::net::TcpListener::bind(&bind_addr).await {
+        Ok(l) => l,
+        Err(e) => {
+            tracing::error!("Failed to bind to address {}: {}", bind_addr, e);
+            std::process::exit(1);
+        }
+    };
 
     tracing::info!("Listening on http://{}", bind_addr);
 
-    axum::serve(listener, app).await.expect("Server error");
+    if let Err(e) = axum::serve(listener, app).await {
+        tracing::error!("Server error: {}", e);
+        std::process::exit(1);
+    }
 }
