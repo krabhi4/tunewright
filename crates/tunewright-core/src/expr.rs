@@ -469,7 +469,7 @@ fn fn_math(args: &[String], op: fn(i64, i64) -> i64) -> String {
 /// Zero-pad a number: $num(value, width)
 fn fn_num(args: &[String]) -> String {
     let n = parse_int(&get_arg(args, 0));
-    let width = parse_int(&get_arg(args, 1)).max(1) as usize;
+    let width = parse_int(&get_arg(args, 1)).clamp(1, 1000) as usize;
     format!("{:0>width$}", n)
 }
 
@@ -808,6 +808,10 @@ mod tests {
     fn test_fn_num() {
         let t = tags();
         assert_eq!(evaluate("$num(%track%,3)", &make_ctx(&t)), "003");
+
+        // Large width should not panic and should be capped at 1000
+        let large_res = evaluate("$num(%track%,100000)", &make_ctx(&t));
+        assert_eq!(large_res.len(), 1000);
     }
 
     #[test]

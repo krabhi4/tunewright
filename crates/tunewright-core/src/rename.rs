@@ -151,14 +151,16 @@ pub fn execute_renames(
                     };
                 }
                 Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {
-                    return RenameResult {
-                        id: preview.id,
-                        status: "error".to_string(),
-                        old_name: preview.old_name,
-                        new_name: preview.new_name,
-                        new_relative_path: unchanged_rel,
-                        error: Some("Target file already exists".to_string()),
-                    };
+                    if !is_same_file(&old_path, &new_path) {
+                        return RenameResult {
+                            id: preview.id,
+                            status: "error".to_string(),
+                            old_name: preview.old_name,
+                            new_name: preview.new_name,
+                            new_relative_path: unchanged_rel,
+                            error: Some("Target file already exists".to_string()),
+                        };
+                    }
                 }
                 Err(_) => {
                     // hard_link fails across filesystems — fall back to rename
@@ -290,6 +292,39 @@ mod tests {
         assert_eq!(results.len(), 1);
         assert_eq!(results[0].status, "error");
         assert!(results[0].error.as_ref().unwrap().contains("Target file already exists"));
+
+        let _ = std::fs::remove_dir_all(&temp_dir);
+    }
+
+    #[test]
+    #[cfg(any(target_os = "macos", target_os = "windows"))]
+    fn test_execute_renames_case_only() {
+        let temp_dir = std::env::temp_dir().join(format!("tunewright_test_{}", rand_num()));
+        std::fs::create_dir_all(&temp_dir).unwrap();
+
+        let old_rel = "Song.flac";
+        let old_path = temp_dir.join(old_rel);
+
+        use std::io::Write;
+        let flac_bytes = b"fLaC\x80\x00\x00\x22\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00";
+        let mut f = File::create(&old_path).unwrap();
+        f.write_all(flac_bytes).unwrap();
+
+        // Write title so that it renames to "song" (different casing)
+        let mut changes = crate::types::TagWriteChanges::default();
+        changes.title = Some("song".to_string());
+        crate::audio::write_tags(&old_path, &changes).unwrap();
+
+        // Executing case-only rename Song.flac -> song.flac should succeed on case-insensitive OS
+        let files = vec![("1".to_string(), old_rel.to_string())];
+        let results = execute_renames(&temp_dir, &files, "%title%");
+
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].status, "ok");
+        assert_eq!(results[0].new_relative_path, "song.flac");
+
+        // Verify file is renamed on disk
+        assert!(temp_dir.join("song.flac").exists());
 
         let _ = std::fs::remove_dir_all(&temp_dir);
     }

@@ -214,7 +214,7 @@ pub fn build_dir_tree(data_root: &Path, max_depth: usize) -> Result<DirNode, Tun
 /// Format a unix timestamp as ISO 8601 (without pulling in chrono)
 fn chrono_format_timestamp(secs: u64) -> String {
     // Simple UTC ISO 8601 formatting
-    let s = secs;
+    let s = secs.min(253402300799);
     let days = s / 86400;
     let time_of_day = s % 86400;
     let hours = time_of_day / 3600;
@@ -286,6 +286,11 @@ mod tests {
     fn test_timestamp_formatting() {
         assert_eq!(chrono_format_timestamp(0), "1970-01-01T00:00:00Z");
         assert_eq!(chrono_format_timestamp(1704067200), "2024-01-01T00:00:00Z");
+        
+        // Far-future date (9999-12-31T23:59:59Z)
+        assert_eq!(chrono_format_timestamp(253402300799), "9999-12-31T23:59:59Z");
+        // u64::MAX should be capped and not hang
+        assert_eq!(chrono_format_timestamp(u64::MAX), "9999-12-31T23:59:59Z");
     }
 
     #[test]
