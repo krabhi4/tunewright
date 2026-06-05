@@ -5,7 +5,11 @@ use serde::Deserialize;
 use std::collections::HashMap;
 
 const MB_BASE: &str = "https://musicbrainz.org/ws/2";
-const USER_AGENT: &str = "Tunewright/0.5.1 (https://github.com/tunewright)";
+const USER_AGENT: &str = concat!(
+    "Tunewright/",
+    env!("CARGO_PKG_VERSION"),
+    " (https://github.com/krabhi4/tunewright)"
+);
 const MB_HEADERS: &[(&str, &str)] = &[("User-Agent", USER_AGENT), ("Accept", "application/json")];
 
 // CoverArtArchive JSON API types

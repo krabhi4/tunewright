@@ -59,9 +59,11 @@ impl AppState {
             .unwrap_or_else(|_| reqwest::Client::new());
 
         let coverart_client = reqwest::Client::builder()
-            .user_agent(
-                "Mozilla/5.0 (compatible; Tunewright/0.5.1; +https://github.com/tunewright)",
-            )
+            .user_agent(concat!(
+                "Mozilla/5.0 (compatible; Tunewright/",
+                env!("CARGO_PKG_VERSION"),
+                "; +https://github.com/krabhi4/tunewright)"
+            ))
             .redirect(reqwest::redirect::Policy::custom(|attempt| {
                 let host = attempt.url().host_str().unwrap_or("");
                 if attempt.previous().len() > 5 {

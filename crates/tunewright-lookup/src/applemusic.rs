@@ -3,7 +3,11 @@ use crate::{extract_year, get_json};
 use reqwest::Client;
 use serde::Deserialize;
 
-const USER_AGENT: &str = "Mozilla/5.0 (compatible; Tunewright/0.5.1)";
+const USER_AGENT: &str = concat!(
+    "Mozilla/5.0 (compatible; Tunewright/",
+    env!("CARGO_PKG_VERSION"),
+    ")"
+);
 const APPLE_HEADERS: &[(&str, &str)] = &[("User-Agent", USER_AGENT)];
 
 #[derive(Debug, Deserialize)]

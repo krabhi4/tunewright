@@ -2214,7 +2214,7 @@ checksum = "e421abadd41a4225275504ea4d6566923418b7f05506fbc9c0fe86ba7396114b"
 
 [[package]]
 name = "tunewright-core"
-version = "0.6.0"
+version = "1.0.0"
 dependencies = [
  "hex",
  "image",
@@ -2231,7 +2231,7 @@ dependencies = [
 
 [[package]]
 name = "tunewright-lookup"
-version = "0.6.0"
+version = "1.0.0"
 dependencies = [
  "reqwest",
  "serde",
@@ -2243,7 +2243,7 @@ dependencies = [
 
 [[package]]
 name = "tunewright-server"
-version = "0.6.0"
+version = "1.0.0"
 dependencies = [
  "argon2",
  "axum",

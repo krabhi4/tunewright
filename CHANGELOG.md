@@ -2,6 +2,35 @@
 
 All notable changes to Tunewright are documented here.
 
+## [1.0.0] - 2026-06-06
+
+Tunewright 1.0. A full-workspace bug audit (69 confirmed findings: 1 critical, 17 high, 30 medium, 21 low) was completed and every finding fixed, alongside a security hardening pass and a new in-app notification system.
+
+### Added
+
+- **Toast Notifications** - Themed, accessible toast system replaces every blocking `alert()`. Save, lookup-apply, actions, rename, filename-to-tag, and cover-art flows now report success, partial-failure, and error outcomes with counts. Errors stay until dismissed; the styling follows all four theme families in light and dark.
+- **Setup Token** - Optional `TUNEWRIGHT_SETUP_TOKEN` environment variable gates first-admin creation, protecting the setup window on network-exposed deployments (recommended for Docker). The setup page shows a token field when required, and the server logs a security warning when listening beyond loopback with setup incomplete.
+- **MSRV Enforcement** - `rust-version = "1.89.0"` is declared in the workspace and checked by a dedicated CI job, and the release workflow verifies the git tag matches the crate version before publishing an image.
+
+### Changed
+
+- **Localhost by Default** - The bare binary now binds `127.0.0.1` instead of `0.0.0.0` (Docker still binds all interfaces via `TUNEWRIGHT_HOST`).
+- **Crash-Safe Writes** - All tag and cover-art writes go through an atomic temp-copy + fsync + rename, so a crash or power loss mid-write can no longer truncate an audio file. `users.json` is fsynced the same way.
+- **Serialized File Writes** - A per-file lock serializes every tag and cover-art write across all endpoints, eliminating lost updates from concurrent edits.
+- **Path Handling** - All read and write endpoints operate on the validated canonical path end-to-end, closing symlink/TOCTOU windows.
+
+### Fixed
+
+- **Data Loss (critical)** - A cross-filesystem rename fallback could silently overwrite an existing file on filesystems without hard-link support (exFAT, SMB/NFS); destinations are now checked and never clobbered.
+- **Rename Correctness** - Case-only renames work on macOS/Windows, conflict detection matches the filesystem's case sensitivity, the preview flags collisions with existing on-disk files, dot-only and unsanitized-extension targets are rejected cleanly, and trailing-dot names are avoided.
+- **Tag Writing** - Writing only a track/disc total no longer fabricates a "0/N" pair on ID3v2; stale secondary tags (APE/ID3v1) are merged and removed so edits can't be shadowed on re-read; ~100 extra tag keys (ISRC, barcode, catalog number, ...) now round-trip instead of being silently dropped.
+- **Format Expressions** - Deeply nested input, `$div`/`$mod` overflow, and huge `$num` pad widths no longer crash the server; empty search strings in Replace/Split no longer corrupt values; `$caps2` preserves original spacing; AutoNumber saturates instead of overflowing.
+- **Lookup** - Multi-disc releases from MusicBrainz and Apple Music order correctly with sequential track numbers; one malformed row in a provider response no longer fails the whole search; all outbound requests share a client with connect/read timeouts; the MusicBrainz rate limiter rejects with 429 instead of queueing unboundedly.
+- **Server Robustness** - Blocking file I/O moved off the async runtime (cover art, rename, user persistence); cover-art uploads up to the advertised 10 MB now work; unmatched `/api/v1/*` paths return JSON 404 instead of the SPA shell; startup failures (bad host, port in use, IPv6 literals, corrupt `users.json`) exit with clean errors instead of panics; invalid `TUNEWRIGHT_PORT` values log a warning.
+- **Authentication** - Login throttling is per-username (normalized and memory-bounded) instead of a global counter an attacker could reset; the session cookie gains a `Secure` flag toggle (`TUNEWRIGHT_COOKIE_SECURE`); the auth middleware uses an explicit public-route allowlist so privileged `/auth/*` routes are protected in the middleware layer.
+- **Frontend Correctness** - Shift-click range selection follows the sorted/filtered view; rapid folder navigation can no longer show the wrong directory's files; edits made while a save is in flight are preserved; a server error during the auth check shows "server unreachable" instead of bouncing to login; failed saves block navigation instead of silently discarding edits; numeric tag fields are clamped and accept `5/10` track/total notation; modals reset stale state on reopen; switching lookup providers clears stale results; durations under a minute display as seconds; Enter can no longer double-submit auth forms.
+- **Packaging** - `docker-compose.yml` validates again, pnpm is version-pinned with `--frozen-lockfile` enforced, dead Discogs configuration was removed, and outbound User-Agent strings now derive from the crate version automatically.
+
 ## [0.6.0] - 2026-05-30
 
 ### Changed

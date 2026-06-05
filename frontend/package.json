@@ -1,6 +1,6 @@
 {
   "name": "tunewright-frontend",
-  "version": "0.6.0",
+  "version": "1.0.0",
   "private": true,
   "packageManager": "pnpm@9.15.4",
   "description": "Tunewright web frontend (SvelteKit SPA)",
