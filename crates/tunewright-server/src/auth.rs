@@ -304,6 +304,7 @@ pub async fn create_invite(State(state): State<AppState>, req: Request<Body>) ->
             StatusCode::OK,
             Json(serde_json::json!({
                 "token": invite.token,
+                "created_by": invite.created_by,
                 "expires_at": invite.expires_at,
                 "link": format!("/register?token={}", invite.token)
             })),

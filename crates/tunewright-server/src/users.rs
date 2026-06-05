@@ -75,20 +75,22 @@ impl UserManager {
                 Ok(contents) => match serde_json::from_str(&contents) {
                     Ok(store) => store,
                     Err(e) => {
-                        panic!(
+                        tracing::error!(
                             "FATAL: users.json at {:?} exists but contains invalid JSON: {}. \
                              Refusing to start to prevent data loss. \
                              Fix or remove the file manually.",
                             path, e
                         );
+                        std::process::exit(1);
                     }
                 },
                 Err(e) => {
-                    panic!(
+                    tracing::error!(
                         "FATAL: Cannot read users file {:?}: {}. \
                          Refusing to start to prevent data loss.",
                         path, e
                     );
+                    std::process::exit(1);
                 }
             }
         } else {

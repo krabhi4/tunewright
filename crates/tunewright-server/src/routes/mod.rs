@@ -9,6 +9,7 @@ pub mod tags;
 
 use axum::extract::DefaultBodyLimit;
 use axum::middleware;
+use axum::response::IntoResponse;
 use axum::routing::{delete, get, post};
 use axum::Router;
 use tower_http::services::{ServeDir, ServeFile};
@@ -69,7 +70,10 @@ pub fn create_router(state: AppState) -> Router {
         .layer(middleware::from_fn_with_state(
             state.clone(),
             auth::require_auth,
-        ));
+        ))
+        // Catch-all: any unmatched /api/v1/* path returns a JSON 404 instead
+        // of falling through to the unauthenticated SPA fallback.
+        .fallback(api_not_found);
 
     let static_dir = state.config.static_dir.clone();
     let index_file = static_dir.join("index.html");
@@ -79,4 +83,12 @@ pub fn create_router(state: AppState) -> Router {
         .fallback_service(ServeDir::new(&static_dir).not_found_service(ServeFile::new(index_file)))
         .layer(TraceLayer::new_for_http())
         .with_state(state)
+}
+
+async fn api_not_found() -> axum::response::Response {
+    (
+        axum::http::StatusCode::NOT_FOUND,
+        axum::Json(serde_json::json!({ "error": "Not found" })),
+    )
+        .into_response()
 }
