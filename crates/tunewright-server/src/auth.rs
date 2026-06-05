@@ -16,11 +16,18 @@ fn generate_session_token() -> String {
     hex::encode(bytes)
 }
 
-fn set_session_cookie(token: &str) -> String {
-    format!(
-        "{}={}; Path=/; HttpOnly; SameSite=Lax; Max-Age=86400",
-        SESSION_COOKIE, token
-    )
+fn set_session_cookie(token: &str, secure: bool) -> String {
+    if secure {
+        format!(
+            "{}={}; Path=/; HttpOnly; SameSite=Lax; Max-Age=86400; Secure",
+            SESSION_COOKIE, token
+        )
+    } else {
+        format!(
+            "{}={}; Path=/; HttpOnly; SameSite=Lax; Max-Age=86400",
+            SESSION_COOKIE, token
+        )
+    }
 }
 
 fn create_session_response(
@@ -39,7 +46,7 @@ fn create_session_response(
             created_at: std::time::Instant::now(),
         },
     );
-    let cookie = set_session_cookie(&token);
+    let cookie = set_session_cookie(&token, state.config.cookie_secure);
     (
         StatusCode::OK,
         [("Set-Cookie", cookie.as_str())],
@@ -116,13 +123,14 @@ pub struct LoginRequest {
 }
 
 pub async fn login(State(state): State<AppState>, Json(body): Json<LoginRequest>) -> Response {
-    // Brute-force throttling
+    // Brute-force throttling (per-username)
     let delay = {
         let mut guard = state
             .failed_logins
             .lock()
             .unwrap_or_else(|e| e.into_inner());
-        let (count, last_failure) = &mut *guard;
+        let entry = guard.entry(body.username.clone()).or_insert((0, std::time::Instant::now()));
+        let (count, last_failure) = entry;
         if *count > 0 && last_failure.elapsed().as_secs() > 60 {
             *count = 0;
         }
@@ -159,7 +167,7 @@ pub async fn login(State(state): State<AppState>, Json(body): Json<LoginRequest>
             .failed_logins
             .lock()
             .unwrap_or_else(|e| e.into_inner());
-        guard.0 = 0;
+        guard.remove(&body.username);
         drop(guard);
         create_session_response(&state, &user.id, &user.username, user.role)
     } else {
@@ -167,8 +175,9 @@ pub async fn login(State(state): State<AppState>, Json(body): Json<LoginRequest>
             .failed_logins
             .lock()
             .unwrap_or_else(|e| e.into_inner());
-        guard.0 = guard.0.saturating_add(1);
-        guard.1 = std::time::Instant::now();
+        let entry = guard.entry(body.username.clone()).or_insert((0, std::time::Instant::now()));
+        entry.0 = entry.0.saturating_add(1);
+        entry.1 = std::time::Instant::now();
         drop(guard);
         (
             StatusCode::UNAUTHORIZED,
@@ -456,4 +465,84 @@ fn require_super_admin(state: &AppState, req: &Request<Body>) -> Result<Session,
     }
 
     Ok(session)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::config::Config;
+    use crate::users::UserManager;
+
+    #[test]
+    fn test_set_session_cookie_secure() {
+        let cookie_insecure = set_session_cookie("test_token", false);
+        assert!(!cookie_insecure.contains("; Secure"));
+
+        let cookie_secure = set_session_cookie("test_token", true);
+        assert!(cookie_secure.contains("; Secure"));
+    }
+
+    #[tokio::test]
+    async fn test_login_brute_force_throttling_per_username() {
+        let temp_dir = std::env::temp_dir().join(format!("tunewright_srv_test_{}", rand_num()));
+        std::fs::create_dir_all(&temp_dir).unwrap();
+        let users_path = temp_dir.join("users.json");
+
+        let user_manager = UserManager::load(users_path);
+        let config = Config {
+            data_dir: temp_dir.clone(),
+            static_dir: temp_dir.clone(),
+            port: 8080,
+            host: "127.0.0.1".to_string(),
+            cookie_secure: false,
+        };
+        let state = AppState::new(config, user_manager);
+
+        // Initially no failed logins
+        {
+            let guard = state.failed_logins.lock().unwrap();
+            assert!(guard.is_empty());
+        }
+
+        // Simulate a failed login for user1
+        let req1 = LoginRequest {
+            username: "user1".to_string(),
+            password: "wrong_password".to_string(),
+        };
+        let resp = login(State(state.clone()), Json(req1)).await;
+        assert_eq!(resp.status(), StatusCode::UNAUTHORIZED);
+
+        // Verify that user1's failed login count is 1
+        {
+            let guard = state.failed_logins.lock().unwrap();
+            assert_eq!(guard.get("user1").unwrap().0, 1);
+            // user2 should still have no entries
+            assert!(guard.get("user2").is_none());
+        }
+
+        // Simulate a failed login for user2
+        let req2 = LoginRequest {
+            username: "user2".to_string(),
+            password: "wrong_password".to_string(),
+        };
+        let resp2 = login(State(state.clone()), Json(req2)).await;
+        assert_eq!(resp2.status(), StatusCode::UNAUTHORIZED);
+
+        // Verify that user2's failed login count is 1, and user1 is still 1
+        {
+            let guard = state.failed_logins.lock().unwrap();
+            assert_eq!(guard.get("user1").unwrap().0, 1);
+            assert_eq!(guard.get("user2").unwrap().0, 1);
+        }
+
+        let _ = std::fs::remove_dir_all(&temp_dir);
+    }
+
+    fn rand_num() -> u64 {
+        use std::time::{SystemTime, UNIX_EPOCH};
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos() as u64
+    }
 }

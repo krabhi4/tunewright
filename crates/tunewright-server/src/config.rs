@@ -6,6 +6,7 @@ pub struct Config {
     pub static_dir: PathBuf,
     pub port: u16,
     pub host: String,
+    pub cookie_secure: bool,
 }
 
 impl Config {
@@ -22,7 +23,37 @@ impl Config {
                 .ok()
                 .and_then(|p| p.parse().ok())
                 .unwrap_or(8080),
-            host: std::env::var("TUNEWRIGHT_HOST").unwrap_or_else(|_| "0.0.0.0".to_string()),
+            host: std::env::var("TUNEWRIGHT_HOST").unwrap_or_else(|_| "127.0.0.1".to_string()),
+            cookie_secure: std::env::var("TUNEWRIGHT_COOKIE_SECURE")
+                .map(|v| v == "true" || v == "1")
+                .unwrap_or(false),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_config_defaults() {
+        // Clear env vars to test defaults
+        std::env::remove_var("TUNEWRIGHT_HOST");
+        std::env::remove_var("TUNEWRIGHT_COOKIE_SECURE");
+
+        let config = Config::from_env();
+        assert_eq!(config.host, "127.0.0.1");
+        assert!(!config.cookie_secure);
+
+        // Test custom values from env
+        std::env::set_var("TUNEWRIGHT_HOST", "192.168.1.50");
+        std::env::set_var("TUNEWRIGHT_COOKIE_SECURE", "true");
+        let config2 = Config::from_env();
+        assert_eq!(config2.host, "192.168.1.50");
+        assert!(config2.cookie_secure);
+
+        // Cleanup env
+        std::env::remove_var("TUNEWRIGHT_HOST");
+        std::env::remove_var("TUNEWRIGHT_COOKIE_SECURE");
     }
 }

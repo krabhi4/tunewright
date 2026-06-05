@@ -22,7 +22,7 @@ pub struct AppState {
     pub users: UserManager,
     pub sessions: Arc<Mutex<HashMap<String, Session>>>,
     pub musicbrainz_next_allowed: Arc<Mutex<Instant>>,
-    pub failed_logins: Arc<Mutex<(u32, Instant)>>,
+    pub failed_logins: Arc<Mutex<HashMap<String, (u32, Instant)>>>,
     /// Shared HTTP client for external lookups; reuses the connection pool
     /// across MusicBrainz/Apple Music requests (it is internally `Arc`-backed).
     pub http_client: reqwest::Client,
@@ -37,7 +37,7 @@ impl AppState {
             users,
             sessions: Arc::new(Mutex::new(HashMap::new())),
             musicbrainz_next_allowed: Arc::new(Mutex::new(Instant::now())),
-            failed_logins: Arc::new(Mutex::new((0, Instant::now()))),
+            failed_logins: Arc::new(Mutex::new(HashMap::new())),
             http_client: reqwest::Client::new(),
         }
     }
