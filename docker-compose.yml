@@ -7,5 +7,6 @@ services:
       # Point this to your music library folder
       - ${MUSIC_DIR:-./music}:/data:rw
     environment:
+      TUNEWRIGHT_HOST: 0.0.0.0
       # - DISCOGS_API_TOKEN=your_token_here
     restart: unless-stopped

@@ -1,7 +1,8 @@
 use axum::extract::State;
 use axum::Json;
-use serde::{Deserialize, Serialize};
 use rayon::prelude::*;
+use serde::{Deserialize, Serialize};
+use std::path::PathBuf;
 use tunewright_core::actions::{Action, ActionContext};
 use tunewright_core::audio;
 use tunewright_core::scanner;
@@ -10,12 +11,18 @@ use tunewright_core::types::{TagData, TagWriteChanges, WriteResult};
 use crate::error::{join_error, AppError};
 use crate::state::AppState;
 
-/// Filter request entries to those resolving to a safe path, as `(id, rel_path)`.
-fn safe_file_entries(data_root: &std::path::Path, files: Vec<ActionFileEntry>) -> Vec<(String, String)> {
+/// Filter request entries to those resolving to a safe path, as `(id, rel_path, canonical_path)`.
+fn safe_file_entries(
+    data_root: &std::path::Path,
+    files: Vec<ActionFileEntry>,
+) -> Vec<(String, String, PathBuf)> {
     files
         .into_iter()
-        .filter(|f| scanner::resolve_safe_path(data_root, &f.path).is_ok())
-        .map(|f| (f.id, f.path))
+        .filter_map(|f| {
+            scanner::resolve_safe_path(data_root, &f.path)
+                .ok()
+                .map(|safe_path| (f.id, f.path, safe_path))
+        })
         .collect()
 }
 
@@ -54,15 +61,16 @@ pub async fn execute(
         // serial (matching audio::batch_write_tags) so write ordering is unchanged.
         let reads: Vec<Result<TagData, String>> = valid_files
             .par_iter()
-            .map(|(_, rel_path)| {
-                audio::read_tags_fast(&data_root.join(rel_path))
-                    .map_err(|e| format!("Read failed: {e}"))
+            .map(|(_, _, canonical_path)| {
+                audio::read_tags_fast(canonical_path).map_err(|e| format!("Read failed: {e}"))
             })
             .collect();
 
         let mut results = Vec::with_capacity(valid_files.len());
 
-        for (i, ((id, rel_path), read)) in valid_files.iter().zip(reads).enumerate() {
+        for (i, ((id, _rel_path, canonical_path), read)) in
+            valid_files.iter().zip(reads).enumerate()
+        {
             let mut tags = match read {
                 Ok(t) => t,
                 Err(e) => {
@@ -75,8 +83,7 @@ pub async fn execute(
                 }
             };
 
-            let full_path = data_root.join(rel_path);
-            let filename = full_path
+            let filename = canonical_path
                 .file_stem()
                 .unwrap_or_default()
                 .to_string_lossy()
@@ -90,7 +97,7 @@ pub async fn execute(
 
             // Write modified tags back
             let changes = TagWriteChanges::from(&tags);
-            match audio::write_tags(&full_path, &changes) {
+            match audio::write_tags(canonical_path, &changes) {
                 Ok(()) => results.push(WriteResult {
                     id: id.clone(),
                     status: "ok".to_string(),
@@ -146,20 +153,19 @@ pub async fn preview(
 
         let mut previews = Vec::new();
 
-        for (i, (id, rel_path)) in valid_files.iter().enumerate() {
-            let full_path = data_root.join(rel_path);
-            let filename = full_path
+        for (i, (id, _rel_path, canonical_path)) in valid_files.iter().enumerate() {
+            let filename = canonical_path
                 .file_name()
                 .unwrap_or_default()
                 .to_string_lossy()
                 .to_string();
-            let stem = full_path
+            let stem = canonical_path
                 .file_stem()
                 .unwrap_or_default()
                 .to_string_lossy()
                 .to_string();
 
-            let original = match audio::read_tags_fast(&full_path) {
+            let original = match audio::read_tags_fast(canonical_path) {
                 Ok(t) => t,
                 Err(_) => continue,
             };

@@ -4,7 +4,7 @@ use crate::types::TunewrightError;
 use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RenamePreview {
@@ -16,29 +16,28 @@ pub struct RenamePreview {
 
 /// Preview renames without executing
 pub fn preview_renames(
-    data_root: &Path,
-    files: &[(String, String)], // (id, relative_path)
+    _data_root: &Path,
+    files: &[(String, String, PathBuf)], // (id, relative_path, canonical_path)
     format: &str,
 ) -> Result<Vec<RenamePreview>, TunewrightError> {
     // Reads are independent, so compute (id, old_name, new_name) in parallel.
     // Conflict detection is order-dependent, so it runs as a sequential pass below.
     let computed: Vec<(String, String, String)> = files
         .par_iter()
-        .map(|(id, rel_path)| {
-            let full_path = data_root.join(rel_path);
-            let old_name = full_path
+        .map(|(id, _rel_path, canonical_path)| {
+            let old_name = canonical_path
                 .file_name()
                 .unwrap_or_default()
                 .to_string_lossy()
                 .to_string();
 
-            let extension = full_path
+            let extension = canonical_path
                 .extension()
                 .unwrap_or_default()
                 .to_string_lossy()
                 .to_string();
 
-            let tags = audio::read_tags_fast(&full_path).unwrap_or_default();
+            let tags = audio::read_tags_fast(canonical_path).unwrap_or_default();
             let new_stem = format_string::evaluate(format, &tags);
 
             let new_name = if new_stem.is_empty() {
@@ -72,7 +71,7 @@ pub fn preview_renames(
 /// Execute renames
 pub fn execute_renames(
     data_root: &Path,
-    files: &[(String, String)], // (id, relative_path)
+    files: &[(String, String, PathBuf)], // (id, relative_path, canonical_path)
     format: &str,
 ) -> Vec<RenameResult> {
     let previews = match preview_renames(data_root, files, format) {
@@ -80,7 +79,7 @@ pub fn execute_renames(
         Err(e) => {
             return files
                 .iter()
-                .map(|(id, rel_path)| RenameResult {
+                .map(|(id, rel_path, _)| RenameResult {
                     id: id.clone(),
                     status: "error".to_string(),
                     old_name: String::new(),
@@ -95,7 +94,7 @@ pub fn execute_renames(
     previews
         .into_iter()
         .zip(files.iter())
-        .map(|(preview, (_, rel_path))| {
+        .map(|(preview, (_, rel_path, canonical_path))| {
             // Where the file ends up on success vs. where it stays otherwise.
             let target_rel = rel_path_with_name(rel_path, &preview.new_name);
             let unchanged_rel = rel_path.clone();
@@ -122,7 +121,22 @@ pub fn execute_renames(
                 };
             }
 
-            let old_path = data_root.join(rel_path);
+            if preview.new_name.contains('/')
+                || preview.new_name.contains('\\')
+                || preview.new_name == ".."
+                || preview.new_name == "."
+            {
+                return RenameResult {
+                    id: preview.id,
+                    status: "error".to_string(),
+                    old_name: preview.old_name,
+                    new_name: preview.new_name,
+                    new_relative_path: unchanged_rel,
+                    error: Some("Invalid target filename".to_string()),
+                };
+            }
+
+            let old_path = canonical_path.clone();
             let new_path = old_path.with_file_name(&preview.new_name);
 
             // Atomic collision check: hard_link fails if target already exists,
@@ -286,12 +300,16 @@ mod tests {
         File::create(&target_path).unwrap();
 
         // Try renaming old.mp3 -> target.mp3
-        let files = vec![("1".to_string(), old_rel.to_string())];
+        let files = vec![("1".to_string(), old_rel.to_string(), old_path.clone())];
         let results = execute_renames(&temp_dir, &files, "target");
 
         assert_eq!(results.len(), 1);
         assert_eq!(results[0].status, "error");
-        assert!(results[0].error.as_ref().unwrap().contains("Target file already exists"));
+        assert!(results[0]
+            .error
+            .as_ref()
+            .unwrap()
+            .contains("Target file already exists"));
 
         let _ = std::fs::remove_dir_all(&temp_dir);
     }
@@ -316,7 +334,7 @@ mod tests {
         crate::audio::write_tags(&old_path, &changes).unwrap();
 
         // Executing case-only rename Song.flac -> song.flac should succeed on case-insensitive OS
-        let files = vec![("1".to_string(), old_rel.to_string())];
+        let files = vec![("1".to_string(), old_rel.to_string(), old_path.clone())];
         let results = execute_renames(&temp_dir, &files, "%title%");
 
         assert_eq!(results.len(), 1);
@@ -367,9 +385,9 @@ mod tests {
         crate::audio::write_tags(&temp_dir.join(file3), &changes3).unwrap();
 
         let files = vec![
-            ("1".to_string(), file1.to_string()), // will rename to "new_song1.flac" (success)
-            ("2".to_string(), file2.to_string()), // will try to rename to "collision.flac" (collision error)
-            ("3".to_string(), file3.to_string()), // will rename to "song3.flac" (skipped because unchanged)
+            ("1".to_string(), file1.to_string(), temp_dir.join(file1)), // will rename to "new_song1.flac" (success)
+            ("2".to_string(), file2.to_string(), temp_dir.join(file2)), // will try to rename to "collision.flac" (collision error)
+            ("3".to_string(), file3.to_string(), temp_dir.join(file3)), // will rename to "song3.flac" (skipped because unchanged)
         ];
 
         let results = execute_renames(&temp_dir, &files, "%title%");
@@ -384,11 +402,46 @@ mod tests {
         // Result 2: error (Target file already exists)
         let r2 = results.iter().find(|r| r.id == "2").unwrap();
         assert_eq!(r2.status, "error");
-        assert!(r2.error.as_ref().unwrap().contains("Target file already exists"));
+        assert!(r2
+            .error
+            .as_ref()
+            .unwrap()
+            .contains("Target file already exists"));
 
         // Result 3: skipped (unchanged)
         let r3 = results.iter().find(|r| r.id == "3").unwrap();
         assert_eq!(r3.status, "skipped");
+
+        let _ = std::fs::remove_dir_all(&temp_dir);
+    }
+
+    #[test]
+    fn test_execute_renames_path_safety_traversal_prevention() {
+        let temp_dir = std::env::temp_dir().join(format!("tunewright_test_{}", rand_num()));
+        std::fs::create_dir_all(&temp_dir).unwrap();
+
+        let old_rel = "song";
+        let old_path = temp_dir.join(old_rel);
+
+        use std::io::Write;
+        let flac_bytes = b"fLaC\x80\x00\x00\x22\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00";
+        let mut f = File::create(&old_path).unwrap();
+        f.write_all(flac_bytes).unwrap();
+
+        let files = vec![("1".to_string(), old_rel.to_string(), old_path.clone())];
+        // Rename using the format string "." (which evaluates to "." and has no extension, resulting in target filename "..")
+        let results = execute_renames(&temp_dir, &files, ".");
+
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].status, "error");
+        assert!(results[0]
+            .error
+            .as_ref()
+            .unwrap()
+            .contains("Invalid target filename"));
+
+        // Verify old file still exists
+        assert!(old_path.exists());
 
         let _ = std::fs::remove_dir_all(&temp_dir);
     }

@@ -1,6 +1,7 @@
 use axum::extract::State;
 use axum::Json;
 use serde::{Deserialize, Serialize};
+use std::path::PathBuf;
 use tunewright_core::rename::{self, RenamePreview, RenameResult};
 use tunewright_core::scanner;
 
@@ -33,11 +34,14 @@ pub async fn preview(
     State(state): State<AppState>,
     Json(body): Json<RenameRequest>,
 ) -> Result<Json<PreviewResponse>, AppError> {
-    let files: Vec<(String, String)> = body
+    let files: Vec<(String, String, PathBuf)> = body
         .files
         .into_iter()
-        .filter(|f| scanner::resolve_safe_path(&state.data_root, &f.path).is_ok())
-        .map(|f| (f.id, f.path))
+        .filter_map(|f| {
+            scanner::resolve_safe_path(&state.data_root, &f.path)
+                .ok()
+                .map(|safe_path| (f.id, f.path, safe_path))
+        })
         .collect();
 
     let previews = rename::preview_renames(&state.data_root, &files, &body.format)?;
@@ -48,11 +52,14 @@ pub async fn execute(
     State(state): State<AppState>,
     Json(body): Json<RenameRequest>,
 ) -> Result<Json<ExecuteResponse>, AppError> {
-    let files: Vec<(String, String)> = body
+    let files: Vec<(String, String, PathBuf)> = body
         .files
         .into_iter()
-        .filter(|f| scanner::resolve_safe_path(&state.data_root, &f.path).is_ok())
-        .map(|f| (f.id, f.path))
+        .filter_map(|f| {
+            scanner::resolve_safe_path(&state.data_root, &f.path)
+                .ok()
+                .map(|safe_path| (f.id, f.path, safe_path))
+        })
         .collect();
 
     let results = rename::execute_renames(&state.data_root, &files, &body.format);

@@ -2,7 +2,7 @@ use axum::extract::State;
 use axum::Json;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use std::path::Path;
+use std::path::PathBuf;
 use tunewright_core::audio;
 use tunewright_core::scanner;
 use tunewright_core::types::{TagData, TagWriteChanges, WriteResult};
@@ -21,24 +21,26 @@ pub struct ReadTagsResponse {
     pub tags: HashMap<String, TagData>,
 }
 
+type BatchReadFn = fn(&[(String, PathBuf)]) -> HashMap<String, TagData>;
+
 /// Shared body for the tag-read endpoints: resolve the requested ids to safe
 /// paths, batch-read them with `batch_read`, then map results back by id.
 async fn read_with(
     state: AppState,
     body: ReadTagsRequest,
-    batch_read: fn(&Path, &[String]) -> HashMap<String, TagData>,
+    batch_read: BatchReadFn,
 ) -> Result<Json<ReadTagsResponse>, AppError> {
     let data_root = state.data_root.clone();
 
     let result = tokio::task::spawn_blocking(move || {
-        let mut valid_paths: Vec<String> = Vec::new();
+        let mut valid_paths: Vec<(String, PathBuf)> = Vec::new();
         let mut id_to_path: HashMap<String, String> = HashMap::new();
 
         for id in &body.ids {
             if let Some(rel_path) = body.paths.get(id) {
                 match scanner::resolve_safe_path(&data_root, rel_path) {
-                    Ok(_) => {
-                        valid_paths.push(rel_path.clone());
+                    Ok(safe_path) => {
+                        valid_paths.push((rel_path.clone(), safe_path));
                         id_to_path.insert(id.clone(), rel_path.clone());
                     }
                     Err(e) => {
@@ -48,7 +50,7 @@ async fn read_with(
             }
         }
 
-        let path_tags = batch_read(&data_root, &valid_paths);
+        let path_tags = batch_read(&valid_paths);
 
         let mut result: HashMap<String, TagData> = HashMap::new();
         for (id, rel_path) in &id_to_path {
@@ -96,12 +98,12 @@ pub async fn write_tags(
     let data_root = state.data_root.clone();
 
     let results = tokio::task::spawn_blocking(move || {
-        let mut changes_vec: Vec<(String, String, TagWriteChanges)> = Vec::new();
+        let mut changes_vec: Vec<(String, PathBuf, TagWriteChanges)> = Vec::new();
 
         for entry in body.changes {
             match scanner::resolve_safe_path(&data_root, &entry.path) {
-                Ok(_) => {
-                    changes_vec.push((entry.id, entry.path, entry.tags));
+                Ok(safe_path) => {
+                    changes_vec.push((entry.id, safe_path, entry.tags));
                 }
                 Err(e) => {
                     tracing::warn!("Unsafe path rejected for write: {} - {}", entry.path, e);
@@ -109,7 +111,7 @@ pub async fn write_tags(
             }
         }
 
-        audio::batch_write_tags(&data_root, &changes_vec)
+        audio::batch_write_tags(&changes_vec)
     })
     .await
     .map_err(join_error)?;

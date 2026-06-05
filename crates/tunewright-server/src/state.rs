@@ -38,7 +38,11 @@ impl AppState {
             sessions: Arc::new(Mutex::new(HashMap::new())),
             musicbrainz_next_allowed: Arc::new(Mutex::new(Instant::now())),
             failed_logins: Arc::new(Mutex::new(HashMap::new())),
-            http_client: reqwest::Client::new(),
+            http_client: reqwest::Client::builder()
+                .timeout(std::time::Duration::from_secs(10))
+                .connect_timeout(std::time::Duration::from_secs(10))
+                .build()
+                .unwrap_or_else(|_| reqwest::Client::new()),
         }
     }
 
@@ -56,5 +60,68 @@ impl AppState {
     pub fn remove_session(&self, token: &str) {
         let mut sessions = self.sessions.lock().unwrap_or_else(|e| e.into_inner());
         sessions.remove(token);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::config::Config;
+    use crate::users::UserManager;
+    use std::net::TcpListener;
+    use std::thread;
+    use std::time::Duration;
+
+    #[tokio::test]
+    async fn test_http_client_timeout() {
+        // Start a local TCP listener that accepts connection but never responds
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+
+        // Spawn a thread to accept the connection but hang
+        thread::spawn(move || {
+            if let Ok((_stream, _)) = listener.accept() {
+                // Just sleep and do nothing, keeping connection open
+                thread::sleep(Duration::from_secs(12));
+            }
+        });
+
+        // Initialize state
+        let config = Config {
+            data_dir: std::env::temp_dir(),
+            static_dir: std::env::temp_dir(),
+            port: 8080,
+            host: "127.0.0.1".to_string(),
+            cookie_secure: false,
+        };
+        let users =
+            UserManager::load(std::env::temp_dir().join(format!("users_{}.json", rand_num())));
+        let state = AppState::new(config, users);
+
+        let url = format!("http://127.0.0.1:{}", port);
+        let start = Instant::now();
+        let result = state.http_client.get(&url).send().await;
+
+        assert!(result.is_err(), "Expected request to fail due to timeout");
+        let elapsed = start.elapsed();
+        // Since timeout is 10s, it should fail around 10s, and definitely before 12s.
+        assert!(
+            elapsed >= Duration::from_secs(9),
+            "Elapsed time too short: {:?}",
+            elapsed
+        );
+        assert!(
+            elapsed < Duration::from_secs(12),
+            "Elapsed time too long: {:?}",
+            elapsed
+        );
+    }
+
+    fn rand_num() -> u64 {
+        use std::time::{SystemTime, UNIX_EPOCH};
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos() as u64
     }
 }

@@ -116,6 +116,8 @@ pub async fn embed_cover_art_from_url(
                 attempt.stop()
             }
         }))
+        .timeout(std::time::Duration::from_secs(10))
+        .connect_timeout(std::time::Duration::from_secs(10))
         .build()
         .map_err(|e| {
             AppError(TunewrightError::Io(std::io::Error::other(format!(

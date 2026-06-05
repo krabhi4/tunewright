@@ -1,11 +1,11 @@
-use crate::types::{TagData, TunewrightError, TagWriteChanges, WriteResult};
+use crate::types::{TagData, TagWriteChanges, TunewrightError, WriteResult};
 use lofty::config::{ParseOptions, ParsingMode, WriteOptions};
 use lofty::file::{AudioFile, TaggedFileExt};
 use lofty::probe::Probe;
 use lofty::tag::{Accessor, ItemKey, ItemValue, Tag, TagItem};
 use rayon::prelude::*;
 use std::collections::HashMap;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 /// Fast parse options: tags only, no audio properties, no cover art data.
 /// This only reads the tag headers (first few KB of the file).
@@ -156,39 +156,34 @@ pub fn read_tags_full(path: &Path) -> Result<TagData, TunewrightError> {
 
 /// Parallel batch read tags (fast mode — tags only, no audio properties).
 /// Uses rayon to read multiple files concurrently across CPU cores.
-pub fn batch_read_tags(data_root: &Path, relative_paths: &[String]) -> HashMap<String, TagData> {
-    relative_paths
+pub fn batch_read_tags(paths: &[(String, PathBuf)]) -> HashMap<String, TagData> {
+    paths
         .par_iter()
-        .filter_map(|rel_path| {
-            let full_path = data_root.join(rel_path);
-            match read_tags_fast(&full_path) {
+        .filter_map(
+            |(rel_path, canonical_path)| match read_tags_fast(canonical_path) {
                 Ok(tags) => Some((rel_path.clone(), tags)),
                 Err(e) => {
                     tracing::warn!("Failed to read tags for {}: {}", rel_path, e);
                     None
                 }
-            }
-        })
+            },
+        )
         .collect()
 }
 
 /// Parallel batch read tags with full audio properties.
-pub fn batch_read_tags_full(
-    data_root: &Path,
-    relative_paths: &[String],
-) -> HashMap<String, TagData> {
-    relative_paths
+pub fn batch_read_tags_full(paths: &[(String, PathBuf)]) -> HashMap<String, TagData> {
+    paths
         .par_iter()
-        .filter_map(|rel_path| {
-            let full_path = data_root.join(rel_path);
-            match read_tags_full(&full_path) {
+        .filter_map(
+            |(rel_path, canonical_path)| match read_tags_full(canonical_path) {
                 Ok(tags) => Some((rel_path.clone(), tags)),
                 Err(e) => {
                     tracing::warn!("Failed to read tags for {}: {}", rel_path, e);
                     None
                 }
-            }
-        })
+            },
+        )
         .collect()
 }
 
@@ -289,16 +284,11 @@ pub fn write_tags(path: &Path, changes: &TagWriteChanges) -> Result<(), Tunewrig
     Ok(())
 }
 
-/// Batch write tags. Returns per-file results.
-pub fn batch_write_tags(
-    data_root: &Path,
-    changes: &[(String, String, TagWriteChanges)],
-) -> Vec<WriteResult> {
+pub fn batch_write_tags(changes: &[(String, PathBuf, TagWriteChanges)]) -> Vec<WriteResult> {
     changes
         .iter()
-        .map(|(id, rel_path, ch)| {
-            let full_path = data_root.join(rel_path);
-            match write_tags(&full_path, ch) {
+        .map(
+            |(id, canonical_path, ch)| match write_tags(canonical_path, ch) {
                 Ok(()) => WriteResult {
                     id: id.clone(),
                     status: "ok".to_string(),
@@ -309,8 +299,8 @@ pub fn batch_write_tags(
                     status: "error".to_string(),
                     error: Some(e.to_string()),
                 },
-            }
-        })
+            },
+        )
         .collect()
 }
 
