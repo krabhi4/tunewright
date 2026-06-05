@@ -104,11 +104,19 @@ pub async fn setup(State(state): State<AppState>, Json(body): Json<SetupRequest>
         Err(resp) => return resp,
     };
 
-    match state.users.add_first_user(&username, hash) {
-        Ok(user) => create_session_response(&state, &user.id, &user.username, user.role),
-        Err(msg) => (
+    let users = state.users.clone();
+    let res = tokio::task::spawn_blocking(move || users.add_first_user(&username, hash)).await;
+
+    match res {
+        Ok(Ok(user)) => create_session_response(&state, &user.id, &user.username, user.role),
+        Ok(Err(msg)) => (
             StatusCode::CONFLICT,
             Json(serde_json::json!({ "error": msg })),
+        )
+            .into_response(),
+        Err(e) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({ "error": format!("Spawn blocking failed: {e}") })),
         )
             .into_response(),
     }
@@ -255,12 +263,15 @@ pub async fn register(
         Err(resp) => return resp,
     };
 
-    match state
-        .users
-        .register_with_invite(&body.token, &username, hash)
-    {
-        Ok(user) => create_session_response(&state, &user.id, &user.username, user.role),
-        Err(msg) => {
+    let users = state.users.clone();
+    let token = body.token.clone();
+    let res =
+        tokio::task::spawn_blocking(move || users.register_with_invite(&token, &username, hash))
+            .await;
+
+    match res {
+        Ok(Ok(user)) => create_session_response(&state, &user.id, &user.username, user.role),
+        Ok(Err(msg)) => {
             let status = if msg.contains("taken") {
                 StatusCode::CONFLICT
             } else {
@@ -268,6 +279,11 @@ pub async fn register(
             };
             (status, Json(serde_json::json!({ "error": msg }))).into_response()
         }
+        Err(e) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({ "error": format!("Spawn blocking failed: {e}") })),
+        )
+            .into_response(),
     }
 }
 
@@ -279,8 +295,12 @@ pub async fn create_invite(State(state): State<AppState>, req: Request<Body>) ->
         Err(r) => return r,
     };
 
-    match state.users.create_invite(&session.user_id) {
-        Ok(invite) => (
+    let users = state.users.clone();
+    let user_id = session.user_id.clone();
+    let res = tokio::task::spawn_blocking(move || users.create_invite(&user_id)).await;
+
+    match res {
+        Ok(Ok(invite)) => (
             StatusCode::OK,
             Json(serde_json::json!({
                 "token": invite.token,
@@ -289,9 +309,14 @@ pub async fn create_invite(State(state): State<AppState>, req: Request<Body>) ->
             })),
         )
             .into_response(),
-        Err(msg) => (
+        Ok(Err(msg)) => (
             StatusCode::INTERNAL_SERVER_ERROR,
             Json(serde_json::json!({ "error": msg })),
+        )
+            .into_response(),
+        Err(e) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({ "error": format!("Spawn blocking failed: {e}") })),
         )
             .into_response(),
     }
@@ -328,16 +353,27 @@ pub async fn delete_invite(
         return r;
     }
 
-    match state.users.delete_invite(&token) {
-        Ok(true) => (StatusCode::OK, Json(serde_json::json!({ "status": "ok" }))).into_response(),
-        Ok(false) => (
+    let users = state.users.clone();
+    let token_clone = token.clone();
+    let res = tokio::task::spawn_blocking(move || users.delete_invite(&token_clone)).await;
+
+    match res {
+        Ok(Ok(true)) => {
+            (StatusCode::OK, Json(serde_json::json!({ "status": "ok" }))).into_response()
+        }
+        Ok(Ok(false)) => (
             StatusCode::NOT_FOUND,
             Json(serde_json::json!({ "error": "Invite not found" })),
         )
             .into_response(),
-        Err(msg) => (
+        Ok(Err(msg)) => (
             StatusCode::INTERNAL_SERVER_ERROR,
             Json(serde_json::json!({ "error": msg })),
+        )
+            .into_response(),
+        Err(e) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({ "error": format!("Spawn blocking failed: {e}") })),
         )
             .into_response(),
     }
@@ -372,22 +408,31 @@ pub async fn delete_user(
             .into_response();
     }
 
-    match state.users.remove_user(&id) {
-        Ok(true) => {
+    let users = state.users.clone();
+    let id_clone = id.clone();
+    let res = tokio::task::spawn_blocking(move || users.remove_user(&id_clone)).await;
+
+    match res {
+        Ok(Ok(true)) => {
             // Purge all sessions belonging to the deleted user
             let mut sessions = state.sessions.lock().unwrap_or_else(|e| e.into_inner());
             sessions.retain(|_, s| s.user_id != id);
             drop(sessions);
             (StatusCode::OK, Json(serde_json::json!({ "status": "ok" }))).into_response()
         }
-        Ok(false) => (
+        Ok(Ok(false)) => (
             StatusCode::NOT_FOUND,
             Json(serde_json::json!({ "error": "User not found" })),
         )
             .into_response(),
-        Err(msg) => (
+        Ok(Err(msg)) => (
             StatusCode::BAD_REQUEST,
             Json(serde_json::json!({ "error": msg })),
+        )
+            .into_response(),
+        Err(e) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({ "error": format!("Spawn blocking failed: {e}") })),
         )
             .into_response(),
     }

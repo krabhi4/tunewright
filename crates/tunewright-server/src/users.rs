@@ -61,6 +61,7 @@ struct UserStore {
 #[derive(Debug, Clone)]
 pub struct UserManager {
     store: Arc<Mutex<UserStore>>,
+    write_lock: Arc<Mutex<()>>,
     path: PathBuf,
 }
 
@@ -95,24 +96,45 @@ impl UserManager {
         };
         Self {
             store: Arc::new(Mutex::new(store)),
+            write_lock: Arc::new(Mutex::new(())),
             path,
         }
     }
 
-    fn save(&self, store: &UserStore) -> Result<(), &'static str> {
-        let tmp_path = self.path.with_extension("json.tmp");
+    fn save_store_data(&self, store: &UserStore) -> Result<(), &'static str> {
         let json = serde_json::to_string_pretty(store).map_err(|e| {
             tracing::error!("Failed to serialize users: {}", e);
             "Failed to save user data"
         })?;
-        std::fs::write(&tmp_path, &json).map_err(|e| {
+
+        use std::io::Write;
+        let tmp_path = self.path.with_extension("json.tmp");
+
+        let mut file = std::fs::File::create(&tmp_path).map_err(|e| {
+            tracing::error!("Failed to create users temp file: {}", e);
+            "Failed to save user data"
+        })?;
+        file.write_all(json.as_bytes()).map_err(|e| {
             tracing::error!("Failed to write users temp file: {}", e);
             "Failed to save user data"
         })?;
+        file.sync_all().map_err(|e| {
+            tracing::error!("Failed to fsync users temp file: {}", e);
+            "Failed to save user data"
+        })?;
+        drop(file);
+
         std::fs::rename(&tmp_path, &self.path).map_err(|e| {
             tracing::error!("Failed to rename users file: {}", e);
             "Failed to save user data"
         })?;
+
+        if let Some(parent) = self.path.parent() {
+            if let Ok(dir) = std::fs::File::open(parent) {
+                let _ = dir.sync_all();
+            }
+        }
+
         Ok(())
     }
 
@@ -129,6 +151,7 @@ impl UserManager {
             .iter()
             .find(|u| u.username == normalized)
             .cloned()
+        // Mutex is dropped here
     }
 
     /// Atomically create the first user. Returns Err if users already exist or save fails.
@@ -137,10 +160,16 @@ impl UserManager {
         username: &str,
         password_hash: String,
     ) -> Result<User, &'static str> {
-        let mut store = self.store.lock().unwrap_or_else(|e| e.into_inner());
-        if !store.users.is_empty() {
-            return Err("Setup already completed");
-        }
+        let _write_guard = self.write_lock.lock().unwrap_or_else(|e| e.into_inner());
+
+        let mut cloned_store = {
+            let store = self.store.lock().unwrap_or_else(|e| e.into_inner());
+            if !store.users.is_empty() {
+                return Err("Setup already completed");
+            }
+            store.clone()
+        };
+
         let user = User {
             id: Uuid::new_v4().to_string(),
             username: username.trim().to_lowercase(),
@@ -148,22 +177,37 @@ impl UserManager {
             role: Role::SuperAdmin,
             created_at: Utc::now(),
         };
-        store.users.push(user.clone());
-        self.save(&store).inspect_err(|_| {
-            store.users.pop();
-        })?;
+        cloned_store.users.push(user.clone());
+
+        self.save_store_data(&cloned_store)?;
+
+        // Success, now update the actual store
+        {
+            let mut store = self.store.lock().unwrap_or_else(|e| e.into_inner());
+            if !store.users.is_empty() {
+                return Err("Setup already completed");
+            }
+            *store = cloned_store;
+        }
+
         Ok(user)
     }
 
     /// Remove a user. Returns Err if trying to remove the last super_admin or save fails.
     pub fn remove_user(&self, id: &str) -> Result<bool, &'static str> {
-        let mut store = self.store.lock().unwrap_or_else(|e| e.into_inner());
-        let idx = match store.users.iter().position(|u| u.id == id) {
+        let _write_guard = self.write_lock.lock().unwrap_or_else(|e| e.into_inner());
+
+        let mut cloned_store = {
+            let store = self.store.lock().unwrap_or_else(|e| e.into_inner());
+            store.clone()
+        };
+
+        let idx = match cloned_store.users.iter().position(|u| u.id == id) {
             None => return Ok(false),
             Some(i) => i,
         };
-        if store.users[idx].role == Role::SuperAdmin {
-            let super_admin_count = store
+        if cloned_store.users[idx].role == Role::SuperAdmin {
+            let super_admin_count = cloned_store
                 .users
                 .iter()
                 .filter(|u| u.role == Role::SuperAdmin)
@@ -172,10 +216,16 @@ impl UserManager {
                 return Err("Cannot delete the last super admin");
             }
         }
-        let removed = store.users.remove(idx);
-        self.save(&store).inspect_err(|_| {
-            store.users.insert(idx, removed);
-        })?;
+        cloned_store.users.remove(idx);
+
+        self.save_store_data(&cloned_store)?;
+
+        // Success, now update the actual store
+        {
+            let mut store = self.store.lock().unwrap_or_else(|e| e.into_inner());
+            *store = cloned_store;
+        }
+
         Ok(true)
     }
 
@@ -185,17 +235,29 @@ impl UserManager {
     }
 
     pub fn create_invite(&self, created_by: &str) -> Result<Invite, &'static str> {
-        let mut store = self.store.lock().unwrap_or_else(|e| e.into_inner());
+        let _write_guard = self.write_lock.lock().unwrap_or_else(|e| e.into_inner());
+
+        let mut cloned_store = {
+            let store = self.store.lock().unwrap_or_else(|e| e.into_inner());
+            store.clone()
+        };
+
         let invite = Invite {
             token: Uuid::new_v4().to_string(),
             created_by: created_by.to_string(),
             expires_at: Utc::now() + Duration::hours(48),
             used: false,
         };
-        store.invites.push(invite.clone());
-        self.save(&store).inspect_err(|_| {
-            store.invites.pop();
-        })?;
+        cloned_store.invites.push(invite.clone());
+
+        self.save_store_data(&cloned_store)?;
+
+        // Success, now update the actual store
+        {
+            let mut store = self.store.lock().unwrap_or_else(|e| e.into_inner());
+            *store = cloned_store;
+        }
+
         Ok(invite)
     }
 
@@ -206,22 +268,30 @@ impl UserManager {
         username: &str,
         password_hash: String,
     ) -> Result<User, &'static str> {
-        let mut store = self.store.lock().unwrap_or_else(|e| e.into_inner());
+        let _write_guard = self.write_lock.lock().unwrap_or_else(|e| e.into_inner());
+
+        let mut cloned_store = {
+            let store = self.store.lock().unwrap_or_else(|e| e.into_inner());
+            store.clone()
+        };
+
         let normalized = username.trim().to_lowercase();
 
-        if store.users.iter().any(|u| u.username == normalized) {
+        if cloned_store.users.iter().any(|u| u.username == normalized) {
             return Err("Username already taken");
         }
 
-        let invite_idx = store
+        let invite_idx = cloned_store
             .invites
             .iter()
             .position(|i| i.token == token)
             .ok_or("Invalid or expired invite")?;
-        if store.invites[invite_idx].used || store.invites[invite_idx].expires_at < Utc::now() {
+        if cloned_store.invites[invite_idx].used
+            || cloned_store.invites[invite_idx].expires_at < Utc::now()
+        {
             return Err("Invalid or expired invite");
         }
-        store.invites[invite_idx].used = true;
+        cloned_store.invites[invite_idx].used = true;
 
         let user = User {
             id: Uuid::new_v4().to_string(),
@@ -230,11 +300,16 @@ impl UserManager {
             role: Role::Admin,
             created_at: Utc::now(),
         };
-        store.users.push(user.clone());
-        self.save(&store).inspect_err(|_| {
-            store.users.pop();
-            store.invites[invite_idx].used = false;
-        })?;
+        cloned_store.users.push(user.clone());
+
+        self.save_store_data(&cloned_store)?;
+
+        // Success, now update the actual store
+        {
+            let mut store = self.store.lock().unwrap_or_else(|e| e.into_inner());
+            *store = cloned_store;
+        }
+
         Ok(user)
     }
 
@@ -250,15 +325,27 @@ impl UserManager {
     }
 
     pub fn delete_invite(&self, token: &str) -> Result<bool, &'static str> {
-        let mut store = self.store.lock().unwrap_or_else(|e| e.into_inner());
-        let idx = match store.invites.iter().position(|i| i.token == token) {
+        let _write_guard = self.write_lock.lock().unwrap_or_else(|e| e.into_inner());
+
+        let mut cloned_store = {
+            let store = self.store.lock().unwrap_or_else(|e| e.into_inner());
+            store.clone()
+        };
+
+        let idx = match cloned_store.invites.iter().position(|i| i.token == token) {
             None => return Ok(false),
             Some(i) => i,
         };
-        let removed = store.invites.remove(idx);
-        self.save(&store).inspect_err(|_| {
-            store.invites.insert(idx, removed);
-        })?;
+        cloned_store.invites.remove(idx);
+
+        self.save_store_data(&cloned_store)?;
+
+        // Success, now update the actual store
+        {
+            let mut store = self.store.lock().unwrap_or_else(|e| e.into_inner());
+            *store = cloned_store;
+        }
+
         Ok(true)
     }
 }
@@ -284,5 +371,82 @@ pub fn verify_password(password: &str, hash: &str) -> bool {
             .verify_password(password.as_bytes(), &parsed)
             .is_ok(),
         Err(_) => false,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_load_non_existent() {
+        let path = std::env::temp_dir().join(format!("users_test_{}.json", uuid::Uuid::new_v4()));
+        let manager = UserManager::load(path.clone());
+        assert!(!manager.has_users());
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn test_add_first_user_and_has_users() {
+        let path = std::env::temp_dir().join(format!("users_test_{}.json", uuid::Uuid::new_v4()));
+        let manager = UserManager::load(path.clone());
+        assert!(!manager.has_users());
+
+        let user = manager
+            .add_first_user("admin", "some_hash".to_string())
+            .unwrap();
+        assert_eq!(user.username, "admin");
+        assert_eq!(user.role, Role::SuperAdmin);
+        assert!(manager.has_users());
+
+        // Setup already completed
+        assert!(manager.add_first_user("other", "hash".to_string()).is_err());
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn test_invite_flow() {
+        let path = std::env::temp_dir().join(format!("users_test_{}.json", uuid::Uuid::new_v4()));
+        let manager = UserManager::load(path.clone());
+        // Create an invite
+        let invite = manager.create_invite("admin").unwrap();
+        assert_eq!(invite.created_by, "admin");
+        assert!(!invite.used);
+
+        // Register user with invite
+        let user = manager
+            .register_with_invite(&invite.token, "invited_user", "password_hash".to_string())
+            .unwrap();
+        assert_eq!(user.username, "invited_user");
+        assert_eq!(user.role, Role::Admin);
+
+        // Try using the same invite again
+        assert!(manager
+            .register_with_invite(&invite.token, "another_user", "password_hash".to_string())
+            .is_err());
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn test_remove_user() {
+        let path = std::env::temp_dir().join(format!("users_test_{}.json", uuid::Uuid::new_v4()));
+        let manager = UserManager::load(path.clone());
+        let admin = manager
+            .add_first_user("admin", "some_hash".to_string())
+            .unwrap();
+
+        // Cannot delete last super admin
+        assert!(manager.remove_user(&admin.id).is_err());
+
+        // Create invite and register an admin user
+        let invite = manager.create_invite("admin").unwrap();
+        let user = manager
+            .register_with_invite(&invite.token, "regular_user", "hash".to_string())
+            .unwrap();
+
+        assert!(manager.remove_user(&user.id).unwrap());
+        // User should not be found anymore
+        assert!(manager.find_by_username("regular_user").is_none());
+        let _ = std::fs::remove_file(&path);
     }
 }
