@@ -267,13 +267,17 @@ pub fn write_tags(path: &Path, changes: &TagWriteChanges) -> Result<(), Tunewrig
         tag.set_track(v);
     }
     if let Some(v) = changes.track_total {
-        tag.set_track_total(v);
+        if primary_type != TagType::Id3v2 || changes.track_number.or_else(|| tag.track()).is_some() {
+            tag.set_track_total(v);
+        }
     }
     if let Some(v) = changes.disc_number {
         tag.set_disk(v);
     }
     if let Some(v) = changes.disc_total {
-        tag.set_disk_total(v);
+        if primary_type != TagType::Id3v2 || changes.disc_number.or_else(|| tag.disk()).is_some() {
+            tag.set_disk_total(v);
+        }
     }
 
     // Write album_artist via TagItem (not available on Accessor trait)
@@ -396,27 +400,146 @@ fn item_key_to_string(key: ItemKey) -> String {
 /// Convert a string key back to an ItemKey for writing
 fn string_to_item_key(key: &str) -> Option<ItemKey> {
     Some(match key {
-        "Lyrics" => ItemKey::Lyrics,
-        "Bpm" => ItemKey::Bpm,
-        "CopyrightMessage" => ItemKey::CopyrightMessage,
-        "EncoderSoftware" => ItemKey::EncoderSoftware,
-        "EncodedBy" => ItemKey::EncodedBy,
-        "Lyricist" => ItemKey::Lyricist,
+        // Titles
+        "AlbumTitle" => ItemKey::AlbumTitle,
+        "SetSubtitle" => ItemKey::SetSubtitle,
+        "ShowName" => ItemKey::ShowName,
+        "ContentGroup" => ItemKey::ContentGroup,
+        "TrackTitle" => ItemKey::TrackTitle,
+        "TrackSubtitle" => ItemKey::TrackSubtitle,
+
+        // Original names
+        "OriginalAlbumTitle" => ItemKey::OriginalAlbumTitle,
+        "OriginalArtist" => ItemKey::OriginalArtist,
+        "OriginalLyricist" => ItemKey::OriginalLyricist,
+
+        // Sorting
+        "AlbumTitleSortOrder" => ItemKey::AlbumTitleSortOrder,
+        "AlbumArtistSortOrder" => ItemKey::AlbumArtistSortOrder,
+        "TrackTitleSortOrder" => ItemKey::TrackTitleSortOrder,
+        "TrackArtistSortOrder" => ItemKey::TrackArtistSortOrder,
+        "ShowNameSortOrder" => ItemKey::ShowNameSortOrder,
+        "ComposerSortOrder" => ItemKey::ComposerSortOrder,
+
+        // People & Organizations
+        "AlbumArtist" => ItemKey::AlbumArtist,
+        "AlbumArtists" => ItemKey::AlbumArtists,
+        "TrackArtist" => ItemKey::TrackArtist,
+        "TrackArtists" => ItemKey::TrackArtists,
+        "Arranger" => ItemKey::Arranger,
+        "Writer" => ItemKey::Writer,
+        "Composer" => ItemKey::Composer,
         "Conductor" => ItemKey::Conductor,
+        "Director" => ItemKey::Director,
+        "Engineer" => ItemKey::Engineer,
+        "Lyricist" => ItemKey::Lyricist,
+        "MixDj" => ItemKey::MixDj,
+        "MixEngineer" => ItemKey::MixEngineer,
+        "Performer" => ItemKey::Performer,
+        "Producer" => ItemKey::Producer,
+        "Publisher" => ItemKey::Publisher,
         "Label" => ItemKey::Label,
-        "Language" => ItemKey::Language,
-        "InitialKey" => ItemKey::InitialKey,
-        "Mood" => ItemKey::Mood,
+        "InternetRadioStationName" => ItemKey::InternetRadioStationName,
+        "InternetRadioStationOwner" => ItemKey::InternetRadioStationOwner,
+        "Remixer" => ItemKey::Remixer,
+
+        // Counts & Indexes
+        "DiscNumber" => ItemKey::DiscNumber,
+        "DiscTotal" => ItemKey::DiscTotal,
+        "TrackNumber" => ItemKey::TrackNumber,
+        "TrackTotal" => ItemKey::TrackTotal,
+        "Popularimeter" => ItemKey::Popularimeter,
+        "ParentalAdvisory" => ItemKey::ParentalAdvisory,
+
+        // Dates
+        "RecordingDate" => ItemKey::RecordingDate,
+        "Year" => ItemKey::Year,
+        "ReleaseDate" => ItemKey::ReleaseDate,
+        "OriginalReleaseDate" => ItemKey::OriginalReleaseDate,
+
+        // Identifiers
+        "Isrc" => ItemKey::Isrc,
+        "Barcode" => ItemKey::Barcode,
+        "AcoustId" => ItemKey::AcoustId,
+        "AcoustIdFingerprint" => ItemKey::AcoustIdFingerprint,
+        "CatalogNumber" => ItemKey::CatalogNumber,
+        "Work" => ItemKey::Work,
+        "Movement" => ItemKey::Movement,
+        "MovementNumber" => ItemKey::MovementNumber,
+        "MovementTotal" => ItemKey::MovementTotal,
+        "ReleaseCountry" => ItemKey::ReleaseCountry,
+
+        // MusicBrainz Identifiers
         "MusicBrainzRecordingId" => ItemKey::MusicBrainzRecordingId,
         "MusicBrainzTrackId" => ItemKey::MusicBrainzTrackId,
         "MusicBrainzReleaseId" => ItemKey::MusicBrainzReleaseId,
-        "MusicBrainzReleaseArtistId" => ItemKey::MusicBrainzReleaseArtistId,
-        "MusicBrainzArtistId" => ItemKey::MusicBrainzArtistId,
         "MusicBrainzReleaseGroupId" => ItemKey::MusicBrainzReleaseGroupId,
-        "ReplayGainTrackGain" => ItemKey::ReplayGainTrackGain,
-        "ReplayGainTrackPeak" => ItemKey::ReplayGainTrackPeak,
+        "MusicBrainzArtistId" => ItemKey::MusicBrainzArtistId,
+        "MusicBrainzReleaseArtistId" => ItemKey::MusicBrainzReleaseArtistId,
+        "MusicBrainzWorkId" => ItemKey::MusicBrainzWorkId,
+        "MusicBrainzReleaseType" => ItemKey::MusicBrainzReleaseType,
+
+        // Flags
+        "FlagCompilation" => ItemKey::FlagCompilation,
+        "FlagPodcast" => ItemKey::FlagPodcast,
+
+        // File Information
+        "FileOwner" => ItemKey::FileOwner,
+        "TaggingTime" => ItemKey::TaggingTime,
+        "Length" => ItemKey::Length,
+        "OriginalFileName" => ItemKey::OriginalFileName,
+        "OriginalMediaType" => ItemKey::OriginalMediaType,
+
+        // Encoder information
+        "EncodedBy" => ItemKey::EncodedBy,
+        "EncoderSoftware" => ItemKey::EncoderSoftware,
+        "EncoderSettings" => ItemKey::EncoderSettings,
+        "EncodingTime" => ItemKey::EncodingTime,
         "ReplayGainAlbumGain" => ItemKey::ReplayGainAlbumGain,
         "ReplayGainAlbumPeak" => ItemKey::ReplayGainAlbumPeak,
+        "ReplayGainTrackGain" => ItemKey::ReplayGainTrackGain,
+        "ReplayGainTrackPeak" => ItemKey::ReplayGainTrackPeak,
+
+        // URLs
+        "AudioFileUrl" => ItemKey::AudioFileUrl,
+        "AudioSourceUrl" => ItemKey::AudioSourceUrl,
+        "CommercialInformationUrl" => ItemKey::CommercialInformationUrl,
+        "CopyrightUrl" => ItemKey::CopyrightUrl,
+        "TrackArtistUrl" => ItemKey::TrackArtistUrl,
+        "RadioStationUrl" => ItemKey::RadioStationUrl,
+        "PaymentUrl" => ItemKey::PaymentUrl,
+        "PublisherUrl" => ItemKey::PublisherUrl,
+
+        // Style
+        "Genre" => ItemKey::Genre,
+        "InitialKey" => ItemKey::InitialKey,
+        "Color" => ItemKey::Color,
+        "Mood" => ItemKey::Mood,
+        "Bpm" => ItemKey::Bpm,
+        "IntegerBpm" => ItemKey::IntegerBpm,
+
+        // Legal
+        "CopyrightMessage" => ItemKey::CopyrightMessage,
+        "License" => ItemKey::License,
+
+        // Podcast
+        "PodcastDescription" => ItemKey::PodcastDescription,
+        "PodcastSeriesCategory" => ItemKey::PodcastSeriesCategory,
+        "PodcastUrl" => ItemKey::PodcastUrl,
+        "PodcastGlobalUniqueId" => ItemKey::PodcastGlobalUniqueId,
+        "PodcastKeywords" => ItemKey::PodcastKeywords,
+
+        // Miscellaneous
+        "Comment" => ItemKey::Comment,
+        "Description" => ItemKey::Description,
+        "Language" => ItemKey::Language,
+        "Script" => ItemKey::Script,
+        "Lyrics" => ItemKey::Lyrics,
+        "UnsyncLyrics" => ItemKey::UnsyncLyrics,
+
+        // Vendor-specific
+        "AppleXid" => ItemKey::AppleXid,
+        "AppleId3v2ContentGroup" => ItemKey::AppleId3v2ContentGroup,
         _ => return None,
     })
 }
@@ -446,7 +569,7 @@ fn collect_extra_tags(tags: &[&Tag]) -> HashMap<String, String> {
 #[cfg(test)]
 mod tests {
     use super::{parse_year, read_year};
-    use lofty::tag::{ItemKey, ItemValue, Tag, TagItem, TagType};
+    use lofty::tag::{Accessor, ItemKey, ItemValue, Tag, TagItem, TagType};
     use lofty::file::{AudioFile, TaggedFileExt};
 
     #[test]
@@ -553,4 +676,199 @@ mod tests {
 
         let _ = std::fs::remove_dir_all(&temp_dir);
     }
+
+    #[test]
+    fn test_write_tags_id3v2_total_only_no_fabrication() {
+        use std::fs::File;
+        use std::io::Write;
+        use lofty::probe::Probe;
+        use lofty::tag::{Tag, TagType};
+        use lofty::config::WriteOptions;
+        use lofty::file::AudioFile;
+        use crate::types::TagWriteChanges;
+
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let temp_dir = std::env::temp_dir().join(format!("tunewright_audio_test_{}", nanos));
+        std::fs::create_dir_all(&temp_dir).unwrap();
+        let file_path = temp_dir.join("test.wav");
+
+        // Minimal valid WAV (RIFF/WAVE/fmt/data)
+        let wav_bytes = b"RIFF\x28\x00\x00\x00WAVEfmt \x10\x00\x00\x00\x01\x00\x01\x00\x44\xac\x00\x00\x88\x58\x01\x00\x02\x00\x10\x00data\x04\x00\x00\x00\x00\x00\x00\x00";
+        let mut f = File::create(&file_path).unwrap();
+        f.write_all(wav_bytes).unwrap();
+        drop(f);
+
+        // Manually insert an ID3v2 tag into the WAV file so primary_type == Id3v2
+        {
+            let mut tagged = Probe::open(&file_path).unwrap().read().unwrap();
+            tagged.insert_tag(Tag::new(TagType::Id3v2));
+            tagged.save_to_path(&file_path, WriteOptions::default()).unwrap();
+        }
+
+        // 1. Write only track_total and disc_total (no track_number or disc_number)
+        let mut changes = TagWriteChanges::default();
+        changes.track_total = Some(12);
+        changes.disc_total = Some(2);
+        super::write_tags(&file_path, &changes).unwrap();
+
+        // 2. Read back and verify — no "0/N" fabrication
+        let tagged_after = Probe::open(&file_path).unwrap().read().unwrap();
+        if let Some(tag) = tagged_after.tag(TagType::Id3v2) {
+            // Assert track number is NOT fabricated to 0
+            assert_eq!(tag.track(), None, "track number must not be fabricated");
+            assert_eq!(tag.disk(), None, "disc number must not be fabricated");
+            // Since no track_number was present, track_total should also be absent in ID3v2
+            assert_eq!(tag.track_total(), None, "track_total must not be written without track_number in ID3v2");
+            assert_eq!(tag.disk_total(), None, "disc_total must not be written without disc_number in ID3v2");
+        }
+
+        // 3. Now write both track number AND track total together
+        let mut changes2 = TagWriteChanges::default();
+        changes2.track_number = Some(3);
+        changes2.track_total = Some(12);
+        changes2.disc_number = Some(1);
+        changes2.disc_total = Some(2);
+        super::write_tags(&file_path, &changes2).unwrap();
+
+        // Verify it successfully writes both, no fabricated 0
+        let tagged_after2 = Probe::open(&file_path).unwrap().read().unwrap();
+        if let Some(tag2) = tagged_after2.tag(TagType::Id3v2) {
+            assert_eq!(tag2.track(), Some(3));
+            assert_eq!(tag2.track_total(), Some(12));
+            assert_eq!(tag2.disk(), Some(1));
+            assert_eq!(tag2.disk_total(), Some(2));
+        }
+
+        let _ = std::fs::remove_dir_all(&temp_dir);
+    }
+
+    #[test]
+    fn test_string_to_item_key_is_symmetric() {
+        use lofty::tag::ItemKey;
+
+        let keys = vec![
+            ItemKey::AlbumTitle,
+            ItemKey::SetSubtitle,
+            ItemKey::ShowName,
+            ItemKey::ContentGroup,
+            ItemKey::TrackTitle,
+            ItemKey::TrackSubtitle,
+            ItemKey::OriginalAlbumTitle,
+            ItemKey::OriginalArtist,
+            ItemKey::OriginalLyricist,
+            ItemKey::AlbumTitleSortOrder,
+            ItemKey::AlbumArtistSortOrder,
+            ItemKey::TrackTitleSortOrder,
+            ItemKey::TrackArtistSortOrder,
+            ItemKey::ShowNameSortOrder,
+            ItemKey::ComposerSortOrder,
+            ItemKey::AlbumArtist,
+            ItemKey::AlbumArtists,
+            ItemKey::TrackArtist,
+            ItemKey::TrackArtists,
+            ItemKey::Arranger,
+            ItemKey::Writer,
+            ItemKey::Composer,
+            ItemKey::Conductor,
+            ItemKey::Director,
+            ItemKey::Engineer,
+            ItemKey::Lyricist,
+            ItemKey::MixDj,
+            ItemKey::MixEngineer,
+            ItemKey::Performer,
+            ItemKey::Producer,
+            ItemKey::Publisher,
+            ItemKey::Label,
+            ItemKey::InternetRadioStationName,
+            ItemKey::InternetRadioStationOwner,
+            ItemKey::Remixer,
+            ItemKey::DiscNumber,
+            ItemKey::DiscTotal,
+            ItemKey::TrackNumber,
+            ItemKey::TrackTotal,
+            ItemKey::Popularimeter,
+            ItemKey::ParentalAdvisory,
+            ItemKey::RecordingDate,
+            ItemKey::Year,
+            ItemKey::ReleaseDate,
+            ItemKey::OriginalReleaseDate,
+            ItemKey::Isrc,
+            ItemKey::Barcode,
+            ItemKey::AcoustId,
+            ItemKey::AcoustIdFingerprint,
+            ItemKey::CatalogNumber,
+            ItemKey::Work,
+            ItemKey::Movement,
+            ItemKey::MovementNumber,
+            ItemKey::MovementTotal,
+            ItemKey::ReleaseCountry,
+            ItemKey::MusicBrainzRecordingId,
+            ItemKey::MusicBrainzTrackId,
+            ItemKey::MusicBrainzReleaseId,
+            ItemKey::MusicBrainzReleaseGroupId,
+            ItemKey::MusicBrainzArtistId,
+            ItemKey::MusicBrainzReleaseArtistId,
+            ItemKey::MusicBrainzWorkId,
+            ItemKey::MusicBrainzReleaseType,
+            ItemKey::FlagCompilation,
+            ItemKey::FlagPodcast,
+            ItemKey::FileOwner,
+            ItemKey::TaggingTime,
+            ItemKey::Length,
+            ItemKey::OriginalFileName,
+            ItemKey::OriginalMediaType,
+            ItemKey::EncodedBy,
+            ItemKey::EncoderSoftware,
+            ItemKey::EncoderSettings,
+            ItemKey::EncodingTime,
+            ItemKey::ReplayGainAlbumGain,
+            ItemKey::ReplayGainAlbumPeak,
+            ItemKey::ReplayGainTrackGain,
+            ItemKey::ReplayGainTrackPeak,
+            ItemKey::AudioFileUrl,
+            ItemKey::AudioSourceUrl,
+            ItemKey::CommercialInformationUrl,
+            ItemKey::CopyrightUrl,
+            ItemKey::TrackArtistUrl,
+            ItemKey::RadioStationUrl,
+            ItemKey::PaymentUrl,
+            ItemKey::PublisherUrl,
+            ItemKey::Genre,
+            ItemKey::InitialKey,
+            ItemKey::Color,
+            ItemKey::Mood,
+            ItemKey::Bpm,
+            ItemKey::IntegerBpm,
+            ItemKey::CopyrightMessage,
+            ItemKey::License,
+            ItemKey::PodcastDescription,
+            ItemKey::PodcastSeriesCategory,
+            ItemKey::PodcastUrl,
+            ItemKey::PodcastGlobalUniqueId,
+            ItemKey::PodcastKeywords,
+            ItemKey::Comment,
+            ItemKey::Description,
+            ItemKey::Language,
+            ItemKey::Script,
+            ItemKey::Lyrics,
+            ItemKey::UnsyncLyrics,
+            ItemKey::AppleXid,
+            ItemKey::AppleId3v2ContentGroup,
+        ];
+
+        for key in keys {
+            let key_str = format!("{:?}", key);
+            let parsed = super::string_to_item_key(&key_str);
+            assert_eq!(
+                parsed,
+                Some(key.clone()),
+                "Failed to parse debug string of {:?} back to ItemKey",
+                key
+            );
+        }
+    }
 }
+

@@ -45,6 +45,29 @@ pub fn lock_file(path: &Path) -> FileLockGuard {
     }
 }
 
+/// Acquire process-global locks for two file paths safely to prevent deadlocks.
+pub fn lock_two_files(p1: &Path, p2: &Path) -> (FileLockGuard, FileLockGuard) {
+    let cp1 = std::fs::canonicalize(p1).unwrap_or_else(|_| p1.to_path_buf());
+    let cp2 = std::fs::canonicalize(p2).unwrap_or_else(|_| p2.to_path_buf());
+
+    if cp1 == cp2 {
+        let g1 = lock_file(&cp1);
+        let g2 = FileLockGuard {
+            path: PathBuf::new(),
+        };
+        (g1, g2)
+    } else if cp1 < cp2 {
+        let g1 = lock_file(&cp1);
+        let g2 = lock_file(&cp2);
+        (g1, g2)
+    } else {
+        let g2 = lock_file(&cp2);
+        let g1 = lock_file(&cp1);
+        (g1, g2)
+    }
+}
+
+
 #[cfg(test)]
 mod tests {
     use super::*;

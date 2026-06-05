@@ -139,6 +139,9 @@ pub fn execute_renames(
             let old_path = canonical_path.clone();
             let new_path = old_path.with_file_name(&preview.new_name);
 
+            // Acquire locks for both the old path and the target path to prevent TOCTOU races
+            let _lock = crate::locks::lock_two_files(&old_path, &new_path);
+
             // Atomic collision check: hard_link fails if target already exists,
             // avoiding the TOCTOU race of exists()+rename().
             match std::fs::hard_link(&old_path, &new_path) {
@@ -453,4 +456,77 @@ mod tests {
             .unwrap()
             .as_nanos() as u64
     }
+
+    #[test]
+    fn test_execute_renames_concurrent_collision_toctou() {
+        use std::sync::{Arc, Barrier};
+        use std::thread;
+
+        let temp_dir = std::env::temp_dir().join(format!("tunewright_test_{}", rand_num()));
+        std::fs::create_dir_all(&temp_dir).unwrap();
+
+        // Create two source files
+        let file1 = "song1.flac";
+        let file2 = "song2.flac";
+        let flac_bytes = b"fLaC\x80\x00\x00\x22\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00";
+
+        use std::io::Write;
+        let mut f1 = File::create(temp_dir.join(file1)).unwrap();
+        f1.write_all(flac_bytes).unwrap();
+
+        let mut f2 = File::create(temp_dir.join(file2)).unwrap();
+        f2.write_all(flac_bytes).unwrap();
+
+        // Write tags so that both rename formats map to the same name: "target"
+        let mut changes1 = crate::types::TagWriteChanges::default();
+        changes1.title = Some("target".to_string());
+        crate::audio::write_tags(&temp_dir.join(file1), &changes1).unwrap();
+
+        let mut changes2 = crate::types::TagWriteChanges::default();
+        changes2.title = Some("target".to_string());
+        crate::audio::write_tags(&temp_dir.join(file2), &changes2).unwrap();
+
+        // We run two renames concurrently using threads.
+        // We synchronize them using a Barrier to maximize the chance of concurrent execution.
+        let barrier = Arc::new(Barrier::new(2));
+        let temp_dir_arc = Arc::new(temp_dir.clone());
+
+        let t1_dir = temp_dir_arc.clone();
+        let t1_barrier = barrier.clone();
+        let files1 = vec![("1".to_string(), file1.to_string(), temp_dir.join(file1))];
+        let handle1 = thread::spawn(move || {
+            t1_barrier.wait();
+            execute_renames(&t1_dir, &files1, "%title%")
+        });
+
+        let t2_dir = temp_dir_arc.clone();
+        let t2_barrier = barrier.clone();
+        let files2 = vec![("2".to_string(), file2.to_string(), temp_dir.join(file2))];
+        let handle2 = thread::spawn(move || {
+            t2_barrier.wait();
+            execute_renames(&t2_dir, &files2, "%title%")
+        });
+
+        let r1 = handle1.join().unwrap();
+        let r2 = handle2.join().unwrap();
+
+        // We expect one of them to succeed, and the other to return "Target file already exists"
+        let s1 = &r1[0];
+        let s2 = &r2[0];
+
+        if s1.status == "ok" {
+            assert_eq!(s2.status, "error");
+            assert!(s2.error.as_ref().unwrap().contains("Target file already exists"));
+        } else {
+            assert_eq!(s1.status, "error");
+            assert!(s1.error.as_ref().unwrap().contains("Target file already exists"));
+            assert_eq!(s2.status, "ok");
+        }
+
+        // Verify that target.flac exists and only one of the original source files was renamed to it
+        assert!(temp_dir.join("target.flac").exists());
+
+        let _ = std::fs::remove_dir_all(&temp_dir);
+    }
 }
+
