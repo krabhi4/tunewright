@@ -765,7 +765,10 @@ mod tests {
         // Note: ) in regex patterns conflicts with function call parsing,
         // so avoid literal ) in patterns passed to $regex().
         assert_eq!(evaluate("$regex(%title%, - .*,)", &make_ctx(&t)), "Song");
-        assert_eq!(evaluate("$regex(%title%,,Replacement)", &make_ctx(&t)), "Song - Remix");
+        assert_eq!(
+            evaluate("$regex(%title%,,Replacement)", &make_ctx(&t)),
+            "Song - Remix"
+        );
     }
 
     #[test]

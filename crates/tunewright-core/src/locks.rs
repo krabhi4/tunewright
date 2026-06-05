@@ -67,7 +67,6 @@ pub fn lock_two_files(p1: &Path, p2: &Path) -> (FileLockGuard, FileLockGuard) {
     }
 }
 
-
 #[cfg(test)]
 mod tests {
     use super::*;

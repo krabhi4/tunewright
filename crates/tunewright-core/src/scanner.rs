@@ -133,14 +133,35 @@ pub fn scan_directory(
         });
     }
 
-    let total = files.len();
-    let paginated: Vec<FileEntry> = files.into_iter().skip(offset).take(limit).collect();
+    let total_dirs = directories.len();
+    let total_files = files.len();
+    let total = total_dirs + total_files;
+
+    let paginated_dirs: Vec<String> = if offset < total_dirs {
+        directories.into_iter().skip(offset).take(limit).collect()
+    } else {
+        Vec::new()
+    };
+
+    let files_skip = offset.saturating_sub(total_dirs);
+
+    let files_limit = if paginated_dirs.is_empty() {
+        limit
+    } else {
+        limit - paginated_dirs.len()
+    };
+
+    let paginated_files: Vec<FileEntry> = files
+        .into_iter()
+        .skip(files_skip)
+        .take(files_limit)
+        .collect();
 
     Ok(FileListResult {
         path: relative_path.to_string(),
-        files: paginated,
+        files: paginated_files,
         total,
-        directories,
+        directories: paginated_dirs,
     })
 }
 
@@ -302,5 +323,77 @@ mod tests {
         assert_eq!(AudioFormat::from_extension("FLAC"), Some(AudioFormat::Flac));
         assert_eq!(AudioFormat::from_extension("m4a"), Some(AudioFormat::Mp4));
         assert_eq!(AudioFormat::from_extension("txt"), None);
+    }
+
+    #[test]
+    fn test_scan_directory_pagination() {
+        fn rand_num() -> u64 {
+            use std::time::{SystemTime, UNIX_EPOCH};
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_nanos() as u64
+        }
+
+        let temp_dir = std::env::temp_dir().join(format!("tunewright_scan_{}", rand_num()));
+        std::fs::create_dir_all(&temp_dir).unwrap();
+
+        // Create 3 subdirectories
+        std::fs::create_dir(temp_dir.join("dir_a")).unwrap();
+        std::fs::create_dir(temp_dir.join("dir_b")).unwrap();
+        std::fs::create_dir(temp_dir.join("dir_c")).unwrap();
+
+        // Create 3 audio files
+        use std::io::Write;
+        let wav_bytes = b"RIFF\x28\x00\x00\x00WAVEfmt \x10\x00\x00\x00\x01\x00\x01\x00\x44\xac\x00\x00\x88\x58\x01\x00\x02\x00\x10\x00data\x04\x00\x00\x00\x00\x00\x00\x00";
+        std::fs::File::create(temp_dir.join("track_1.mp3"))
+            .unwrap()
+            .write_all(wav_bytes)
+            .unwrap();
+        std::fs::File::create(temp_dir.join("track_2.wav"))
+            .unwrap()
+            .write_all(wav_bytes)
+            .unwrap();
+        std::fs::File::create(temp_dir.join("track_3.flac"))
+            .unwrap()
+            .write_all(wav_bytes)
+            .unwrap();
+
+        // Call scan_directory
+        // Total items: 3 directories + 3 files = 6 items.
+        // Directories: dir_a, dir_b, dir_c (alphabetical)
+        // Files: track_1.mp3, track_2.wav, track_3.flac (alphabetical)
+
+        // Test 1: Page 1, limit 2
+        let res1 = scan_directory(&temp_dir, "", 0, 2).unwrap();
+        assert_eq!(res1.total, 6);
+        assert_eq!(
+            res1.directories,
+            vec!["dir_a".to_string(), "dir_b".to_string()]
+        );
+        assert!(res1.files.is_empty());
+
+        // Test 2: Page 2, offset 2, limit 2
+        let res2 = scan_directory(&temp_dir, "", 2, 2).unwrap();
+        assert_eq!(res2.total, 6);
+        assert_eq!(res2.directories, vec!["dir_c".to_string()]);
+        assert_eq!(res2.files.len(), 1);
+        assert_eq!(res2.files[0].filename, "track_1.mp3");
+
+        // Test 3: Page 3, offset 4, limit 2
+        let res3 = scan_directory(&temp_dir, "", 4, 2).unwrap();
+        assert_eq!(res3.total, 6);
+        assert!(res3.directories.is_empty());
+        assert_eq!(res3.files.len(), 2);
+        assert_eq!(res3.files[0].filename, "track_2.wav");
+        assert_eq!(res3.files[1].filename, "track_3.flac");
+
+        // Test 4: Page 4, offset 6, limit 2
+        let res4 = scan_directory(&temp_dir, "", 6, 2).unwrap();
+        assert_eq!(res4.total, 6);
+        assert!(res4.directories.is_empty());
+        assert!(res4.files.is_empty());
+
+        let _ = std::fs::remove_dir_all(&temp_dir);
     }
 }

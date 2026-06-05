@@ -49,6 +49,8 @@ struct AppleLookupResult {
     track_name: Option<String>,
     #[serde(rename = "trackNumber")]
     track_number: Option<u32>,
+    #[serde(rename = "discNumber")]
+    disc_number: Option<u32>,
     #[serde(rename = "trackTimeMillis")]
     track_time_millis: Option<u64>,
     #[serde(rename = "artworkUrl100")]
@@ -109,24 +111,39 @@ pub async fn get_release(client: &Client, id: &str) -> Result<ReleaseDetail, Str
         .ok_or_else(|| "Album details not found in Apple Music response".to_string())?;
 
     // Extract all tracks (where wrapper_type is "track" and kind is "song")
-    let mut tracks: Vec<TrackInfo> = body
+    let mut temp_tracks: Vec<(u32, u32, TrackInfo)> = body
         .results
         .iter()
         .filter(|r| r.wrapper_type == "track" && r.kind.as_deref() == Some("song"))
         .filter_map(|r| {
-            let position = r.track_number?;
+            let disc = r.disc_number.unwrap_or(1);
+            let track = r.track_number?;
             let title = r.track_name.clone()?;
-            Some(TrackInfo {
-                position,
-                title,
-                artist: Some(r.artist_name.clone()),
-                duration_secs: r.track_time_millis.map(|ms| ms as f64 / 1000.0),
-            })
+            Some((
+                disc,
+                track,
+                TrackInfo {
+                    position: track,
+                    title,
+                    artist: Some(r.artist_name.clone()),
+                    duration_secs: r.track_time_millis.map(|ms| ms as f64 / 1000.0),
+                },
+            ))
         })
         .collect();
 
-    // Sort tracks by position to ensure sequential ordering
-    tracks.sort_by_key(|t| t.position);
+    // Sort tracks by (disc, track)
+    temp_tracks.sort_by_key(|t| (t.0, t.1));
+
+    // Assign a global sequential position (1..N) to prevent duplicates and ordering issues
+    let tracks: Vec<TrackInfo> = temp_tracks
+        .into_iter()
+        .enumerate()
+        .map(|(i, (_, _, mut t))| {
+            t.position = (i + 1) as u32;
+            t
+        })
+        .collect();
 
     Ok(ReleaseDetail {
         id: id.to_string(),
@@ -138,4 +155,98 @@ pub async fn get_release(client: &Client, id: &str) -> Result<ReleaseDetail, Str
         source: LookupSource::AppleMusic,
         cover_art_url: upgrade_cover_url(&collection.artwork_url_100),
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_apple_music_multi_disc_sorting() {
+        let json_data = r#"{
+            "results": [
+                {
+                    "wrapperType": "collection",
+                    "collectionId": 12345,
+                    "collectionName": "Greatest Hits",
+                    "artistName": "Famous Artist",
+                    "releaseDate": "2020-05-15T07:00:00Z",
+                    "primaryGenreName": "Pop",
+                    "artworkUrl100": "http://example.com/100x100bb.jpg"
+                },
+                {
+                    "wrapperType": "track",
+                    "kind": "song",
+                    "artistName": "Famous Artist",
+                    "trackName": "Disc 2 Track 1",
+                    "trackNumber": 1,
+                    "discNumber": 2,
+                    "trackTimeMillis": 180000
+                },
+                {
+                    "wrapperType": "track",
+                    "kind": "song",
+                    "artistName": "Famous Artist",
+                    "trackName": "Disc 1 Track 2",
+                    "trackNumber": 2,
+                    "discNumber": 1,
+                    "trackTimeMillis": 240000
+                },
+                {
+                    "wrapperType": "track",
+                    "kind": "song",
+                    "artistName": "Famous Artist",
+                    "trackName": "Disc 1 Track 1",
+                    "trackNumber": 1,
+                    "discNumber": 1,
+                    "trackTimeMillis": 200000
+                }
+            ]
+        }"#;
+
+        let response: AppleLookupResponse = serde_json::from_str(json_data).unwrap();
+
+        let mut temp_tracks: Vec<(u32, u32, TrackInfo)> = response
+            .results
+            .iter()
+            .filter(|r| r.wrapper_type == "track" && r.kind.as_deref() == Some("song"))
+            .filter_map(|r| {
+                let disc = r.disc_number.unwrap_or(1);
+                let track = r.track_number?;
+                let title = r.track_name.clone()?;
+                Some((
+                    disc,
+                    track,
+                    TrackInfo {
+                        position: track,
+                        title,
+                        artist: Some(r.artist_name.clone()),
+                        duration_secs: r.track_time_millis.map(|ms| ms as f64 / 1000.0),
+                    },
+                ))
+            })
+            .collect();
+
+        temp_tracks.sort_by_key(|t| (t.0, t.1));
+
+        let tracks: Vec<TrackInfo> = temp_tracks
+            .into_iter()
+            .enumerate()
+            .map(|(i, (_, _, mut t))| {
+                t.position = (i + 1) as u32;
+                t
+            })
+            .collect();
+
+        assert_eq!(tracks.len(), 3);
+        // Track 1: Disc 1 Track 1
+        assert_eq!(tracks[0].title, "Disc 1 Track 1");
+        assert_eq!(tracks[0].position, 1);
+        // Track 2: Disc 1 Track 2
+        assert_eq!(tracks[1].title, "Disc 1 Track 2");
+        assert_eq!(tracks[1].position, 2);
+        // Track 3: Disc 2 Track 1
+        assert_eq!(tracks[2].title, "Disc 2 Track 1");
+        assert_eq!(tracks[2].position, 3);
+    }
 }

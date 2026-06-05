@@ -52,10 +52,16 @@ pub fn preview_renames(
 
     let mut previews = Vec::with_capacity(computed.len());
     let mut used_names: HashSet<String> = HashSet::new();
+    let case_sensitive = is_case_sensitive(_data_root);
 
     for (id, old_name, new_name) in computed {
-        let conflict = used_names.contains(&new_name.to_lowercase());
-        used_names.insert(new_name.to_lowercase());
+        let key = if case_sensitive {
+            new_name.clone()
+        } else {
+            new_name.to_lowercase()
+        };
+        let conflict = used_names.contains(&key);
+        used_names.insert(key);
 
         previews.push(RenamePreview {
             id,
@@ -250,6 +256,37 @@ fn is_same_file(path1: &Path, path2: &Path) -> bool {
     }
 }
 
+/// Detect if the filesystem at the given path is case-sensitive.
+fn is_case_sensitive(path: &Path) -> bool {
+    if let Ok(canonical) = path.canonicalize() {
+        for ancestor in canonical.ancestors() {
+            if let Some(file_name) = ancestor.file_name() {
+                let name_str = file_name.to_string_lossy();
+                let has_alpha = name_str.chars().any(|c| c.is_ascii_alphabetic());
+                if has_alpha {
+                    let toggled: String = name_str
+                        .chars()
+                        .map(|c| {
+                            if c.is_ascii_lowercase() {
+                                c.to_ascii_uppercase()
+                            } else if c.is_ascii_uppercase() {
+                                c.to_ascii_lowercase()
+                            } else {
+                                c
+                            }
+                        })
+                        .collect();
+                    if let Some(parent) = ancestor.parent() {
+                        let probed_path = parent.join(toggled);
+                        return !probed_path.exists();
+                    }
+                }
+            }
+        }
+    }
+    !cfg!(any(target_os = "windows", target_os = "macos"))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -285,6 +322,63 @@ mod tests {
         }
 
         // Cleanup
+        let _ = std::fs::remove_dir_all(&temp_dir);
+    }
+
+    #[test]
+    fn test_is_case_sensitive() {
+        let temp_dir = std::env::temp_dir().join(format!("tunewright_test_{}", rand_num()));
+        std::fs::create_dir_all(&temp_dir).unwrap();
+        let case_sens = is_case_sensitive(&temp_dir);
+        #[cfg(any(target_os = "macos", target_os = "windows"))]
+        assert!(!case_sens);
+        #[cfg(target_os = "linux")]
+        assert!(case_sens);
+        let _ = std::fs::remove_dir_all(&temp_dir);
+    }
+
+    #[test]
+    fn test_preview_renames_case_conflict() {
+        let temp_dir = std::env::temp_dir().join(format!("tunewright_test_{}", rand_num()));
+        std::fs::create_dir_all(&temp_dir).unwrap();
+
+        let path1 = temp_dir.join("Song.flac");
+        let path2 = temp_dir.join("song2.flac");
+
+        use std::io::Write;
+        let flac_bytes = b"fLaC\x80\x00\x00\x22\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00";
+        File::create(&path1).unwrap().write_all(flac_bytes).unwrap();
+        File::create(&path2).unwrap().write_all(flac_bytes).unwrap();
+
+        // Let's preview a batch rename where both would rename to "Target.flac" and "target.flac" (case variations).
+        let files = vec![
+            ("1".to_string(), "Song.flac".to_string(), path1.clone()),
+            ("2".to_string(), "song2.flac".to_string(), path2.clone()),
+        ];
+
+        // Format is "%title%"
+        // Let's set the titles of the files first.
+        let mut changes1 = crate::types::TagWriteChanges::default();
+        changes1.title = Some("Target".to_string());
+        crate::audio::write_tags(&path1, &changes1).unwrap();
+
+        let mut changes2 = crate::types::TagWriteChanges::default();
+        changes2.title = Some("target".to_string());
+        crate::audio::write_tags(&path2, &changes2).unwrap();
+
+        let previews = preview_renames(&temp_dir, &files, "%title%").unwrap();
+        assert_eq!(previews.len(), 2);
+
+        let case_sens = is_case_sensitive(&temp_dir);
+        if case_sens {
+            // Under case-sensitive OS, they should not conflict!
+            assert!(!previews[0].conflict);
+            assert!(!previews[1].conflict);
+        } else {
+            // Under case-insensitive OS, they must conflict!
+            assert!(previews[1].conflict);
+        }
+
         let _ = std::fs::remove_dir_all(&temp_dir);
     }
 
@@ -516,10 +610,18 @@ mod tests {
 
         if s1.status == "ok" {
             assert_eq!(s2.status, "error");
-            assert!(s2.error.as_ref().unwrap().contains("Target file already exists"));
+            assert!(s2
+                .error
+                .as_ref()
+                .unwrap()
+                .contains("Target file already exists"));
         } else {
             assert_eq!(s1.status, "error");
-            assert!(s1.error.as_ref().unwrap().contains("Target file already exists"));
+            assert!(s1
+                .error
+                .as_ref()
+                .unwrap()
+                .contains("Target file already exists"));
             assert_eq!(s2.status, "ok");
         }
 
@@ -529,4 +631,3 @@ mod tests {
         let _ = std::fs::remove_dir_all(&temp_dir);
     }
 }
-

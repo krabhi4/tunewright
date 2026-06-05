@@ -267,7 +267,8 @@ pub fn write_tags(path: &Path, changes: &TagWriteChanges) -> Result<(), Tunewrig
         tag.set_track(v);
     }
     if let Some(v) = changes.track_total {
-        if primary_type != TagType::Id3v2 || changes.track_number.or_else(|| tag.track()).is_some() {
+        if primary_type != TagType::Id3v2 || changes.track_number.or_else(|| tag.track()).is_some()
+        {
             tag.set_track_total(v);
         }
     }
@@ -569,8 +570,8 @@ fn collect_extra_tags(tags: &[&Tag]) -> HashMap<String, String> {
 #[cfg(test)]
 mod tests {
     use super::{parse_year, read_year};
-    use lofty::tag::{Accessor, ItemKey, ItemValue, Tag, TagItem, TagType};
     use lofty::file::{AudioFile, TaggedFileExt};
+    use lofty::tag::{Accessor, ItemKey, ItemValue, Tag, TagItem, TagType};
 
     #[test]
     fn parse_year_extracts_leading_year() {
@@ -602,12 +603,12 @@ mod tests {
 
     #[test]
     fn test_write_tags_removes_and_merges_secondary_tags() {
+        use crate::types::TagWriteChanges;
+        use lofty::config::WriteOptions;
+        use lofty::probe::Probe;
+        use lofty::tag::{ItemKey, ItemValue, Tag, TagItem, TagType};
         use std::fs::File;
         use std::io::Write;
-        use lofty::probe::Probe;
-        use lofty::tag::{Tag, TagItem, ItemKey, ItemValue, TagType};
-        use lofty::config::WriteOptions;
-        use crate::types::TagWriteChanges;
 
         let nanos = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
@@ -625,7 +626,7 @@ mod tests {
 
         // 1. Manually insert both RiffInfo (primary for WAV in some contexts) and ID3v2 tags
         let mut tagged = Probe::open(&file_path).unwrap().read().unwrap();
-        
+
         let primary_type = tagged.primary_tag_type();
         let secondary_type = if primary_type == TagType::RiffInfo {
             TagType::Id3v2
@@ -634,16 +635,30 @@ mod tests {
         };
 
         let mut primary_tag = Tag::new(primary_type);
-        primary_tag.push(TagItem::new(ItemKey::TrackTitle, ItemValue::Text("Primary Title".to_string())));
-        primary_tag.push(TagItem::new(ItemKey::TrackArtist, ItemValue::Text("Primary Artist".to_string())));
+        primary_tag.push(TagItem::new(
+            ItemKey::TrackTitle,
+            ItemValue::Text("Primary Title".to_string()),
+        ));
+        primary_tag.push(TagItem::new(
+            ItemKey::TrackArtist,
+            ItemValue::Text("Primary Artist".to_string()),
+        ));
         tagged.insert_tag(primary_tag);
 
         let mut secondary_tag = Tag::new(secondary_type);
-        secondary_tag.push(TagItem::new(ItemKey::TrackTitle, ItemValue::Text("Secondary Title".to_string())));
-        secondary_tag.push(TagItem::new(ItemKey::Composer, ItemValue::Text("Secondary Composer".to_string())));
+        secondary_tag.push(TagItem::new(
+            ItemKey::TrackTitle,
+            ItemValue::Text("Secondary Title".to_string()),
+        ));
+        secondary_tag.push(TagItem::new(
+            ItemKey::Composer,
+            ItemValue::Text("Secondary Composer".to_string()),
+        ));
         tagged.insert_tag(secondary_tag);
 
-        tagged.save_to_path(&file_path, WriteOptions::default()).unwrap();
+        tagged
+            .save_to_path(&file_path, WriteOptions::default())
+            .unwrap();
 
         // 2. Call write_tags to write changes and merge secondary tags
         let mut changes = TagWriteChanges::default();
@@ -652,13 +667,13 @@ mod tests {
 
         // 3. Verify the result
         let tagged_after = Probe::open(&file_path).unwrap().read().unwrap();
-        
+
         // Assert that the secondary tag was completely removed
         assert!(tagged_after.tag(secondary_type).is_none());
 
         // Assert that the primary tag exists and has the correct merged/updated fields
         let primary_after = tagged_after.tag(primary_type).unwrap();
-        
+
         assert_eq!(
             primary_after.get_string(ItemKey::TrackTitle),
             Some("Primary Title")
@@ -679,13 +694,13 @@ mod tests {
 
     #[test]
     fn test_write_tags_id3v2_total_only_no_fabrication() {
-        use std::fs::File;
-        use std::io::Write;
-        use lofty::probe::Probe;
-        use lofty::tag::{Tag, TagType};
+        use crate::types::TagWriteChanges;
         use lofty::config::WriteOptions;
         use lofty::file::AudioFile;
-        use crate::types::TagWriteChanges;
+        use lofty::probe::Probe;
+        use lofty::tag::{Tag, TagType};
+        use std::fs::File;
+        use std::io::Write;
 
         let nanos = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
@@ -705,7 +720,9 @@ mod tests {
         {
             let mut tagged = Probe::open(&file_path).unwrap().read().unwrap();
             tagged.insert_tag(Tag::new(TagType::Id3v2));
-            tagged.save_to_path(&file_path, WriteOptions::default()).unwrap();
+            tagged
+                .save_to_path(&file_path, WriteOptions::default())
+                .unwrap();
         }
 
         // 1. Write only track_total and disc_total (no track_number or disc_number)
@@ -721,8 +738,16 @@ mod tests {
             assert_eq!(tag.track(), None, "track number must not be fabricated");
             assert_eq!(tag.disk(), None, "disc number must not be fabricated");
             // Since no track_number was present, track_total should also be absent in ID3v2
-            assert_eq!(tag.track_total(), None, "track_total must not be written without track_number in ID3v2");
-            assert_eq!(tag.disk_total(), None, "disc_total must not be written without disc_number in ID3v2");
+            assert_eq!(
+                tag.track_total(),
+                None,
+                "track_total must not be written without track_number in ID3v2"
+            );
+            assert_eq!(
+                tag.disk_total(),
+                None,
+                "disc_total must not be written without disc_number in ID3v2"
+            );
         }
 
         // 3. Now write both track number AND track total together
@@ -871,4 +896,3 @@ mod tests {
         }
     }
 }
-
