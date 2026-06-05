@@ -30,6 +30,7 @@
 		pendingEditCount
 	} from '$lib/stores/tags';
 	import { selectedIds } from '$lib/stores/files';
+	import { toast } from '$lib/stores/toast';
 	import { onMount } from 'svelte';
 	import { get } from 'svelte/store';
 	import { goto } from '$app/navigation';
@@ -82,7 +83,7 @@
 	async function handleConfirmSave() {
 		const result = await saveAllEdits();
 		if (result.failed > 0) {
-			alert(`Failed to save edits for ${result.failed} file(s). Navigation cancelled.`);
+			toast.error(`Failed to save edits for ${result.failed} file(s). Navigation cancelled.`);
 			pendingNavPath = null;
 			confirmOpen = false;
 			return;
@@ -178,7 +179,10 @@
 	async function handleSave() {
 		const result = await saveAllEdits();
 		if (result.failed > 0) {
-			alert(`Failed to save edits for ${result.failed} file(s).`);
+			const saved = result.success > 0 ? `; ${result.success} saved` : '';
+			toast.error(`Failed to save edits for ${result.failed} file(s)${saved}.`);
+		} else if (result.success > 0) {
+			toast.success(`Saved ${result.success} file(s).`);
 		}
 	}
 

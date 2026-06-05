@@ -3,6 +3,7 @@
 	import { selectedTags, KEEP_VALUE, setPendingEdit, mergedTags, pendingEdits } from '$lib/stores/tags';
 	import { getCoverArtUrl, uploadCoverArt } from '$lib/api/coverart';
 	import { coverArtVersion, bumpCoverArt } from '$lib/stores/ui';
+	import { toast } from '$lib/stores/toast';
 
 	let coverArtError = $state(false);
 	let dragOver = $state(false);
@@ -22,6 +23,7 @@
 			bumpCoverArt();
 		} catch (err) {
 			console.error('Failed to upload cover art:', err);
+			toast.error('Cover art upload failed. See console for details.');
 		} finally {
 			uploading = false;
 		}

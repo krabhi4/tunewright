@@ -5,6 +5,7 @@
 	import type { FilenameTagPreview } from '$lib/api/filename-to-tag';
 	import { writeTags } from '$lib/api/tags';
 	import { fetchTagsForFiles } from '$lib/stores/tags';
+	import { toast } from '$lib/stores/toast';
 
 	interface Props {
 		open: boolean;
@@ -69,12 +70,15 @@
 
 			const results = await writeTags(changes);
 			const failed = results.filter((r) => r.status === 'error');
+			const okIds = results.filter((r) => r.status === 'ok').map((r) => r.id);
 			if (failed.length > 0) {
-				console.warn(`Filename-to-tag: ${results.length - failed.length} ok, ${failed.length} failed`);
+				console.warn(`Filename-to-tag: ${okIds.length} ok, ${failed.length} failed`);
+				toast.warning(`Applied tags to ${okIds.length} file(s); ${failed.length} failed.`);
+			} else if (okIds.length > 0) {
+				toast.success(`Applied tags to ${okIds.length} file(s).`);
 			}
 
 			// Refresh tags for updated files
-			const okIds = results.filter((r) => r.status === 'ok').map((r) => r.id);
 			if (okIds.length > 0) {
 				await fetchTagsForFiles(okIds, true);
 			}
@@ -83,6 +87,7 @@
 			onClose();
 		} catch (err) {
 			console.error('Apply failed:', err);
+			toast.error('Apply failed. See console for details.');
 		} finally {
 			applying = false;
 		}

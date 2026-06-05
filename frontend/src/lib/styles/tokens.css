@@ -14,6 +14,7 @@
 	--z-dropdown: 100;
 	--z-modal: 200;
 	--z-context: 300;
+	--z-toast: 400;
 }
 
 [data-theme="console"][data-mode="dark"] {

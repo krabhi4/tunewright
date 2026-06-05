@@ -7,6 +7,7 @@
 	import { applyReleaseToFiles } from '$lib/services/applyRelease';
 	import { embedCoverArtFromUrl } from '$lib/api/coverart';
 	import { bumpCoverArt } from '$lib/stores/ui';
+	import { toast } from '$lib/stores/toast';
 	import { selectedIds, files } from '$lib/stores/files';
 	import { get } from 'svelte/store';
 	import { selectedTags } from '$lib/stores/tags';
@@ -268,7 +269,14 @@
 				const parts: string[] = [];
 				if (result.saveFailed > 0) parts.push(`${result.saveFailed} file(s) failed to save tags`);
 				if (result.renameFailed > 0) parts.push(`${result.renameFailed} file(s) failed to rename`);
-				alert(`Applied with errors: ${parts.join('; ')}.`);
+				toast.warning(`Applied with errors: ${parts.join('; ')}.`);
+			} else {
+				// Without rename the edits are only staged, not written to disk yet.
+				toast.success(
+					renameFiles
+						? `Applied "${selectedRelease.title}" to ${matchedCount} file(s).`
+						: `Staged tags for ${matchedCount} file(s). Save to write them.`
+				);
 			}
 
 			onClose();
@@ -279,19 +287,19 @@
 					.then((res) => {
 						bumpCoverArt();
 						if (res.errors && res.errors.length > 0) {
-							alert(
+							toast.warning(
 								`Cover art embedded for ${res.embedded} of ${coverPaths.length} file(s); ${res.errors.length} failed.`
 							);
 						}
 					})
 					.catch((err) => {
 						console.error('Cover art embed failed:', err);
-						alert('Cover art embed failed. No covers were updated.');
+						toast.error('Cover art embed failed. No covers were updated.');
 					});
 			}
 		} catch (err) {
 			console.error('Apply failed:', err);
-			alert('Apply failed. See console for details.');
+			toast.error('Apply failed. See console for details.');
 		} finally {
 			applying = false;
 		}

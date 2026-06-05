@@ -4,6 +4,7 @@
 	import { previewActions, executeActions } from '$lib/api/actions';
 	import type { Action, ActionPreview } from '$lib/api/actions';
 	import { fetchTagsForFiles } from '$lib/stores/tags';
+	import { toast } from '$lib/stores/toast';
 
 	interface Props {
 		open: boolean;
@@ -120,10 +121,13 @@
 			const fileEntries = files.map((f) => ({ id: f.id, path: f.relative_path }));
 			const results = await executeActions(fileEntries, actions);
 			const failed = results.filter((r) => r.status === 'error');
-			if (failed.length > 0) {
-				console.warn(`Actions: ${results.length - failed.length} ok, ${failed.length} failed`);
-			}
 			const okIds = results.filter((r) => r.status === 'ok').map((r) => r.id);
+			if (failed.length > 0) {
+				console.warn(`Actions: ${okIds.length} ok, ${failed.length} failed`);
+				toast.warning(`Applied actions to ${okIds.length} file(s); ${failed.length} failed.`);
+			} else if (okIds.length > 0) {
+				toast.success(`Applied actions to ${okIds.length} file(s).`);
+			}
 			if (okIds.length > 0) {
 				await fetchTagsForFiles(okIds, true);
 			}
@@ -131,6 +135,7 @@
 			onClose();
 		} catch (err) {
 			console.error('Actions execution failed:', err);
+			toast.error('Actions execution failed. See console for details.');
 		} finally {
 			executing = false;
 		}

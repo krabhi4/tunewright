@@ -3,6 +3,7 @@
 	import type { FileEntry } from '$lib/types/audio';
 	import { previewRenames, executeRenames } from '$lib/api/rename';
 	import type { RenamePreview } from '$lib/api/rename';
+	import { toast } from '$lib/stores/toast';
 
 	interface Props {
 		open: boolean;
@@ -56,13 +57,18 @@
 			const fileEntries = files.map((f) => ({ id: f.id, path: f.relative_path }));
 			const results = await executeRenames(fileEntries, format);
 			const failed = results.filter((r) => r.status === 'error');
+			const ok = results.filter((r) => r.status === 'ok').length;
 			if (failed.length > 0) {
-				console.warn(`Rename: ${results.length - failed.length} ok, ${failed.length} failed`);
+				console.warn(`Rename: ${ok} ok, ${failed.length} failed`);
+				toast.warning(`Renamed ${ok} file(s); ${failed.length} failed.`);
+			} else if (ok > 0) {
+				toast.success(`Renamed ${ok} file(s).`);
 			}
 			onComplete();
 			onClose();
 		} catch (err) {
 			console.error('Rename failed:', err);
+			toast.error('Rename failed. See console for details.');
 		} finally {
 			executing = false;
 		}
