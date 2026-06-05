@@ -6,7 +6,7 @@ Thanks for your interest in contributing. This document covers how to get starte
 
 ### Prerequisites
 
-- Rust 1.88+ (`rustup` recommended)
+- Rust 1.89+ (`rustup` recommended)
 - Node.js 20+ with pnpm
 - Some audio files for testing (MP3, FLAC, etc.)
 

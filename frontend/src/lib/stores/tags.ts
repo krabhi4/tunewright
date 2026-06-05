@@ -178,11 +178,11 @@ export function setPendingEdit(field: string, value: string | number | undefined
 }
 
 // Save all pending edits to the server
-export async function saveAllEdits(): Promise<{ success: number; failed: number }> {
+export async function saveAllEdits(): Promise<{ success: number; failed: number; failedIds: string[] }> {
 	const $pending = get(pendingEdits);
 	const $filesById = get(filesById);
 
-	if ($pending.size === 0) return { success: 0, failed: 0 };
+	if ($pending.size === 0) return { success: 0, failed: 0, failedIds: [] };
 
 	const changes = Array.from($pending.entries()).map(([id, edits]) => {
 		const file = $filesById.get(id);
@@ -198,19 +198,36 @@ export async function saveAllEdits(): Promise<{ success: number; failed: number 
 
 		let success = 0;
 		let failed = 0;
+		const failedIds: string[] = [];
 		const loadedUpdates: Array<[string, TagData]> = [];
 
 		pendingEdits.update((map) => {
 			const next = new Map(map);
 			for (const r of results) {
 				if (r.status === 'ok') {
-					next.delete(r.id);
 					success++;
 					const current = get(loadedTags).get(r.id) || {};
 					const edits = $pending.get(r.id) || {};
 					loadedUpdates.push([r.id, { ...current, ...edits } as TagData]);
+
+					const liveEdits = next.get(r.id);
+					if (liveEdits) {
+						const nextEdits = { ...liveEdits };
+						for (const key of Object.keys(edits)) {
+							const k = key as keyof TagData;
+							if (nextEdits[k] === edits[k]) {
+								delete nextEdits[k];
+							}
+						}
+						if (Object.keys(nextEdits).length === 0) {
+							next.delete(r.id);
+						} else {
+							next.set(r.id, nextEdits);
+						}
+					}
 				} else {
 					failed++;
+					failedIds.push(r.id);
 					console.error(`Failed to save ${r.id}: ${r.error}`);
 				}
 			}
@@ -232,10 +249,10 @@ export async function saveAllEdits(): Promise<{ success: number; failed: number 
 			await fetchTagsForFiles(savedIds, true);
 		}
 
-		return { success, failed };
+		return { success, failed, failedIds };
 	} catch (err) {
 		console.error('Failed to save tags:', err);
-		return { success: 0, failed: $pending.size };
+		return { success: 0, failed: $pending.size, failedIds: Array.from($pending.keys()) };
 	}
 }
 

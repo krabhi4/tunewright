@@ -3,6 +3,7 @@ name = "tunewright-lookup"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
+rust-version.workspace = true
 
 [dependencies]
 reqwest = { version = "0.13", features = ["json"] }

@@ -1,10 +1,10 @@
 # Stage 1: Build frontend
 FROM node:22-slim AS frontend-builder
-RUN corepack enable && corepack prepare pnpm@latest --activate
+RUN corepack enable && corepack prepare pnpm@9.15.4 --activate
 WORKDIR /app/frontend
 COPY frontend/package.json frontend/pnpm-lock.yaml* frontend/pnpm-workspace.yaml* ./
 RUN --mount=type=cache,target=/root/.local/share/pnpm/store \
-    pnpm install --frozen-lockfile || pnpm install
+    pnpm install --frozen-lockfile
 COPY frontend/ ./
 RUN pnpm run build
 

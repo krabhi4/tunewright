@@ -23,23 +23,33 @@ export const filesById = derived(files, ($files) => {
 
 export const selectedCount = derived(selectedIds, ($ids) => $ids.size);
 
+let loadGeneration = 0;
+
 export async function loadDirectory(path: string) {
+	loadGeneration++;
+	const gen = loadGeneration;
+
 	loading.set(true);
 	currentPath.set(path);
 	selectedIds.set(new Set());
 
 	try {
 		const result = await listFiles(path, 0, 5000);
+		if (gen !== loadGeneration) return;
+
 		files.set(result.files);
 		totalCount.set(result.total);
 		directories.set(result.directories);
 	} catch (err) {
+		if (gen !== loadGeneration) return;
 		console.error('Failed to load directory:', err);
 		files.set([]);
 		totalCount.set(0);
 		directories.set([]);
 	} finally {
-		loading.set(false);
+		if (gen === loadGeneration) {
+			loading.set(false);
+		}
 	}
 }
 
@@ -64,8 +74,8 @@ export function selectNone() {
 	selectedIds.set(new Set());
 }
 
-export function selectRange(fromId: string, toId: string) {
-	const $files = get(files);
+export function selectRange(fromId: string, toId: string, customFiles?: FileEntry[]) {
+	const $files = customFiles || get(files);
 	const fromIdx = $files.findIndex((f) => f.id === fromId);
 	const toIdx = $files.findIndex((f) => f.id === toId);
 	if (fromIdx === -1 || toIdx === -1) return;

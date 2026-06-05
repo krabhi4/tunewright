@@ -3,6 +3,7 @@ name = "tunewright-core"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
+rust-version.workspace = true
 
 [dependencies]
 lofty = "0.24"

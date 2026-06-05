@@ -51,17 +51,27 @@ export async function applyReleaseToFiles(
 	let coverPaths = matched.map((f) => f.relative_path);
 
 	if (opts.rename && filesToRename.length > 0) {
-		await saveAllEdits();
-		try {
-			const results = await executeRenames(filesToRename, RENAME_FORMAT);
-			// Use the server-reported new path instead of re-deriving it client-side.
-			const newPaths = new Map<string, string>();
-			for (const res of results) {
-				if (res.status === 'ok') newPaths.set(res.id, res.new_relative_path);
+		const saveRes = await saveAllEdits();
+		const failedSet = new Set(saveRes.failedIds);
+		const filesToRenameFiltered = filesToRename.filter((f) => !failedSet.has(f.id));
+
+		if (filesToRenameFiltered.length > 0) {
+			try {
+				const results = await executeRenames(filesToRenameFiltered, RENAME_FORMAT);
+				// Use the server-reported new path instead of re-deriving it client-side.
+				const newPaths = new Map<string, string>();
+				for (const res of results) {
+					if (res.status === 'ok') newPaths.set(res.id, res.new_relative_path);
+				}
+				coverPaths = matched
+					.filter((f) => !failedSet.has(f.id))
+					.map((f) => newPaths.get(f.id) ?? f.relative_path);
+			} catch (err) {
+				console.error('Rename failed:', err);
+				coverPaths = matched.filter((f) => !failedSet.has(f.id)).map((f) => f.relative_path);
 			}
-			coverPaths = matched.map((f) => newPaths.get(f.id) ?? f.relative_path);
-		} catch (err) {
-			console.error('Rename failed:', err);
+		} else {
+			coverPaths = matched.filter((f) => !failedSet.has(f.id)).map((f) => f.relative_path);
 		}
 	}
 

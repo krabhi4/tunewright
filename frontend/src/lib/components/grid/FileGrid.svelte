@@ -216,7 +216,7 @@
 
 	function handleRowClick(file: FileEntry, e: MouseEvent) {
 		if (e.shiftKey && lastClickedId) {
-			selectRange(lastClickedId, file.id);
+			selectRange(lastClickedId, file.id, processedFiles);
 		} else {
 			toggleSelection(file.id, e.ctrlKey || e.metaKey);
 		}
@@ -284,7 +284,7 @@
 			focusedId.set(file.id);
 
 			if (e.shiftKey && lastClickedId) {
-				selectRange(lastClickedId, file.id);
+				selectRange(lastClickedId, file.id, processedFiles);
 			} else if (!e.shiftKey) {
 				// Select the focused row (replace selection)
 				selectedIds.set(new Set([file.id]));

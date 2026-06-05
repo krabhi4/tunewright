@@ -130,7 +130,7 @@ No database. Tag data lives in the audio files. User accounts live in `users.jso
 
 ### Prerequisites
 
-- Rust 1.88+
+- Rust 1.89+
 - Node.js 20+ with pnpm
 - Docker (for container builds)
 
