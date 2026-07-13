@@ -45,3 +45,6 @@ updates:
     cooldown:
       default-days: 30
     open-pull-requests-limit: 5
+    groups:
+      gha:
+        patterns: ["*"]

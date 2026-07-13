@@ -173,7 +173,8 @@
 		$sortColumn;
 		$sortAsc;
 		$selectedIds;
-		syncToUrl();
+		const timer = setTimeout(syncToUrl, 250);
+		return () => clearTimeout(timer);
 	});
 
 	async function handleSave() {

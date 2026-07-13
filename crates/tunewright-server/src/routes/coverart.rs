@@ -1,8 +1,9 @@
 use axum::body::Body;
 use axum::extract::{Multipart, Query, State};
-use axum::http::{header, StatusCode};
+use axum::http::{header, HeaderMap, StatusCode};
 use axum::response::Response;
 use axum::Json;
+use rayon::prelude::*;
 use reqwest::Url;
 use serde::Deserialize;
 use tunewright_core::picture;
@@ -41,10 +42,40 @@ fn has_image_magic(data: &[u8]) -> bool {
 pub async fn get_cover_art(
     State(state): State<AppState>,
     Query(params): Query<CoverArtQuery>,
+    headers: HeaderMap,
 ) -> Result<Response, AppError> {
     let safe_path = scanner::resolve_safe_path(&state.data_root, &params.path)?;
 
     let max_size = if params.size == 0 { 0 } else { params.size };
+
+    // ETag from the file's mtime + size plus the requested thumbnail size;
+    // the frontend cache-busts with a version param on writes.
+    let metadata = std::fs::metadata(&safe_path).map_err(TunewrightError::Io)?;
+    let mtime = metadata
+        .modified()
+        .ok()
+        .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+        .unwrap_or_default();
+    let etag = format!(
+        "\"{}-{}-{}-{}\"",
+        mtime.as_secs(),
+        mtime.subsec_nanos(),
+        metadata.len(),
+        max_size
+    );
+
+    if headers
+        .get(header::IF_NONE_MATCH)
+        .and_then(|v| v.to_str().ok())
+        .is_some_and(|v| v.split(',').any(|candidate| candidate.trim() == etag))
+    {
+        return Ok(Response::builder()
+            .status(StatusCode::NOT_MODIFIED)
+            .header(header::ETAG, etag)
+            .header(header::CACHE_CONTROL, "private, max-age=3600")
+            .body(Body::empty())
+            .unwrap());
+    }
 
     let result = tokio::task::spawn_blocking(move || {
         picture::extract_cover_art_thumbnail(&safe_path, max_size)
@@ -57,7 +88,8 @@ pub async fn get_cover_art(
         Some((data, mime)) => Ok(Response::builder()
             .status(StatusCode::OK)
             .header(header::CONTENT_TYPE, mime)
-            .header(header::CACHE_CONTROL, "private, max-age=60")
+            .header(header::ETAG, etag)
+            .header(header::CACHE_CONTROL, "private, max-age=3600")
             .body(Body::from(data))
             .unwrap()),
         None => Ok(Response::builder()
@@ -155,34 +187,35 @@ pub async fn embed_cover_art_from_url(
         ))));
     }
 
+    // Embed into all files in parallel, sharing the downloaded bytes; the
+    // per-path results stay in request order.
+    let data_root = state.data_root.clone();
+    let paths = body.paths;
+    let outcomes: Vec<Result<(), String>> = tokio::task::spawn_blocking(move || {
+        paths
+            .par_iter()
+            .enumerate()
+            .map(|(i, path_str)| match scanner::resolve_safe_path(&data_root, path_str) {
+                Ok(safe_path) => picture::embed_cover_art(&safe_path, &image_data).map_err(|e| {
+                    tracing::warn!("cover art embed failed for {:?}: {}", path_str, e);
+                    format!("file {}: embed failed", i)
+                }),
+                Err(e) => {
+                    tracing::warn!("path resolution failed for {:?}: {}", path_str, e);
+                    Err(format!("file {}: invalid path", i))
+                }
+            })
+            .collect()
+    })
+    .await
+    .map_err(|e| AppError(TunewrightError::Io(std::io::Error::other(e.to_string()))))?;
+
     let mut embedded = 0u32;
     let mut errors: Vec<String> = Vec::new();
-
-    for (i, path_str) in body.paths.iter().enumerate() {
-        match scanner::resolve_safe_path(&state.data_root, path_str) {
-            Ok(safe_path) => {
-                let data = image_data.clone();
-                let result = tokio::task::spawn_blocking(move || {
-                    picture::embed_cover_art(&safe_path, &data)
-                })
-                .await;
-
-                match result {
-                    Ok(Ok(())) => embedded += 1,
-                    Ok(Err(e)) => {
-                        tracing::warn!("cover art embed failed for {:?}: {}", path_str, e);
-                        errors.push(format!("file {}: embed failed", i));
-                    }
-                    Err(e) => {
-                        tracing::warn!("cover art embed task panicked for {:?}: {}", path_str, e);
-                        errors.push(format!("file {}: internal error", i));
-                    }
-                }
-            }
-            Err(e) => {
-                tracing::warn!("path resolution failed for {:?}: {}", path_str, e);
-                errors.push(format!("file {}: invalid path", i));
-            }
+    for outcome in outcomes {
+        match outcome {
+            Ok(()) => embedded += 1,
+            Err(msg) => errors.push(msg),
         }
     }
 

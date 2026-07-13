@@ -15,15 +15,16 @@ tower-http = { version = "0.7", features = ["fs", "trace"] }
 serde = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }
-reqwest = { version = "0.13", features = ["json"] }
+reqwest = { workspace = true }
+rustls = { version = "0.23", default-features = false, features = ["ring"] }
 tracing = { workspace = true }
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 rand = "0.10"
-rayon = "1.12"
-hex = "0.4"
+rayon = { workspace = true }
+hex = { workspace = true }
 argon2 = "0.5"
 uuid = { version = "1", features = ["v4"] }
-chrono = { version = "0.4", features = ["serde"] }
+chrono = { version = "0.4", default-features = false, features = ["serde", "now", "std"] }
 
 [dev-dependencies]
 tower = { version = "0.5", features = ["util"] }

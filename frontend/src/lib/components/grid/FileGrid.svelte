@@ -9,7 +9,7 @@
 		directories,
 		currentPath
 	} from '$lib/stores/files';
-	import { mergedTags, fetchTagsForFiles, queuePropertiesFetch, pendingEdits } from '$lib/stores/tags';
+	import { mergedTags, queueVisibleTagsFetch, pendingEdits } from '$lib/stores/tags';
 	import { filterText, sortColumn, sortAsc } from '$lib/stores/ui';
 	import ContextMenu from '$lib/components/common/ContextMenu.svelte';
 
@@ -83,6 +83,9 @@
 		{ key: 'size', label: 'Size', width: 70, mono: true, align: 'right' as const }
 	];
 
+	// Sort keys whose values come from loaded tags (others come from the file entry)
+	const tagSortKeys = new Set(['title', 'artist', 'album', 'year', 'track_number', 'genre', 'duration']);
+
 	function getCellValue(file: FileEntry, tags: TagData | undefined, key: string): string {
 		switch (key) {
 			case 'filename':
@@ -134,11 +137,12 @@
 		if ($sortColumn) {
 			const col = $sortColumn;
 			const dir = $sortAsc ? 1 : -1;
+			const usesTags = tagSortKeys.has(col);
 			// Precompute one sort key per file so the comparator doesn't redo the
 			// map lookup + lowercasing O(n log n) times.
 			const keyOf = new Map<string, string>();
 			for (const f of result) {
-				keyOf.set(f.id, getCellValue(f, $mergedTags.get(f.id), col).toLowerCase());
+				keyOf.set(f.id, getCellValue(f, usesTags ? $mergedTags.get(f.id) : undefined, col).toLowerCase());
 			}
 			result = [...result].sort((a, b) => {
 				const av = keyOf.get(a.id) ?? '';
@@ -190,9 +194,7 @@
 			.filter((r): r is { type: 'file'; file: FileEntry } => r.type === 'file')
 			.map((r) => r.file.id);
 		if (fileIds.length > 0) {
-			fetchTagsForFiles(fileIds).then(() => {
-				queuePropertiesFetch(fileIds);
-			});
+			queueVisibleTagsFetch(fileIds);
 		}
 	});
 

@@ -5,7 +5,9 @@
 
 use crate::expr::{self, ExprContext};
 use crate::types::TagData;
+use regex::Regex;
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 
 /// A single action that can be applied to tag data.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -92,9 +94,31 @@ pub struct ActionContext {
     pub filename: String,
 }
 
+/// Compile every regex `Replace` pattern in `actions` once, keyed by pattern.
+/// Returns an error describing the first invalid pattern.
+pub fn compile_regexes(actions: &[Action]) -> Result<HashMap<String, Regex>, String> {
+    let mut regexes = HashMap::new();
+    for action in actions {
+        if let Action::Replace {
+            search,
+            regex: true,
+            ..
+        } = action
+        {
+            if !regexes.contains_key(search) {
+                let re =
+                    Regex::new(search).map_err(|e| format!("invalid regex '{search}': {e}"))?;
+                regexes.insert(search.clone(), re);
+            }
+        }
+    }
+    Ok(regexes)
+}
+
 impl Action {
     /// Apply this action to a mutable TagData, modifying it in place.
-    pub fn apply(&self, tags: &mut TagData, ctx: &ActionContext) {
+    /// `regexes` holds the batch's pre-compiled patterns from [`compile_regexes`].
+    pub fn apply(&self, tags: &mut TagData, ctx: &ActionContext, regexes: &HashMap<String, Regex>) {
         match self {
             Action::CaseConversion { field, mode } => {
                 let val = get_field(tags, field);
@@ -114,9 +138,9 @@ impl Action {
                     return;
                 }
                 let result = if *regex {
-                    match regex::Regex::new(search) {
-                        Ok(re) => re.replace_all(&val, replace.as_str()).to_string(),
-                        Err(_) => val,
+                    match regexes.get(search) {
+                        Some(re) => re.replace_all(&val, replace.as_str()).to_string(),
+                        None => val,
                     }
                 } else {
                     val.replace(search.as_str(), replace.as_str())
@@ -225,9 +249,10 @@ pub struct ActionGroup {
 
 impl ActionGroup {
     /// Apply all actions in sequence to tag data.
-    pub fn apply(&self, tags: &mut TagData, ctx: &ActionContext) {
+    /// `regexes` holds the batch's pre-compiled patterns from [`compile_regexes`].
+    pub fn apply(&self, tags: &mut TagData, ctx: &ActionContext, regexes: &HashMap<String, Regex>) {
         for action in &self.actions {
-            action.apply(tags, ctx);
+            action.apply(tags, ctx, regexes);
         }
     }
 }
@@ -360,6 +385,10 @@ mod tests {
         }
     }
 
+    fn regexes_for(action: &Action) -> HashMap<String, Regex> {
+        compile_regexes(std::slice::from_ref(action)).unwrap()
+    }
+
     fn sample_tags() -> TagData {
         TagData {
             title: Some("hello world".to_string()),
@@ -378,7 +407,7 @@ mod tests {
             field: "title".to_string(),
             mode: CaseMode::Title,
         };
-        action.apply(&mut tags, &ctx(0));
+        action.apply(&mut tags, &ctx(0), &regexes_for(&action));
         assert_eq!(tags.title.as_deref(), Some("Hello World"));
     }
 
@@ -389,7 +418,7 @@ mod tests {
             field: "artist".to_string(),
             mode: CaseMode::Upper,
         };
-        action.apply(&mut tags, &ctx(0));
+        action.apply(&mut tags, &ctx(0), &regexes_for(&action));
         assert_eq!(tags.artist.as_deref(), Some("THE BAND"));
     }
 
@@ -402,7 +431,7 @@ mod tests {
             replace: "earth".to_string(),
             regex: false,
         };
-        action.apply(&mut tags, &ctx(0));
+        action.apply(&mut tags, &ctx(0), &regexes_for(&action));
         assert_eq!(tags.title.as_deref(), Some("hello earth"));
     }
 
@@ -415,7 +444,7 @@ mod tests {
             replace: "WORLD".to_string(),
             regex: true,
         };
-        action.apply(&mut tags, &ctx(0));
+        action.apply(&mut tags, &ctx(0), &regexes_for(&action));
         assert_eq!(tags.title.as_deref(), Some("hello WORLD"));
     }
 
@@ -426,7 +455,7 @@ mod tests {
             field: "title".to_string(),
             format: "$upper(%artist%) - %title%".to_string(),
         };
-        action.apply(&mut tags, &ctx(0));
+        action.apply(&mut tags, &ctx(0), &regexes_for(&action));
         assert_eq!(tags.title.as_deref(), Some("THE BAND - hello world"));
     }
 
@@ -437,7 +466,7 @@ mod tests {
             field: "genre".to_string(),
             value: "Rock".to_string(),
         };
-        action.apply(&mut tags, &ctx(0));
+        action.apply(&mut tags, &ctx(0), &regexes_for(&action));
         assert_eq!(tags.genre.as_deref(), Some("Rock"));
     }
 
@@ -447,7 +476,7 @@ mod tests {
         let action = Action::RemoveField {
             field: "title".to_string(),
         };
-        action.apply(&mut tags, &ctx(0));
+        action.apply(&mut tags, &ctx(0), &regexes_for(&action));
         assert_eq!(tags.title, None);
     }
 
@@ -460,8 +489,9 @@ mod tests {
             start: 1,
             padding: 2,
         };
-        action.apply(&mut tags1, &ctx(0));
-        action.apply(&mut tags2, &ctx(1));
+        let regexes = regexes_for(&action);
+        action.apply(&mut tags1, &ctx(0), &regexes);
+        action.apply(&mut tags2, &ctx(1), &regexes);
         assert_eq!(tags1.track_number, Some(1)); // "01" parsed as 1
         assert_eq!(tags2.track_number, Some(2)); // "02" parsed as 2
     }
@@ -478,7 +508,7 @@ mod tests {
             part: 1,
             target: "album".to_string(),
         };
-        action.apply(&mut tags, &ctx(0));
+        action.apply(&mut tags, &ctx(0), &regexes_for(&action));
         assert_eq!(tags.album.as_deref(), Some("Part B"));
     }
 
@@ -494,7 +524,7 @@ mod tests {
             part: 1,
             target: "album".to_string(),
         };
-        action.apply(&mut tags, &ctx(0));
+        action.apply(&mut tags, &ctx(0), &regexes_for(&action));
         assert_eq!(tags.album.as_deref(), Some("e"));
     }
 
@@ -506,7 +536,7 @@ mod tests {
             separator: " - ".to_string(),
             target: "comment".to_string(),
         };
-        action.apply(&mut tags, &ctx(0));
+        action.apply(&mut tags, &ctx(0), &regexes_for(&action));
         assert_eq!(tags.comment.as_deref(), Some("the band - great album"));
     }
 
@@ -519,7 +549,7 @@ mod tests {
         let action = Action::TrimField {
             field: "title".to_string(),
         };
-        action.apply(&mut tags, &ctx(0));
+        action.apply(&mut tags, &ctx(0), &regexes_for(&action));
         assert_eq!(tags.title.as_deref(), Some("spaces"));
     }
 
@@ -538,7 +568,7 @@ mod tests {
                 },
             ],
         };
-        group.apply(&mut tags, &ctx(0));
+        group.apply(&mut tags, &ctx(0), &compile_regexes(&group.actions).unwrap());
         assert_eq!(tags.title.as_deref(), Some("Hello World"));
     }
 
@@ -551,13 +581,13 @@ mod tests {
             field: "BPM".to_string(),
             value: "130".to_string(),
         };
-        action.apply(&mut tags, &ctx(0));
+        action.apply(&mut tags, &ctx(0), &regexes_for(&action));
         assert_eq!(tags.extra.get("BPM").unwrap(), "130");
 
         let action = Action::RemoveField {
             field: "BPM".to_string(),
         };
-        action.apply(&mut tags, &ctx(0));
+        action.apply(&mut tags, &ctx(0), &regexes_for(&action));
         assert!(!tags.extra.contains_key("BPM"));
     }
 
@@ -570,7 +600,7 @@ mod tests {
             replace: "X".to_string(),
             regex: false,
         };
-        action.apply(&mut tags, &ctx(0));
+        action.apply(&mut tags, &ctx(0), &regexes_for(&action));
         assert_eq!(tags.title.as_deref(), Some("hello world"));
     }
 
@@ -583,7 +613,7 @@ mod tests {
             replace: "X".to_string(),
             regex: true,
         };
-        action.apply(&mut tags, &ctx(0));
+        action.apply(&mut tags, &ctx(0), &regexes_for(&action));
         assert_eq!(tags.title.as_deref(), Some("hello world"));
     }
 
@@ -595,8 +625,19 @@ mod tests {
             start: u32::MAX,
             padding: 2,
         };
-        action.apply(&mut tags, &ctx(1));
+        action.apply(&mut tags, &ctx(1), &regexes_for(&action));
         // u32::MAX + 1 saturates to u32::MAX rather than panicking or wrapping
         assert_eq!(tags.track_number, Some(u32::MAX));
+    }
+
+    #[test]
+    fn test_compile_regexes_invalid_pattern() {
+        let actions = vec![Action::Replace {
+            field: "title".to_string(),
+            search: "[unclosed".to_string(),
+            replace: "x".to_string(),
+            regex: true,
+        }];
+        assert!(compile_regexes(&actions).is_err());
     }
 }

@@ -17,14 +17,11 @@ export const pendingEditCount = derived(pendingEdits, ($pe) => $pe.size);
 
 // Merged view: loaded + pending overlay
 export const mergedTags = derived([loadedTags, pendingEdits], ([$loaded, $pending]) => {
-	const result = new Map<string, TagData>();
-	for (const [id, tags] of $loaded) {
-		const edits = $pending.get(id);
-		if (edits) {
-			result.set(id, { ...tags, ...edits });
-		} else {
-			result.set(id, tags);
-		}
+	if ($pending.size === 0) return $loaded;
+	const result = new Map($loaded);
+	for (const [id, edits] of $pending) {
+		const tags = result.get(id);
+		if (tags) result.set(id, { ...tags, ...edits });
 	}
 	return result;
 });
@@ -77,14 +74,17 @@ function intersectTags(tagsList: TagData[]): TagData {
 // Generation counter — incremented on clearTags() to invalidate in-flight fetches
 let fetchGeneration = 0;
 
+// IDs with a tag fetch currently in flight
+const tagsInFlight = new Set<string>();
+
 // Fetch tags for a set of file IDs
 export async function fetchTagsForFiles(ids: string[], force = false) {
 	const $filesById = get(filesById);
 	const $loaded = get(loadedTags);
 	const gen = fetchGeneration;
 
-	// Only fetch for files we don't already have (unless forced)
-	const needed = force ? ids : ids.filter((id) => !$loaded.has(id));
+	// Only fetch for files we don't already have or aren't already fetching (unless forced)
+	const needed = force ? ids : ids.filter((id) => !$loaded.has(id) && !tagsInFlight.has(id));
 	if (needed.length === 0) return;
 
 	// Build id -> relative_path map
@@ -96,6 +96,7 @@ export async function fetchTagsForFiles(ids: string[], force = false) {
 
 	if (Object.keys(paths).length === 0) return;
 
+	for (const id of needed) tagsInFlight.add(id);
 	try {
 		const tags = await readTags(needed, paths);
 		// Discard if directory changed while fetching
@@ -109,7 +110,27 @@ export async function fetchTagsForFiles(ids: string[], force = false) {
 		});
 	} catch (err) {
 		console.error('Failed to fetch tags:', err);
+	} finally {
+		for (const id of needed) tagsInFlight.delete(id);
 	}
+}
+
+// Debounced fetch for visible grid rows: fast tags first, then properties backfill
+let visibleTagsTimer: ReturnType<typeof setTimeout> | null = null;
+let pendingVisibleIds: string[] = [];
+
+export function queueVisibleTagsFetch(ids: string[]) {
+	pendingVisibleIds = [...new Set([...pendingVisibleIds, ...ids])];
+
+	if (visibleTagsTimer) clearTimeout(visibleTagsTimer);
+	visibleTagsTimer = setTimeout(() => {
+		visibleTagsTimer = null;
+		const batch = pendingVisibleIds;
+		pendingVisibleIds = [];
+		fetchTagsForFiles(batch).then(() => {
+			queuePropertiesFetch(batch);
+		});
+	}, 150);
 }
 
 // Track which files have had properties loaded
@@ -275,10 +296,16 @@ export function clearTags() {
 	fetchGeneration++; // invalidate any in-flight fetches
 	loadedTags.set(new Map());
 	pendingEdits.set(new Map());
+	tagsInFlight.clear();
 	propertiesLoaded.clear();
 	pendingPropertyIds = [];
 	if (propertiesTimer) {
 		clearTimeout(propertiesTimer);
 		propertiesTimer = null;
+	}
+	pendingVisibleIds = [];
+	if (visibleTagsTimer) {
+		clearTimeout(visibleTagsTimer);
+		visibleTagsTimer = null;
 	}
 }

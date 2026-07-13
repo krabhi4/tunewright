@@ -37,6 +37,8 @@ pub fn is_allowed_cover_host_safe(host: &str) -> bool {
 #[derive(Debug, Clone)]
 pub struct AppState {
     pub config: Config,
+    /// The data directory, canonicalized at startup in `main`;
+    /// `scanner::resolve_safe_path` requires an already-canonical root.
     pub data_root: PathBuf,
     pub users: UserManager,
     pub sessions: Arc<Mutex<HashMap<String, Session>>>,
@@ -51,6 +53,10 @@ pub struct AppState {
 
 impl AppState {
     pub fn new(config: Config, users: UserManager) -> Self {
+        // reqwest's rustls-no-provider feature panics on Client::build unless a
+        // crypto provider is installed process-wide first; idempotent, so safe
+        // for tests that construct AppState without going through main.
+        let _ = rustls::crypto::ring::default_provider().install_default();
         let data_root = config.data_dir.clone();
         let http_client = reqwest::Client::builder()
             .timeout(std::time::Duration::from_secs(10))

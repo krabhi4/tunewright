@@ -389,6 +389,7 @@
 								src={result.cover_art_url}
 								alt=""
 								class="result-thumb"
+								loading="lazy"
 								onerror={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }}
 							/>
 						{:else}

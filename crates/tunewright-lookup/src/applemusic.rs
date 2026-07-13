@@ -61,6 +61,9 @@ struct AppleLookupResult {
     artwork_url_100: Option<String>,
 }
 
+/// Rewrite the 100px search artwork to the full-size variant; only used on the
+/// release-detail path (search results keep the small thumbnail, matching the
+/// MusicBrainz provider).
 fn upgrade_cover_url(url: &Option<String>) -> Option<String> {
     url.as_ref()
         .map(|u| u.replace("100x100bb.jpg", "800x800bb.jpg"))
@@ -94,7 +97,7 @@ pub async fn search_releases(
                 year: extract_year(&r.release_date),
                 track_count: r.track_count,
                 source: LookupSource::AppleMusic,
-                cover_art_url: upgrade_cover_url(&r.artwork_url_100),
+                cover_art_url: r.artwork_url_100,
             })
         })
         .collect();

@@ -33,6 +33,9 @@ impl IntoResponse for AppError {
                 (StatusCode::UNPROCESSABLE_ENTITY, "Unsupported audio format")
             }
             TunewrightError::ImageError(_) => (StatusCode::BAD_REQUEST, "Image processing error"),
+            TunewrightError::InvalidFormatString(_) => {
+                (StatusCode::BAD_REQUEST, "Invalid format string or pattern")
+            }
             TunewrightError::TagReadError(_) => {
                 (StatusCode::INTERNAL_SERVER_ERROR, "Failed to read tags")
             }

@@ -11,9 +11,9 @@ image = { version = ">=0.25.0, <0.25.11", default-features = false, features = [
 serde = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }
-sha2 = "0.11"
-hex = "0.4"
-rayon = "1.12"
+sha2 = "0.10"
+hex = { workspace = true }
+rayon = { workspace = true }
 regex = "1"
 tracing = { workspace = true }
 walkdir = "2"

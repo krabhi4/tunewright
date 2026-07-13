@@ -18,7 +18,7 @@ async fn main() {
         )
         .init();
 
-    let config = Config::from_env();
+    let mut config = Config::from_env();
 
     tracing::info!("Tunewright v{}", env!("CARGO_PKG_VERSION"));
     tracing::info!("Data directory: {:?}", config.data_dir);
@@ -29,6 +29,13 @@ async fn main() {
         tracing::warn!("Data directory does not exist: {:?}", config.data_dir);
         std::fs::create_dir_all(&config.data_dir).expect("Failed to create data directory");
     }
+
+    // Canonicalize the data root once; every path-safety check compares
+    // resolved paths against this canonical root.
+    config.data_dir = config
+        .data_dir
+        .canonicalize()
+        .expect("Failed to canonicalize data directory");
 
     let users_path = config.data_dir.join("users.json");
     let users = UserManager::load(users_path);

@@ -80,7 +80,7 @@ pub fn extract_cover_art_thumbnail(
                 return Ok(Some((data, mime)));
             }
 
-            let thumb = img.resize(max_size, max_size, FilterType::Lanczos3);
+            let thumb = img.resize(max_size, max_size, FilterType::Triangle);
             let mut buf = Vec::new();
             let mut cursor = Cursor::new(&mut buf);
 
@@ -111,6 +111,7 @@ pub fn embed_cover_art(path: &Path, image_data: &[u8]) -> Result<(), TunewrightE
 fn embed_cover_art_inner(path: &Path, image_data: &[u8]) -> Result<(), TunewrightError> {
     let mut tagged = Probe::open(path)
         .map_err(|e| TunewrightError::TagWriteError(format!("{}: {}", path.display(), e)))?
+        .options(ParseOptions::new().read_properties(false))
         .read()
         .map_err(|e| TunewrightError::TagWriteError(format!("{}: {}", path.display(), e)))?;
 
@@ -164,6 +165,7 @@ pub fn remove_cover_art(path: &Path) -> Result<(), TunewrightError> {
 fn remove_cover_art_inner(path: &Path) -> Result<(), TunewrightError> {
     let mut tagged = Probe::open(path)
         .map_err(|e| TunewrightError::TagWriteError(format!("{}: {}", path.display(), e)))?
+        .options(ParseOptions::new().read_properties(false))
         .read()
         .map_err(|e| TunewrightError::TagWriteError(format!("{}: {}", path.display(), e)))?;
 

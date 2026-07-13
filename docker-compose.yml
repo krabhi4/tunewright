@@ -4,8 +4,12 @@ services:
     ports:
       - "8080:8080"
     volumes:
-      # Point this to your music library folder
+      # Point this to your music library folder. The container runs as
+      # non-root uid 65532, so /data must be writable by that uid (the app
+      # writes tags and users.json there).
       - ${MUSIC_DIR:-./music}:/data:rw
+    # Uncomment to run as a different uid/gid that owns your music library:
+    # user: "1000:1000"
     environment:
       TUNEWRIGHT_HOST: 0.0.0.0
       # Recommended: require a token to claim the first admin account, since
