@@ -3,10 +3,10 @@ use axum::Json;
 use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
-use tunewright_core::actions::{Action, ActionContext};
+use tunewright_core::actions::{self, Action, ActionContext};
 use tunewright_core::audio;
 use tunewright_core::scanner;
-use tunewright_core::types::{TagData, TagWriteChanges, WriteResult};
+use tunewright_core::types::{TagWriteChanges, TunewrightError, WriteResult};
 
 use crate::error::{join_error, AppError};
 use crate::state::AppState;
@@ -55,66 +55,60 @@ pub async fn execute(
     let data_root = state.data_root.clone();
 
     let results = tokio::task::spawn_blocking(move || {
+        let regexes = actions::compile_regexes(&body.actions)
+            .map_err(TunewrightError::InvalidFormatString)?;
         let valid_files = safe_file_entries(&data_root, body.files);
 
-        // Reads are independent, so run them in parallel. Apply + write stays
-        // serial (matching audio::batch_write_tags) so write ordering is unchanged.
-        let reads: Vec<Result<TagData, String>> = valid_files
+        // Each file's read → apply → write is independent (per-path locks
+        // serialize conflicting writes), so process files in parallel.
+        let results: Vec<WriteResult> = valid_files
             .par_iter()
-            .map(|(_, _, canonical_path)| {
-                audio::read_tags_fast(canonical_path).map_err(|e| format!("Read failed: {e}"))
+            .enumerate()
+            .map(|(i, (id, _rel_path, canonical_path))| {
+                let mut tags = match audio::read_tags_fast(canonical_path) {
+                    Ok(t) => t,
+                    Err(e) => {
+                        return WriteResult {
+                            id: id.clone(),
+                            status: "error".to_string(),
+                            error: Some(format!("Read failed: {e}")),
+                        };
+                    }
+                };
+
+                let filename = canonical_path
+                    .file_stem()
+                    .unwrap_or_default()
+                    .to_string_lossy()
+                    .to_string();
+
+                // Apply all actions in sequence
+                let ctx = ActionContext { index: i, filename };
+                for action in &body.actions {
+                    action.apply(&mut tags, &ctx, &regexes);
+                }
+
+                // Write modified tags back
+                let changes = TagWriteChanges::from(&tags);
+                match audio::write_tags(canonical_path, &changes) {
+                    Ok(()) => WriteResult {
+                        id: id.clone(),
+                        status: "ok".to_string(),
+                        error: None,
+                    },
+                    Err(e) => WriteResult {
+                        id: id.clone(),
+                        status: "error".to_string(),
+                        error: Some(e.to_string()),
+                    },
+                }
             })
             .collect();
 
-        let mut results = Vec::with_capacity(valid_files.len());
-
-        for (i, ((id, _rel_path, canonical_path), read)) in
-            valid_files.iter().zip(reads).enumerate()
-        {
-            let mut tags = match read {
-                Ok(t) => t,
-                Err(e) => {
-                    results.push(WriteResult {
-                        id: id.clone(),
-                        status: "error".to_string(),
-                        error: Some(e),
-                    });
-                    continue;
-                }
-            };
-
-            let filename = canonical_path
-                .file_stem()
-                .unwrap_or_default()
-                .to_string_lossy()
-                .to_string();
-
-            // Apply all actions in sequence
-            let ctx = ActionContext { index: i, filename };
-            for action in &body.actions {
-                action.apply(&mut tags, &ctx);
-            }
-
-            // Write modified tags back
-            let changes = TagWriteChanges::from(&tags);
-            match audio::write_tags(canonical_path, &changes) {
-                Ok(()) => results.push(WriteResult {
-                    id: id.clone(),
-                    status: "ok".to_string(),
-                    error: None,
-                }),
-                Err(e) => results.push(WriteResult {
-                    id: id.clone(),
-                    status: "error".to_string(),
-                    error: Some(e.to_string()),
-                }),
-            }
-        }
-
-        results
+        Ok::<_, TunewrightError>(results)
     })
     .await
-    .map_err(join_error)?;
+    .map_err(join_error)??;
 
     Ok(Json(ExecuteActionsResponse { results }))
 }
@@ -149,6 +143,8 @@ pub async fn preview(
     let data_root = state.data_root.clone();
 
     let previews = tokio::task::spawn_blocking(move || {
+        let regexes = actions::compile_regexes(&body.actions)
+            .map_err(TunewrightError::InvalidFormatString)?;
         let valid_files = safe_file_entries(&data_root, body.files);
 
         let mut previews = Vec::new();
@@ -176,7 +172,7 @@ pub async fn preview(
                 filename: stem,
             };
             for action in &body.actions {
-                action.apply(&mut modified, &ctx);
+                action.apply(&mut modified, &ctx, &regexes);
             }
 
             // Diff: find changed fields
@@ -190,10 +186,10 @@ pub async fn preview(
             }
         }
 
-        previews
+        Ok::<_, TunewrightError>(previews)
     })
     .await
-    .map_err(join_error)?;
+    .map_err(join_error)??;
 
     Ok(Json(PreviewActionsResponse { previews }))
 }

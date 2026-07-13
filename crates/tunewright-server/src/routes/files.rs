@@ -2,7 +2,7 @@ use axum::extract::{Query, State};
 use axum::Json;
 use serde::Deserialize;
 use tunewright_core::scanner;
-use tunewright_core::types::{DirNode, FileListResult};
+use tunewright_core::types::FileListResult;
 
 use crate::error::{join_error, AppError};
 use crate::state::AppState;
@@ -42,28 +42,4 @@ pub async fn list_files(
     .map_err(join_error)??;
 
     Ok(Json(result))
-}
-
-#[derive(Deserialize)]
-pub struct DirTreeQuery {
-    #[serde(default = "default_depth")]
-    pub depth: usize,
-}
-
-fn default_depth() -> usize {
-    2
-}
-
-pub async fn dir_tree(
-    State(state): State<AppState>,
-    Query(params): Query<DirTreeQuery>,
-) -> Result<Json<DirNode>, AppError> {
-    let data_root = state.data_root.clone();
-    let depth = params.depth.min(50);
-
-    let tree = tokio::task::spawn_blocking(move || scanner::build_dir_tree(&data_root, depth))
-        .await
-        .map_err(join_error)??;
-
-    Ok(Json(tree))
 }

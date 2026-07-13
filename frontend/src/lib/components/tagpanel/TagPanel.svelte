@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { selectedCount, selectedFiles, selectedIds } from '$lib/stores/files';
-	import { selectedTags, KEEP_VALUE, setPendingEdit, mergedTags, pendingEdits } from '$lib/stores/tags';
+	import { selectedTags, KEEP_VALUE, setPendingEdit, pendingEdits } from '$lib/stores/tags';
 	import { getCoverArtUrl, uploadCoverArt } from '$lib/api/coverart';
 	import { coverArtVersion, bumpCoverArt } from '$lib/stores/ui';
 	import { toast } from '$lib/stores/toast';
@@ -61,17 +61,13 @@
 		}
 	}
 
-	// Get cover art URL for first selected file (check tags for has_cover).
-	// Once any cover art has changed this session ($coverArtVersion > 0) we
-	// optimistically try to load, since has_cover from the listing can be stale.
+	// Cover art URL for the first selected file. The /coverart request 404s
+	// when there is no embedded art, and onerror hides the image.
 	let coverArtUrl = $derived.by(() => {
 		const files = $selectedFiles;
 		const version = $coverArtVersion;
 		if (files.length === 0) return null;
-		const first = files[0];
-		const tags = $mergedTags.get(first.id);
-		if (!tags?.has_cover && !first.has_cover && version === 0) return null;
-		return getCoverArtUrl(first.relative_path, 250) + `&_=${version}`;
+		return getCoverArtUrl(files[0].relative_path, 250) + `&_=${version}`;
 	});
 
 	$effect(() => {

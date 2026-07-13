@@ -34,12 +34,30 @@ export async function loadDirectory(path: string) {
 	selectedIds.set(new Set());
 
 	try {
-		const result = await listFiles(path, 0, 5000);
-		if (gen !== loadGeneration) return;
+		// The server paginates directories + files as one list, with total
+		// counting both; keep fetching pages until we have everything.
+		const pageSize = 5000;
+		const allFiles: FileEntry[] = [];
+		const allDirs: string[] = [];
+		let offset = 0;
+		let total = 0;
 
-		files.set(result.files);
-		totalCount.set(result.total);
-		directories.set(result.directories);
+		for (;;) {
+			const result = await listFiles(path, offset, pageSize);
+			if (gen !== loadGeneration) return;
+
+			allDirs.push(...result.directories);
+			allFiles.push(...result.files);
+			total = result.total;
+
+			if (result.directories.length + result.files.length === 0) break;
+			if (allDirs.length + allFiles.length >= total) break;
+			offset += pageSize;
+		}
+
+		files.set(allFiles);
+		totalCount.set(total);
+		directories.set(allDirs);
 	} catch (err) {
 		if (gen !== loadGeneration) return;
 		console.error('Failed to load directory:', err);

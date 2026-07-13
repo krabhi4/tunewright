@@ -60,7 +60,7 @@ pub fn read_tags_fast(path: &Path) -> Result<TagData, TunewrightError> {
     // Check picture count without loading picture data
     let has_cover = tags.iter().any(|t| !t.pictures().is_empty());
 
-    let extra = collect_extra_tags(&tags);
+    let extra = collect_extra_tags(&tags, false);
 
     Ok(TagData {
         title,
@@ -128,7 +128,7 @@ pub fn read_tags_full(path: &Path) -> Result<TagData, TunewrightError> {
 
     let has_cover = tags.iter().any(|t| !t.pictures().is_empty());
 
-    let extra = collect_extra_tags(&tags);
+    let extra = collect_extra_tags(&tags, true);
 
     Ok(TagData {
         title,
@@ -197,8 +197,11 @@ pub fn write_tags(path: &Path, changes: &TagWriteChanges) -> Result<(), Tunewrig
 }
 
 fn apply_tag_changes(path: &Path, changes: &TagWriteChanges) -> Result<(), TunewrightError> {
+    // Keep cover art (default) so existing pictures survive the save, but
+    // skip audio properties — they aren't needed for tag writes.
     let mut tagged = Probe::open(path)
         .map_err(|e| TunewrightError::TagWriteError(format!("{}: {}", path.display(), e)))?
+        .options(ParseOptions::new().read_properties(false))
         .read()
         .map_err(|e| TunewrightError::TagWriteError(format!("{}: {}", path.display(), e)))?;
 
@@ -327,9 +330,10 @@ fn apply_tag_changes(path: &Path, changes: &TagWriteChanges) -> Result<(), Tunew
     Ok(())
 }
 
+/// Parallel batch write tags; per-path locks serialize conflicting writes.
 pub fn batch_write_tags(changes: &[(String, PathBuf, TagWriteChanges)]) -> Vec<WriteResult> {
     changes
-        .iter()
+        .par_iter()
         .map(
             |(id, canonical_path, ch)| match write_tags(canonical_path, ch) {
                 Ok(()) => WriteResult {
@@ -552,12 +556,17 @@ fn string_to_item_key(key: &str) -> Option<ItemKey> {
     })
 }
 
-/// Collect all non-standard tag items into a HashMap
-fn collect_extra_tags(tags: &[&Tag]) -> HashMap<String, String> {
+/// Collect all non-standard tag items into a HashMap.
+/// Lyric keys (often multiple KB per file) are only kept when `include_lyrics`
+/// is set; the fast batch path skips them.
+fn collect_extra_tags(tags: &[&Tag], include_lyrics: bool) -> HashMap<String, String> {
     let mut extra = HashMap::new();
     for tag in tags {
         for item in tag.items() {
             if is_standard_key(item.key()) {
+                continue;
+            }
+            if !include_lyrics && matches!(item.key(), ItemKey::Lyrics | ItemKey::UnsyncLyrics) {
                 continue;
             }
             let key = item_key_to_string(item.key());
@@ -896,7 +905,7 @@ mod tests {
             let parsed = super::string_to_item_key(&key_str);
             assert_eq!(
                 parsed,
-                Some(key.clone()),
+                Some(key),
                 "Failed to parse debug string of {:?} back to ItemKey",
                 key
             );

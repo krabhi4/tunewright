@@ -1,4 +1,4 @@
-use crate::types::{AudioFormat, DirNode, FileEntry, FileListResult, TunewrightError};
+use crate::types::{AudioFormat, FileEntry, FileListResult, TunewrightError};
 use sha2::{Digest, Sha256};
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -13,6 +13,9 @@ pub fn file_id(relative_path: &str) -> String {
 
 /// Resolve a user-provided path safely within the data root.
 /// Prevents path traversal attacks.
+///
+/// `data_root` must already be canonicalized (done once at startup); resolved
+/// candidates are compared against it directly.
 pub fn resolve_safe_path(data_root: &Path, requested: &str) -> Result<PathBuf, TunewrightError> {
     let clean = requested.trim_start_matches('/');
     let candidate = data_root.join(clean);
@@ -21,9 +24,7 @@ pub fn resolve_safe_path(data_root: &Path, requested: &str) -> Result<PathBuf, T
         .canonicalize()
         .map_err(|_| TunewrightError::FileNotFound(candidate.clone()))?;
 
-    let root_canonical = data_root.canonicalize().map_err(TunewrightError::Io)?;
-
-    if !resolved.starts_with(&root_canonical) {
+    if !resolved.starts_with(data_root) {
         return Err(TunewrightError::PathTraversal(requested.to_string()));
     }
 
@@ -43,9 +44,7 @@ pub fn scan_directory(
         return Err(TunewrightError::FileNotFound(dir));
     }
 
-    let root_canonical = data_root.canonicalize()?;
-
-    let mut files: Vec<FileEntry> = Vec::new();
+    let mut candidates: Vec<(&fs::DirEntry, String, AudioFormat)> = Vec::new();
     let mut directories: Vec<String> = Vec::new();
 
     let mut entries: Vec<_> = fs::read_dir(&dir)?.filter_map(|e| e.ok()).collect();
@@ -54,9 +53,17 @@ pub fn scan_directory(
 
     for entry in &entries {
         let path = entry.path();
-        let metadata = entry.metadata().ok();
+        let file_type = entry.file_type().ok();
+        let is_symlink = file_type.is_some_and(|ft| ft.is_symlink());
 
-        if path.is_dir() {
+        // Classify from the readdir file type; only symlinks (and errors)
+        // need a follow-up stat to see what they point at.
+        let is_dir = match file_type {
+            Some(ft) if !ft.is_symlink() => ft.is_dir(),
+            _ => path.is_dir(),
+        };
+
+        if is_dir {
             if let Some(name) = path.file_name().and_then(|n| n.to_str()) {
                 directories.push(name.to_string());
             }
@@ -86,64 +93,27 @@ pub fn scan_directory(
         // file `path` is canonical too and we can strip the root prefix directly,
         // avoiding a canonicalize() syscall per file. Symlinks still get resolved
         // so their target is re-checked against the root.
-        let is_symlink = metadata
-            .as_ref()
-            .map(|m| m.file_type().is_symlink())
-            .unwrap_or(false);
         let relative = if is_symlink {
-            match path.canonicalize().ok().and_then(|p| {
-                p.strip_prefix(&root_canonical)
-                    .ok()
-                    .map(|r| r.to_path_buf())
-            }) {
+            match path
+                .canonicalize()
+                .ok()
+                .and_then(|p| p.strip_prefix(data_root).ok().map(|r| r.to_path_buf()))
+            {
                 Some(r) => r,
                 None => continue, // skip symlinks that resolve outside root / are broken
             }
         } else {
-            match path.strip_prefix(&root_canonical) {
+            match path.strip_prefix(data_root) {
                 Ok(r) => r.to_path_buf(),
                 Err(_) => continue,
             }
         };
 
-        let relative_str = relative.to_string_lossy().to_string();
-        let id = file_id(&relative_str);
-
-        let filename = path
-            .file_name()
-            .unwrap_or_default()
-            .to_string_lossy()
-            .to_string();
-
-        let size = metadata.as_ref().map(|m| m.len()).unwrap_or(0);
-
-        let modified_at = metadata
-            .as_ref()
-            .and_then(|m| m.modified().ok())
-            .and_then(|t| {
-                t.duration_since(std::time::UNIX_EPOCH)
-                    .ok()
-                    .map(|d| chrono_format_timestamp(d.as_secs()))
-            })
-            .unwrap_or_default();
-
-        // Skip probing files here for speed — duration and cover art
-        // will be fetched lazily via the tags endpoint
-        files.push(FileEntry {
-            id,
-            filename,
-            relative_path: relative_str,
-            format,
-            format_label: format.display_name().to_string(),
-            size,
-            duration_secs: None,
-            has_cover: false,
-            modified_at,
-        });
+        candidates.push((entry, relative.to_string_lossy().to_string(), format));
     }
 
     let total_dirs = directories.len();
-    let total_files = files.len();
+    let total_files = candidates.len();
     let total = total_dirs + total_files;
 
     let paginated_dirs: Vec<String> = if offset < total_dirs {
@@ -160,10 +130,44 @@ pub fn scan_directory(
         limit - paginated_dirs.len()
     };
 
-    let paginated_files: Vec<FileEntry> = files
+    // Build full entries (SHA-256 id, metadata, timestamp) only for the
+    // requested page.
+    let paginated_files: Vec<FileEntry> = candidates
         .into_iter()
         .skip(files_skip)
         .take(files_limit)
+        .map(|(entry, relative_str, format)| {
+            let metadata = entry.metadata().ok();
+            let id = file_id(&relative_str);
+
+            let filename = entry.file_name().to_string_lossy().to_string();
+
+            let size = metadata.as_ref().map(|m| m.len()).unwrap_or(0);
+
+            let modified_at = metadata
+                .as_ref()
+                .and_then(|m| m.modified().ok())
+                .and_then(|t| {
+                    t.duration_since(std::time::UNIX_EPOCH)
+                        .ok()
+                        .map(|d| chrono_format_timestamp(d.as_secs()))
+                })
+                .unwrap_or_default();
+
+            // Skip probing files here for speed — duration and cover art
+            // will be fetched lazily via the tags endpoint
+            FileEntry {
+                id,
+                filename,
+                relative_path: relative_str,
+                format,
+                format_label: format.display_name().to_string(),
+                size,
+                duration_secs: None,
+                has_cover: false,
+                modified_at,
+            }
+        })
         .collect();
 
     Ok(FileListResult {
@@ -171,73 +175,6 @@ pub fn scan_directory(
         files: paginated_files,
         total,
         directories: paginated_dirs,
-    })
-}
-
-/// Build a directory tree starting from data_root
-pub fn build_dir_tree(data_root: &Path, max_depth: usize) -> Result<DirNode, TunewrightError> {
-    let root_canonical = data_root.canonicalize()?;
-    let root_name = root_canonical
-        .file_name()
-        .unwrap_or_default()
-        .to_string_lossy()
-        .to_string();
-
-    fn walk(dir: &Path, root: &Path, depth: usize, max_depth: usize) -> Vec<DirNode> {
-        if depth >= max_depth {
-            return Vec::new();
-        }
-
-        let mut children: Vec<DirNode> = Vec::new();
-
-        let mut entries: Vec<_> = fs::read_dir(dir)
-            .ok()
-            .map(|rd| rd.filter_map(|e| e.ok()).collect())
-            .unwrap_or_default();
-
-        entries.sort_by_key(|a| a.file_name());
-
-        for entry in entries {
-            let path = entry.path();
-            if !path.is_dir() {
-                continue;
-            }
-
-            let name = path
-                .file_name()
-                .unwrap_or_default()
-                .to_string_lossy()
-                .to_string();
-
-            // Skip hidden directories
-            if name.starts_with('.') {
-                continue;
-            }
-
-            let relative = path
-                .strip_prefix(root)
-                .unwrap_or(&path)
-                .to_string_lossy()
-                .to_string();
-
-            let sub_children = walk(&path, root, depth + 1, max_depth);
-
-            children.push(DirNode {
-                name,
-                path: relative,
-                children: sub_children,
-            });
-        }
-
-        children
-    }
-
-    let children = walk(&root_canonical, &root_canonical, 0, max_depth);
-
-    Ok(DirNode {
-        name: root_name,
-        path: String::new(),
-        children,
     })
 }
 
@@ -346,6 +283,7 @@ mod tests {
 
         let temp_dir = std::env::temp_dir().join(format!("tunewright_scan_{}", rand_num()));
         std::fs::create_dir_all(&temp_dir).unwrap();
+        let temp_dir = temp_dir.canonicalize().unwrap();
 
         // Create 3 subdirectories
         std::fs::create_dir(temp_dir.join("dir_a")).unwrap();

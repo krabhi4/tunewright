@@ -2,6 +2,41 @@
 
 All notable changes to Tunewright are documented here.
 
+## [1.0.1] - 2026-07-14
+
+A full-workspace optimization audit (34 verified findings across runtime, build, Docker, CI, and frontend) with every finding applied, plus correctness fixes discovered along the way.
+
+### Fixed
+
+- **Embedded Cover Art Now Displays** - Tag reads skipped picture frames entirely, so `has_cover` was always false and existing embedded artwork never appeared in the tag panel; the thumbnail now loads unconditionally and hides itself only when the file truly has no art.
+- **Large Directory Truncation** - Directories with more than 5000 entries silently truncated in the grid while the status bar showed the full count; the file list now pages through the entire directory.
+- **Safari Keyboard Navigation** - URL state syncing called `history.replaceState` on every arrow-key press, tripping Safari's 100-calls-per-30-seconds limit and breaking the app during key-repeat; syncing is now debounced.
+- **Invalid Patterns Return 400** - An invalid regex in a Replace action or an invalid filename-to-tag pattern now fails the request with a single clear `400 Bad Request` instead of being silently swallowed per file or returning a 500.
+- **API Documentation Drift** - `docs/api.md` request/response shapes are regenerated from the actual handlers; the tags, files, and rename endpoints all documented shapes the server never accepted.
+
+### Performance
+
+- **Parallel Batch Writes** - Batch tag writes and batch action executions now run across all cores (reads already did), cutting large-batch write time substantially on SSDs.
+- **Cover-Art Caching** - `GET /coverart` responses carry an `ETag` and answer `If-None-Match` with `304`, with `max-age` raised from 60s to 1h; thumbnail resizing switched from Lanczos3 to the several-times-faster Triangle filter; embedding one cover into many files shares the downloaded bytes and runs concurrently instead of copying and writing serially.
+- **One Regex Compile Per Request** - Replace actions compiled their regex once per file, so a 1000-file preview compiled the same pattern 1000 times; patterns now compile once per request.
+- **Leaner Tag Writes** - Write paths no longer parse the duration/bitrate/sample-rate data they discard.
+- **Cheaper Directory Scans** - One stat syscall per entry instead of two, and per-file metadata (hash id, timestamp formatting) is computed only for the requested page instead of the whole directory; the data root is canonicalized once at startup instead of once per file per batch request.
+- **Smaller Tag Payloads** - Batch tag reads omit multi-kilobyte lyrics fields the grid never displays (full single-file reads keep them).
+- **Frontend Hot Paths** - Scrolling no longer fires duplicate overlapping tag-read requests (in-flight tracking plus a debounce); filename/size/format sorts no longer resort on every tag fetch; tag-edit overlays copy the loaded map instead of rebuilding it per update.
+- **Lookup Thumbnails** - Apple Music search results load 100px artwork instead of 800px for 36px thumbnails, and result thumbnails lazy-load.
+
+### Changed
+
+- **Non-Root Distroless Docker Image** - The runtime image is now `gcr.io/distroless/cc-debian12:nonroot` (was `debian:bookworm-slim` running as root): 64.5 MB, no shell or package manager, and the server runs as uid 65532. **Migration:** the mounted `/data` directory must be writable by uid 65532, or set `user:` in your compose file to match your library's owner (see the note in `docker-compose.yml`).
+- **Smaller Release Binary** - Release builds are stripped and use thin LTO with a single codegen unit.
+
+### Internal
+
+- **CI Speedups** - Docker builds use cargo-chef so dependency compilation is cached across CI runs (the old BuildKit cache mounts were never persisted by the GitHub Actions cache); the docker job runs in parallel with the test jobs instead of after them; a redundant `cargo check` step was removed; github-actions dependabot updates are grouped into one PR.
+- **Dependency Trims** - reqwest now uses ring instead of aws-lc-rs for TLS (drops the slowest-compiling crate in the tree); tokio narrowed from `full` to the features in use; chrono drops its time-zone machinery; sha2 pinned to dedupe a duplicated RustCrypto stack; reqwest, rayon, and hex moved to workspace dependencies.
+- **Dead Code Removal** - The unused `GET /files/tree` endpoint and its recursive tree walker are gone.
+- **Build Hygiene** - Docker builds enforce `Cargo.lock` with `--locked`; `.dockerignore` covers nested `.env` files, `docs/`, and `.github/`.
+
 ## [1.0.0] - 2026-06-06
 
 Tunewright 1.0. A full-workspace bug audit (69 confirmed findings: 1 critical, 17 high, 30 medium, 21 low) was completed and every finding fixed, alongside a security hardening pass and a new in-app notification system.

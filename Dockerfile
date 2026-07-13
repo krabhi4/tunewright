@@ -8,24 +8,31 @@ RUN --mount=type=cache,target=/root/.local/share/pnpm/store \
 COPY frontend/ ./
 RUN pnpm run build
 
-# Stage 2: Build Rust backend
+# Stage 2: Build Rust backend (cargo-chef splits dependency compilation into
+# its own cacheable layer).
 # Track latest stable Rust (matches the stable CI job; avoids MSRV-pin breakage).
-FROM rust:1-bookworm AS backend-builder
+FROM rust:1-bookworm AS chef
+RUN cargo install cargo-chef --locked
 WORKDIR /app
 
-COPY Cargo.toml Cargo.lock* ./
+FROM chef AS planner
+COPY Cargo.toml Cargo.lock ./
 COPY crates/ crates/
+RUN cargo chef prepare --recipe-path recipe.json
 
-RUN --mount=type=cache,target=/usr/local/cargo/registry \
-    --mount=type=cache,target=/app/target \
-    cargo build --release && \
+FROM chef AS backend-builder
+COPY --from=planner /app/recipe.json recipe.json
+RUN cargo chef cook --release --locked --recipe-path recipe.json
+
+COPY Cargo.toml Cargo.lock ./
+COPY crates/ crates/
+RUN cargo build --release --locked && \
     cp target/release/tunewright-server /app/tunewright-server
 
-# Stage 3: Runtime
-FROM debian:bookworm-slim
-RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates && rm -rf /var/lib/apt/lists/*
+# Stage 3: Runtime (distroless ships glibc + CA certs; runs as uid 65532)
+FROM gcr.io/distroless/cc-debian12:nonroot
 
-COPY --from=backend-builder /app/tunewright-server /usr/local/bin/
+COPY --from=backend-builder /app/tunewright-server /usr/local/bin/tunewright-server
 COPY --from=frontend-builder /app/frontend/build /srv/static
 
 ENV TUNEWRIGHT_STATIC_DIR=/srv/static
@@ -36,4 +43,4 @@ ENV TUNEWRIGHT_HOST=0.0.0.0
 EXPOSE 8080
 VOLUME ["/data"]
 
-ENTRYPOINT ["tunewright-server"]
+ENTRYPOINT ["/usr/local/bin/tunewright-server"]
