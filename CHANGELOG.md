@@ -6,7 +6,8 @@ All notable changes to Tunewright are documented here.
 
 ### Fixed
 
-- **Metadata Lookup Showed No Results** - MusicBrainz and Apple Music searches returned matches (HTTP 200 with a full result set) but the modal rendered nothing. A reactive effect intended to clear stale results on a provider switch also tracked the in-flight `searching`/`loadingRelease` flags, so it wiped `searchResults` the instant a search completed. The reset now runs only when the provider selector actually changes.
+- **Metadata Lookup Showed No Results** - MusicBrainz and Apple Music searches returned matches (HTTP 200 with a full result set) but the modal rendered nothing, or briefly showed results that vanished a beat later. Two reactive effects cleared `searchResults` out from under a completed search: the provider-reset effect also tracked the in-flight `searching`/`loadingRelease` flags (wiping results the instant a search finished), and the auto-fill effect re-ran every time the selected files' tags/properties finished loading in the background. Each now fires only on its intended trigger (an explicit provider change; the modal opening).
+- **Apply-with-Rename Failed on Repeat** - After applying a looked-up release with "rename files" enabled, the file list was not refreshed, so the renamed files' paths went stale in the browser and a subsequent apply or save wrote to the pre-rename paths and failed with "File not found". The directory now reloads after a rename, matching the Rename tool.
 
 ## [1.0.1] - 2026-07-14
 
