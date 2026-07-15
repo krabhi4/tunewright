@@ -2,6 +2,12 @@
 
 All notable changes to Tunewright are documented here.
 
+## [1.0.2] - 2026-07-15
+
+### Fixed
+
+- **Metadata Lookup Showed No Results** - MusicBrainz and Apple Music searches returned matches (HTTP 200 with a full result set) but the modal rendered nothing. A reactive effect intended to clear stale results on a provider switch also tracked the in-flight `searching`/`loadingRelease` flags, so it wiped `searchResults` the instant a search completed. The reset now runs only when the provider selector actually changes.
+
 ## [1.0.1] - 2026-07-14
 
 A full-workspace optimization audit (34 verified findings across runtime, build, Docker, CI, and frontend) with every finding applied, plus correctness fixes discovered along the way.

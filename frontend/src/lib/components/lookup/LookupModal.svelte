@@ -86,15 +86,14 @@
 		}
 	});
 
-	// Clear stale results when provider changes
-	$effect(() => {
-		provider;
-		if (!searching && !loadingRelease) {
-			searchResults = [];
-			searchError = '';
-			selectedRelease = null;
-		}
-	});
+	// Stale results are cleared when the user switches provider, via the
+	// <select> onchange handler below. (A prior $effect keyed off
+	// searching/loadingRelease wiped results the instant a search completed.)
+	function onProviderChange() {
+		searchResults = [];
+		searchError = '';
+		selectedRelease = null;
+	}
 
 	async function handleSearch() {
 		if (!searchQuery.trim()) return;
@@ -318,6 +317,7 @@
 			<select
 				class="provider-select"
 				bind:value={provider}
+				onchange={onProviderChange}
 				disabled={searching || loadingRelease}
 				aria-label="Search Provider"
 			>
