@@ -16,9 +16,12 @@
 	interface Props {
 		open: boolean;
 		onClose: () => void;
+		/** Called after an apply that renamed files, so the parent can reload
+		 * the directory (renames rewrite paths; the store must not go stale). */
+		onApplied?: () => void;
 	}
 
-	let { open, onClose }: Props = $props();
+	let { open, onClose, onApplied }: Props = $props();
 
 	// Step: 'search' | 'match'
 	let step = $state<'search' | 'match'>('search');
@@ -66,10 +69,15 @@
 		selectedUnmatchedIdx = selectedUnmatchedIdx === idx ? null : idx;
 	}
 
-	// Auto-fill search from selected tags
+	// Auto-fill search + reset state only when the modal transitions to open.
+	// selectedTags is read with get() (non-reactive) so the async tag/properties
+	// backfill for the selected files doesn't re-run this effect and wipe an
+	// in-progress search. (Tracking $selectedTags here cleared results a beat
+	// after every search once the backfill landed.)
+	let wasOpen = false;
 	$effect(() => {
-		if (open) {
-			const tags = $selectedTags;
+		if (open && !wasOpen) {
+			const tags = get(selectedTags);
 			if (tags) {
 				const parts = [tags.artist, tags.album].filter(
 					(v) => v && v !== KEEP_VALUE
@@ -84,6 +92,7 @@
 			unmatchedFiles = [];
 			provider = 'musicbrainz';
 		}
+		wasOpen = open;
 	});
 
 	// Stale results are cleared when the user switches provider, via the
@@ -279,6 +288,10 @@
 			}
 
 			onClose();
+
+			// Renames rewrite file paths on disk; refresh the directory so the
+			// store doesn't keep stale paths (which break a later apply/save).
+			if (renameFiles) onApplied?.();
 
 			// Embed cover art in the background after the modal closes
 			if (coverArtUrl && coverPaths.length > 0) {

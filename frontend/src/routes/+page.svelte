@@ -336,6 +336,7 @@
 <LookupModal
 	open={lookupModalOpen}
 	onClose={() => (lookupModalOpen = false)}
+	onApplied={() => { clearTags(); loadDirectory($currentPath); }}
 />
 
 <ConfirmModal
