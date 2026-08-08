@@ -8,12 +8,16 @@ pub mod rename;
 pub mod tags;
 
 use axum::extract::DefaultBodyLimit;
+use axum::http::{header, HeaderValue};
 use axum::middleware;
 use axum::response::IntoResponse;
 use axum::routing::{delete, get, post};
 use axum::Router;
 use tower_http::services::{ServeDir, ServeFile};
+use tower_http::set_header::SetResponseHeaderLayer;
 use tower_http::trace::TraceLayer;
+
+const CSP: &str = "img-src 'self' data: https:; style-src 'self' 'unsafe-inline'; connect-src 'self'; object-src 'none'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'";
 
 use crate::auth;
 use crate::state::AppState;
@@ -80,6 +84,28 @@ pub fn create_router(state: AppState) -> Router {
     Router::new()
         .nest("/api/v1", api)
         .fallback_service(ServeDir::new(&static_dir).not_found_service(ServeFile::new(index_file)))
+        .layer(SetResponseHeaderLayer::if_not_present(
+            header::X_CONTENT_TYPE_OPTIONS,
+            HeaderValue::from_static("nosniff"),
+        ))
+        .layer(SetResponseHeaderLayer::if_not_present(
+            header::X_FRAME_OPTIONS,
+            HeaderValue::from_static("DENY"),
+        ))
+        .layer(SetResponseHeaderLayer::if_not_present(
+            header::REFERRER_POLICY,
+            HeaderValue::from_static("no-referrer"),
+        ))
+        .layer(SetResponseHeaderLayer::if_not_present(
+            header::CONTENT_SECURITY_POLICY,
+            HeaderValue::from_static(CSP),
+        ))
+        .layer(SetResponseHeaderLayer::if_not_present(
+            header::HeaderName::from_static("permissions-policy"),
+            HeaderValue::from_static(
+                "geolocation=(), camera=(), microphone=(), interest-cohort=()",
+            ),
+        ))
         .layer(TraceLayer::new_for_http())
         .with_state(state)
 }

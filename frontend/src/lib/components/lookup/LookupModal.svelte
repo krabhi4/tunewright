@@ -10,6 +10,21 @@
 	import { toast } from '$lib/stores/toast';
 	import { selectedIds, files } from '$lib/stores/files';
 	import { get } from 'svelte/store';
+
+	const COVER_HOSTS = ['coverartarchive.org', 'archive.org', 'mzstatic.com'];
+
+	function safeCoverUrl(raw: string | null | undefined): string | undefined {
+		if (!raw) return undefined;
+		try {
+			const url = new URL(raw);
+			if (url.protocol !== 'https:') return undefined;
+			const host = url.hostname.replace(/\.$/, '');
+			const ok = COVER_HOSTS.some((h) => host === h || host.endsWith(`.${h}`));
+			return ok ? url.toString() : undefined;
+		} catch {
+			return undefined;
+		}
+	}
 	import { selectedTags } from '$lib/stores/tags';
 	import { formatDuration } from '$lib/utils/format';
 
@@ -356,9 +371,10 @@
 				<div class="release-header">
 					{#if selectedRelease.cover_art_url}
 						<img
-							src={selectedRelease.cover_art_url}
+							src={safeCoverUrl(selectedRelease.cover_art_url)}
 							alt="Cover art for {selectedRelease.title} by {selectedRelease.artist}"
 							class="release-cover"
+							referrerpolicy="no-referrer"
 							onerror={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }}
 						/>
 					{/if}
@@ -399,10 +415,11 @@
 							</div>
 						{:else if result.cover_art_url}
 							<img
-								src={result.cover_art_url}
+								src={safeCoverUrl(result.cover_art_url)}
 								alt=""
 								class="result-thumb"
 								loading="lazy"
+								referrerpolicy="no-referrer"
 								onerror={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }}
 							/>
 						{:else}

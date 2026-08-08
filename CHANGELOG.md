@@ -2,6 +2,53 @@
 
 All notable changes to Tunewright are documented here.
 
+## [1.0.3] - 2026-08-09
+
+A security release. An existing audit report was verified finding-by-finding against the code (7 of its 38 findings turned out to be incorrect and were withdrawn, and 15 real issues it had missed were found), then everything genuine was fixed and the fixes were themselves adversarially reviewed twice more.
+
+**Migration:** if you run the Docker image with its default `TUNEWRIGHT_HOST=0.0.0.0` and have *not* yet created your admin account, the server now refuses to hand that account to whoever connects first. It generates a one-time setup token at startup and prints it to the log; read it with `docker compose logs` and enter it on the setup screen. Set `TUNEWRIGHT_SETUP_TOKEN` to choose your own instead. Existing installations that already have a user are unaffected.
+
+### Security
+
+- **Setup Window No Longer Open to the Network** - `POST /auth/setup` is unauthenticated by design and grants the first caller super-admin over the whole music library. With the container's default `0.0.0.0` bind and no token configured, anyone who could reach the port could claim it. Previously this only logged a warning; the server now mints a setup token and prints it, so the window is closed by default.
+- **Stored XSS via Cover Art** - The `Content-Type` served by `GET /coverart` was taken verbatim from the audio file's embedded picture frame, which is attacker-controlled and which lofty preserves unvalidated. A crafted file requested with `size=0` returned arbitrary bytes as `text/html` on the application's own origin. The MIME is now derived from the payload's magic bytes and constrained to an image allowlist at both the source and the response, with `nosniff` and `Content-Disposition: inline`.
+- **Unauthenticated Argon2id Amplification** - `/auth/setup`, `/auth/register`, and `/auth/login` are public and each ran a full Argon2id hash (~19 MiB, t=2) per request, with setup and register hashing *before* their cheap rejection checks. Those checks now run first, and all password hashing goes through a concurrency limiter.
+- **Login Throttle Rewritten** - The previous throttle was bypassable by issuing guesses concurrently (all attempts read the same counter and slept in parallel) and was keyed only on username. Attempts for a username now serialize, and failed responses are delayed on an escalating, capped schedule. A correct password is always verified and always accepted, so an attacker cannot lock an account's owner out by failing repeatedly.
+- **Image Decompression Bomb** - Cover-art thumbnailing decoded attacker-supplied bytes with the image crate's defaults: no dimension ceiling and a 512 MB allocation budget. A 476 KB file decoding to 9000x9000 is now refused in ~15 ms with flat memory, and art too large to expand is served as stored rather than failing.
+- **SSRF via Lookup Redirects** - The HTTP client used for MusicBrainz and Apple Music had no redirect policy, so it followed up to 10 hops to any host including link-local metadata addresses. It now re-validates scheme and host against an allowlist on every hop, matching the cover-art client, which additionally now requires https.
+- **Filesystem Existence Oracle** - `GET /files` returned a different status for a traversal path that exists on the host versus one that does not, letting an authenticated user probe the filesystem outside the data root. Parent-directory components are now rejected before the filesystem is touched, so both cases are identical.
+- **Security Headers** - Responses now carry `Content-Security-Policy`, `X-Frame-Options`, `X-Content-Type-Options`, `Referrer-Policy`, and `Permissions-Policy`. `script-src` is delivered as hashes by the SvelteKit build so the app's own inline bootstrap stays trusted.
+- **Inter-Process File Locking** - Per-file locking synchronized threads within one process only, so two instances sharing a data directory could interleave writes. Writes now also take an OS advisory lock, with a bounded wait so a stuck external process cannot wedge the worker pool, and the crash-safe temp file is per-process.
+- **Batch Limits** - Tag, action, rename, and cover-art endpoints had no explicit ceiling. They are now bounded, with actions capped separately and by the `files x actions` product, since that is what actually drives the work.
+- **Bounded Lookup Responses** - Provider responses were buffered into memory with no size limit; they are now capped and read in chunks, matching the cover-art download path.
+- **Tag Value Limits** - Per-value and per-file caps when collecting non-standard tags from untrusted audio files.
+- **Error Message Sanitization** - Internal error strings, absolute filesystem paths, and provider errors are no longer echoed to clients; they are logged server-side and replaced with generic messages.
+- **Invite Tokens Out of the Query String** - Invite links are now `/register#token=...`, so the token stays in the fragment and out of reverse-proxy access logs and `Referer` headers. Existing `?token=` links continue to work.
+- **Frontend Hardening** - Third-party cover-art URLs from lookup providers are validated against an allowlist before rendering and carry `referrerpolicy="no-referrer"`; the icon component's `{@html}` sink is now typed to its own icon set so an arbitrary string cannot reach it.
+- **Constant-Time Setup Token Comparison** - Plus the removal of a 403-versus-409 response oracle that revealed whether a supplied setup token was correct.
+
+### Fixed
+
+- **Client Errors Returned 5xx** - A malformed cover-art URL, a rejected host, a non-image upload, and a malformed MusicBrainz or Apple Music id all returned `500` or `502` for what are plainly client mistakes. They now return `400`, and oversized batches return `413`, each with an accurate message.
+- **Setup Impossible at `RUST_LOG=error`** - The generated setup token was only emitted through `tracing`, so a stricter log filter silently swallowed it and left the instance unable to complete setup. It is now written to stderr as well.
+- **Filename Sanitization** - Control characters are stripped from generated filenames, and names are bounded to fit within filesystem limits without splitting a multi-byte character.
+- **Flaky Test Suite** - Test temporary directories were named from a nanosecond timestamp and collided under parallel execution, failing a different test on roughly one run in four.
+
+### Changed
+
+- **`TUNEWRIGHT_COOKIE_SECURE` and `TUNEWRIGHT_SETUP_TOKEN` Documented** - Both are now in the README configuration table, which also no longer claims `TUNEWRIGHT_HOST` defaults to `0.0.0.0` (the binary defaults to `127.0.0.1`; only the container image overrides it).
+- **Compiled Regex Caching** - `$regex()` compiled its pattern once per file inside the batch loops; patterns are now cached with a bounded budget and a size limit chosen by measuring real-world patterns against automaton-blowup ones.
+- **Logout Cookie** - The session-clearing cookie now honours `TUNEWRIGHT_COOKIE_SECURE` like the session cookie does.
+
+### Removed
+
+- **Unused `walkdir` Dependency** - Declared but never used; the scanner uses `std::fs::read_dir` directly.
+
+### Internal
+
+- **Verification** - 131 unit tests (up from 103) and a new 81-case end-to-end suite covering every route plus each security property claimed above, run against a freshly provisioned container. Two tests were found to be asserting conditions that could no longer occur and were repaired and mutation-tested.
+- **Audit Report Corrected** - `SECURITY_AUDIT.md` now records the verification verdict for every original finding, the newly discovered issues, and an explicit list of the report's own suggested fixes that must not be applied because they would not compile, are no-ops, or would cause data loss.
+
 ## [1.0.2] - 2026-07-15
 
 ### Fixed

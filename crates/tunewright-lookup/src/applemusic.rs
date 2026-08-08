@@ -106,9 +106,13 @@ pub async fn search_releases(
 }
 
 /// Get detailed album information and tracks via Apple Music Lookup API
+/// Apple Music ids are numeric; validating up front prevents path injection.
+pub fn is_valid_apple_id(id: &str) -> bool {
+    !id.is_empty() && id.chars().all(|c| c.is_ascii_digit())
+}
+
 pub async fn get_release(client: &Client, id: &str) -> Result<ReleaseDetail, String> {
-    // Validate ID is numeric to prevent path injection
-    if !id.chars().all(|c| c.is_ascii_digit()) {
+    if !is_valid_apple_id(id) {
         return Err("Invalid Apple Music ID".to_string());
     }
 

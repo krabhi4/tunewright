@@ -20,6 +20,13 @@ pub fn resolve_safe_path(data_root: &Path, requested: &str) -> Result<PathBuf, T
     let clean = requested.trim_start_matches('/');
     let candidate = data_root.join(clean);
 
+    if candidate
+        .components()
+        .any(|c| matches!(c, std::path::Component::ParentDir))
+    {
+        return Err(TunewrightError::PathTraversal(requested.to_string()));
+    }
+
     let resolved = candidate
         .canonicalize()
         .map_err(|_| TunewrightError::FileNotFound(candidate.clone()))?;

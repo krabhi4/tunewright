@@ -1,4 +1,5 @@
 use crate::types::TunewrightError;
+use sha2::{Digest, Sha256};
 use std::path::Path;
 
 /// Crash-safe in-place file mutation: run `mutate` against a temp copy of
@@ -15,7 +16,24 @@ where
     let file_name = path.file_name().ok_or_else(|| {
         TunewrightError::TagWriteError(format!("{}: invalid file name", path.display()))
     })?;
-    let tmp_path = path.with_file_name(format!(".tw-tmp-{}", file_name.to_string_lossy()));
+    // Process id keeps concurrent instances sharing a data directory from
+    // clobbering each other's temp copy. The source name is hashed rather than
+    // embedded so the result is always well under the 255-byte NAME_MAX.
+    // The extension is preserved because lofty infers the container format
+    // from it; only the stem is hashed.
+    let mut hasher = Sha256::new();
+    hasher.update(file_name.as_encoded_bytes());
+    let digest = hasher.finalize();
+    let ext = path
+        .extension()
+        .map(|e| format!(".{}", e.to_string_lossy()))
+        .unwrap_or_default();
+    let tmp_path = path.with_file_name(format!(
+        ".tw-tmp-{}-{}{}",
+        std::process::id(),
+        hex::encode(&digest[..8]),
+        ext
+    ));
 
     let result = (|| {
         // fs::copy preserves permissions, keeping the swapped-in file consistent.
@@ -62,6 +80,15 @@ mod tests {
         nanos.wrapping_add(count)
     }
 
+    fn leftover_temp_files(dir: &std::path::Path) -> Vec<String> {
+        std::fs::read_dir(dir)
+            .unwrap()
+            .filter_map(|e| e.ok())
+            .map(|e| e.file_name().to_string_lossy().to_string())
+            .filter(|n| n.starts_with(".tw-tmp-"))
+            .collect()
+    }
+
     #[test]
     fn test_atomic_update_success_replaces_content_and_cleans_temp() {
         let temp_dir = std::env::temp_dir().join(format!("tunewright_test_{}", rand_num()));
@@ -75,8 +102,9 @@ mod tests {
         .unwrap();
 
         assert_eq!(std::fs::read(&path).unwrap(), b"new");
-        assert!(
-            !temp_dir.join(".tw-tmp-f.txt").exists(),
+        assert_eq!(
+            leftover_temp_files(&temp_dir),
+            Vec::<String>::new(),
             "temp file must not be left behind on success"
         );
 
@@ -103,8 +131,9 @@ mod tests {
             b"old",
             "original must be byte-identical after a failed mutation"
         );
-        assert!(
-            !temp_dir.join(".tw-tmp-f.txt").exists(),
+        assert_eq!(
+            leftover_temp_files(&temp_dir),
+            Vec::<String>::new(),
             "temp file must be cleaned up on failure"
         );
 

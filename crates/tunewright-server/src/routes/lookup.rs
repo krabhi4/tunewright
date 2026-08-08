@@ -16,11 +16,21 @@ pub struct SearchQuery {
     pub query: String,
 }
 
+/// A malformed id is the caller's mistake, not an upstream failure.
+fn bad_request(msg: &str) -> Response {
+    (
+        StatusCode::BAD_REQUEST,
+        Json(serde_json::json!({ "error": msg })),
+    )
+        .into_response()
+}
+
 /// Map a lookup-provider error string to a 502 Bad Gateway JSON response.
 fn bad_gateway(e: String) -> Response {
+    tracing::error!("Lookup provider error: {e}");
     (
         StatusCode::BAD_GATEWAY,
-        Json(serde_json::json!({ "error": e })),
+        Json(serde_json::json!({ "error": "Lookup provider unavailable" })),
     )
         .into_response()
 }
@@ -83,6 +93,9 @@ pub async fn musicbrainz_release(
     if let Err(resp) = rate_limit_musicbrainz(&state).await {
         return resp;
     }
+    if !musicbrainz::is_valid_mbid(&mbid) {
+        return bad_request("Invalid MusicBrainz ID");
+    }
     match musicbrainz::get_release(&state.http_client, &mbid).await {
         Ok(detail) => Json(detail).into_response(),
         Err(e) => bad_gateway(e),
@@ -103,6 +116,9 @@ pub async fn applemusic_release(
     State(state): State<AppState>,
     Path(id): Path<String>,
 ) -> Result<Json<ReleaseDetail>, Response> {
+    if !applemusic::is_valid_apple_id(&id) {
+        return Err(bad_request("Invalid Apple Music ID"));
+    }
     applemusic::get_release(&state.http_client, &id)
         .await
         .map(Json)
@@ -148,10 +164,16 @@ mod tests {
     }
 
     fn rand_num() -> u64 {
+        use std::sync::atomic::{AtomicU64, Ordering};
         use std::time::{SystemTime, UNIX_EPOCH};
-        SystemTime::now()
+        static COUNTER: AtomicU64 = AtomicU64::new(0);
+        let nanos = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .unwrap()
-            .as_nanos() as u64
+            .as_nanos() as u64;
+        nanos
+            .wrapping_mul(1000)
+            .wrapping_add(COUNTER.fetch_add(1, Ordering::Relaxed))
+            .wrapping_add(std::process::id() as u64)
     }
 }

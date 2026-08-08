@@ -556,6 +556,9 @@ fn string_to_item_key(key: &str) -> Option<ItemKey> {
     })
 }
 
+const MAX_EXTRA_TAGS: usize = 256;
+const MAX_TAG_VALUE_BYTES: usize = 64 * 1024;
+
 /// Collect all non-standard tag items into a HashMap.
 /// Lyric keys (often multiple KB per file) are only kept when `include_lyrics`
 /// is set; the fast batch path skips them.
@@ -569,12 +572,15 @@ fn collect_extra_tags(tags: &[&Tag], include_lyrics: bool) -> HashMap<String, St
             if !include_lyrics && matches!(item.key(), ItemKey::Lyrics | ItemKey::UnsyncLyrics) {
                 continue;
             }
+            if extra.len() >= MAX_EXTRA_TAGS {
+                return extra;
+            }
             let key = item_key_to_string(item.key());
             if extra.contains_key(&key) {
                 continue; // first tag wins
             }
             if let ItemValue::Text(val) = item.value() {
-                if !val.is_empty() {
+                if !val.is_empty() && val.len() <= MAX_TAG_VALUE_BYTES {
                     extra.insert(key, val.to_string());
                 }
             }

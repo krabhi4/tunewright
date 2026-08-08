@@ -7,6 +7,10 @@ use std::time::Instant;
 
 const SESSION_TTL_SECS: u64 = 86400; // 24 hours
 
+const MAX_CONCURRENT_HASHES: usize = 4;
+
+const MAX_LOGIN_GATES: usize = 1000;
+
 #[derive(Debug, Clone)]
 pub struct Session {
     pub user_id: String,
@@ -22,6 +26,24 @@ pub fn is_allowed_cover_host(host: &str) -> bool {
         || host.ends_with(".archive.org")
         || host == "mzstatic.com"
         || host.ends_with(".mzstatic.com")
+}
+
+pub fn is_allowed_lookup_host(host: &str) -> bool {
+    let host = host.trim_end_matches('.');
+    host == "musicbrainz.org"
+        || host.ends_with(".musicbrainz.org")
+        || host == "itunes.apple.com"
+        || is_allowed_cover_host(host)
+}
+
+pub fn is_allowed_lookup_host_safe(host: &str) -> bool {
+    if host.is_empty() {
+        return false;
+    }
+    if host.parse::<std::net::IpAddr>().is_ok() || (host.starts_with('[') && host.ends_with(']')) {
+        return false;
+    }
+    is_allowed_lookup_host(host)
 }
 
 pub fn is_allowed_cover_host_safe(host: &str) -> bool {
@@ -44,6 +66,8 @@ pub struct AppState {
     pub sessions: Arc<Mutex<HashMap<String, Session>>>,
     pub musicbrainz_next_allowed: Arc<Mutex<Instant>>,
     pub failed_logins: Arc<Mutex<HashMap<String, (u32, Instant)>>>,
+    pub password_hash_limit: Arc<tokio::sync::Semaphore>,
+    pub login_gates: Arc<Mutex<HashMap<String, Arc<tokio::sync::Mutex<()>>>>>,
     /// Shared HTTP client for external lookups; reuses the connection pool
     /// across MusicBrainz/Apple Music requests (it is internally `Arc`-backed).
     pub http_client: reqwest::Client,
@@ -59,6 +83,16 @@ impl AppState {
         let _ = rustls::crypto::ring::default_provider().install_default();
         let data_root = config.data_dir.clone();
         let http_client = reqwest::Client::builder()
+            .redirect(reqwest::redirect::Policy::custom(|attempt| {
+                let host = attempt.url().host_str().unwrap_or("");
+                if attempt.previous().len() > 5 {
+                    attempt.stop()
+                } else if attempt.url().scheme() == "https" && is_allowed_lookup_host_safe(host) {
+                    attempt.follow()
+                } else {
+                    attempt.stop()
+                }
+            }))
             .timeout(std::time::Duration::from_secs(10))
             .connect_timeout(std::time::Duration::from_secs(10))
             .build()
@@ -74,7 +108,7 @@ impl AppState {
                 let host = attempt.url().host_str().unwrap_or("");
                 if attempt.previous().len() > 5 {
                     attempt.stop()
-                } else if is_allowed_cover_host_safe(host) {
+                } else if attempt.url().scheme() == "https" && is_allowed_cover_host_safe(host) {
                     attempt.follow()
                 } else {
                     attempt.stop()
@@ -92,9 +126,19 @@ impl AppState {
             sessions: Arc::new(Mutex::new(HashMap::new())),
             musicbrainz_next_allowed: Arc::new(Mutex::new(Instant::now())),
             failed_logins: Arc::new(Mutex::new(HashMap::new())),
+            password_hash_limit: Arc::new(tokio::sync::Semaphore::new(MAX_CONCURRENT_HASHES)),
+            login_gates: Arc::new(Mutex::new(HashMap::new())),
             http_client,
             coverart_client,
         }
+    }
+
+    pub fn login_gate(&self, key: &str) -> Arc<tokio::sync::Mutex<()>> {
+        let mut gates = self.login_gates.lock().unwrap_or_else(|e| e.into_inner());
+        if !gates.contains_key(key) && gates.len() >= MAX_LOGIN_GATES {
+            gates.retain(|_, g| Arc::strong_count(g) > 1);
+        }
+        gates.entry(key.to_string()).or_default().clone()
     }
 
     pub fn add_session(&self, token: String, session: Session) {
@@ -170,11 +214,17 @@ mod tests {
     }
 
     fn rand_num() -> u64 {
+        use std::sync::atomic::{AtomicU64, Ordering};
         use std::time::{SystemTime, UNIX_EPOCH};
-        SystemTime::now()
+        static COUNTER: AtomicU64 = AtomicU64::new(0);
+        let nanos = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .unwrap()
-            .as_nanos() as u64
+            .as_nanos() as u64;
+        nanos
+            .wrapping_mul(1000)
+            .wrapping_add(COUNTER.fetch_add(1, Ordering::Relaxed))
+            .wrapping_add(std::process::id() as u64)
     }
 
     #[test]

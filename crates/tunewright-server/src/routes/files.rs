@@ -33,7 +33,7 @@ pub async fn list_files(
 
     let data_root = state.data_root.clone();
     let offset = params.offset;
-    let limit = params.limit;
+    let limit = params.limit.clamp(1, 5000);
 
     let result = tokio::task::spawn_blocking(move || {
         scanner::scan_directory(&data_root, &path, offset, limit)

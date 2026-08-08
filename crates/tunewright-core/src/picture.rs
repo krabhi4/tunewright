@@ -7,6 +7,23 @@ use lofty::probe::Probe;
 use std::io::Cursor;
 use std::path::Path;
 
+const MAX_DECODE_DIMENSION: u32 = 8192;
+/// Sized so ordinary large art (up to ~5600 square RGBA / ~6500 square RGB)
+/// still gets a real thumbnail; 64 MiB rejected covers people actually have.
+const MAX_DECODE_ALLOC: u64 = 128 * 1024 * 1024;
+
+pub fn sanitize_mime(mime: &str) -> &'static str {
+    match mime.trim().to_ascii_lowercase().as_str() {
+        "image/jpeg" | "image/jpg" => "image/jpeg",
+        "image/png" => "image/png",
+        "image/gif" => "image/gif",
+        "image/bmp" => "image/bmp",
+        "image/tiff" => "image/tiff",
+        "image/webp" => "image/webp",
+        _ => "application/octet-stream",
+    }
+}
+
 fn detect_mime(data: &[u8]) -> Option<&'static str> {
     if data.starts_with(&[0xFF, 0xD8]) {
         Some("image/jpeg")
@@ -44,18 +61,14 @@ pub fn extract_cover_art(path: &Path) -> Result<Option<(Vec<u8>, String)>, Tunew
             .or_else(|| tag.pictures().first());
 
         if let Some(pic) = pic {
-            let mime = match pic.mime_type() {
-                Some(mime_type) => {
-                    let s = mime_type.as_str();
-                    if s.is_empty() {
-                        detect_mime(pic.data()).unwrap_or("image/jpeg").to_string()
-                    } else {
-                        s.to_string()
-                    }
-                }
-                None => detect_mime(pic.data()).unwrap_or("image/jpeg").to_string(),
+            let mime = match detect_mime(pic.data()) {
+                Some(detected) => detected,
+                None => pic
+                    .mime_type()
+                    .map(|m| sanitize_mime(m.as_str()))
+                    .unwrap_or("application/octet-stream"),
             };
-            return Ok(Some((pic.data().to_vec(), mime)));
+            return Ok(Some((pic.data().to_vec(), mime.to_string())));
         }
     }
 
@@ -72,8 +85,34 @@ pub fn extract_cover_art_thumbnail(
         None => Ok(None),
         Some((data, mime)) if max_size == 0 => Ok(Some((data, mime))),
         Some((data, mime)) => {
-            let img = image::load_from_memory(&data)
-                .map_err(|e| TunewrightError::ImageError(e.to_string()))?;
+            let decoded = image::ImageReader::new(Cursor::new(&data))
+                .with_guessed_format()
+                .map_err(|e| TunewrightError::ImageError(e.to_string()))
+                .and_then(|mut reader| {
+                    let mut limits = image::Limits::default();
+                    limits.max_image_width = Some(MAX_DECODE_DIMENSION);
+                    limits.max_image_height = Some(MAX_DECODE_DIMENSION);
+                    limits.max_alloc = Some(MAX_DECODE_ALLOC);
+                    reader.limits(limits);
+                    reader
+                        .decode()
+                        .map_err(|e| TunewrightError::ImageError(e.to_string()))
+                });
+
+            // Anything we refuse to decode (oversized, malformed, or a
+            // decompression bomb) is still served untouched rather than 400ing:
+            // no pixels are expanded, so this costs only the bytes already read.
+            let img = match decoded {
+                Ok(img) => img,
+                Err(e) => {
+                    // Art we refuse to expand (bomb, corrupt, or beyond the
+                    // decode budget) is returned as stored rather than 400ing,
+                    // so a cover always displays. No pixels are expanded here,
+                    // and the payload is bounded by what is embedded in the file.
+                    tracing::warn!("serving cover art unresized: {e}");
+                    return Ok(Some((data, mime)));
+                }
+            };
 
             if img.width() <= max_size && img.height() <= max_size {
                 // Already small enough, return as-is to avoid quality / metadata / format loss

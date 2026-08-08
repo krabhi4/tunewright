@@ -10,6 +10,12 @@ const config = {
 		}),
 		prerender: {
 			entries: []
+		},
+		csp: {
+			mode: 'hash',
+			directives: {
+				'script-src': ['self']
+			}
 		}
 	}
 };

@@ -1,6 +1,10 @@
 <script lang="ts">
+	import { ICONS, type IconName } from './index';
+
+	type IconMarkup = (typeof ICONS)[IconName];
+
 	interface Props {
-		path: string; // inner SVG markup (paths/shapes), viewBox 0 0 24 24
+		path: IconMarkup;
 		size?: number;
 		stroke?: number;
 		label?: string;

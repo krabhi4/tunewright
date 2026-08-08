@@ -89,10 +89,20 @@ All configuration is via environment variables.
 |----------|---------|-------------|
 | `TUNEWRIGHT_DATA_DIR` | `/data` | Music directory inside the container |
 | `TUNEWRIGHT_PORT` | `8080` | HTTP port |
-| `TUNEWRIGHT_HOST` | `0.0.0.0` | Bind address |
+| `TUNEWRIGHT_HOST` | `127.0.0.1` (`0.0.0.0` in the Docker image) | Bind address |
 | `TUNEWRIGHT_STATIC_DIR` | `/srv/static` | Frontend build directory (set by Docker) |
+| `TUNEWRIGHT_SETUP_TOKEN` | unset | Token required to claim the first admin account |
+| `TUNEWRIGHT_COOKIE_SECURE` | `false` | Set to `true` when serving over HTTPS so the session cookie gets the `Secure` flag |
 
-Authentication is managed through the web UI — no environment variables needed.
+Authentication is managed through the web UI.
+
+Until the first admin account exists, `/api/v1/auth/setup` is reachable without
+authentication and hands the first caller super-admin. If the server binds a
+non-loopback address with no `TUNEWRIGHT_SETUP_TOKEN` set, it generates one at
+startup and prints it to the log — read it with `docker compose logs` and enter
+it on the setup screen. Set `TUNEWRIGHT_SETUP_TOKEN` explicitly to choose your own.
+
+Put `TUNEWRIGHT_COOKIE_SECURE=true` behind any HTTPS reverse proxy.
 
 ## Architecture
 

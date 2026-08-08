@@ -5,7 +5,13 @@
 	import { auth } from '$lib/stores/auth';
 	import Logo from '$lib/icons/Logo.svelte';
 
-	let token = $state(page.url.searchParams.get('token') || '');
+	function tokenFromUrl(): string {
+		const hash = page.url.hash.replace(/^#/, '');
+		const fromHash = new URLSearchParams(hash).get('token');
+		return fromHash || page.url.searchParams.get('token') || '';
+	}
+
+	let token = $state(tokenFromUrl());
 	let username = $state('');
 	let password = $state('');
 	let confirmPassword = $state('');

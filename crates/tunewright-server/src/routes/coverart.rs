@@ -85,17 +85,19 @@ pub async fn get_cover_art(
     .map_err(AppError)?;
 
     match result {
-        Some((data, mime)) => Ok(Response::builder()
+        Some((data, mime)) => Response::builder()
             .status(StatusCode::OK)
-            .header(header::CONTENT_TYPE, mime)
+            .header(header::CONTENT_TYPE, picture::sanitize_mime(&mime))
+            .header(header::X_CONTENT_TYPE_OPTIONS, "nosniff")
+            .header(header::CONTENT_DISPOSITION, "inline")
             .header(header::ETAG, etag)
             .header(header::CACHE_CONTROL, "private, max-age=3600")
             .body(Body::from(data))
-            .unwrap()),
-        None => Ok(Response::builder()
+            .map_err(|e| AppError(TunewrightError::Io(std::io::Error::other(e.to_string())))),
+        None => Response::builder()
             .status(StatusCode::NOT_FOUND)
             .body(Body::from("No cover art"))
-            .unwrap()),
+            .map_err(|e| AppError(TunewrightError::Io(std::io::Error::other(e.to_string())))),
     }
 }
 
@@ -117,23 +119,24 @@ pub async fn embed_cover_art_from_url(
     State(state): State<AppState>,
     Json(body): Json<CoverArtFromUrlRequest>,
 ) -> Result<Json<serde_json::Value>, AppError> {
-    // Only allow CoverArtArchive or Apple Music URLs
+    // Only allow CoverArtArchive or Apple Music URLs, over https
     let parsed_ok = Url::parse(&body.url)
         .ok()
+        .filter(|u| u.scheme() == "https")
         .and_then(|u| u.host_str().map(crate::state::is_allowed_cover_host_safe))
         .unwrap_or(false);
     if !parsed_ok {
-        return Err(AppError(TunewrightError::Io(std::io::Error::new(
-            std::io::ErrorKind::InvalidInput,
-            "only coverartarchive.org and mzstatic.com URLs are allowed",
-        ))));
+        return Err(AppError(TunewrightError::InvalidInput(
+            "only https coverartarchive.org and mzstatic.com URLs are allowed".to_string(),
+        )));
     }
 
+    crate::error::check_batch_size(body.paths.len())?;
+
     if body.paths.is_empty() {
-        return Err(AppError(TunewrightError::Io(std::io::Error::new(
-            std::io::ErrorKind::InvalidInput,
-            "no file paths provided",
-        ))));
+        return Err(AppError(TunewrightError::InvalidInput(
+            "no file paths provided".to_string(),
+        )));
     }
 
     // Reuse the shared HTTP client with pre-configured redirects
@@ -153,10 +156,9 @@ pub async fn embed_cover_art_from_url(
     }
 
     let too_large = || {
-        AppError(TunewrightError::Io(std::io::Error::new(
-            std::io::ErrorKind::InvalidData,
-            "cover art too large (max 10MB)",
-        )))
+        AppError(TunewrightError::RequestTooLarge(
+            "cover art too large (max 10MB)".to_string(),
+        ))
     };
 
     // Reject oversized responses before buffering
@@ -181,10 +183,9 @@ pub async fn embed_cover_art_from_url(
     }
 
     if !has_image_magic(&image_data) {
-        return Err(AppError(TunewrightError::Io(std::io::Error::new(
-            std::io::ErrorKind::InvalidData,
-            "invalid image format (JPEG or PNG only)",
-        ))));
+        return Err(AppError(TunewrightError::InvalidInput(
+            "invalid image format (JPEG or PNG only)".to_string(),
+        )));
     }
 
     // Embed into all files in parallel, sharing the downloaded bytes; the
@@ -195,16 +196,20 @@ pub async fn embed_cover_art_from_url(
         paths
             .par_iter()
             .enumerate()
-            .map(|(i, path_str)| match scanner::resolve_safe_path(&data_root, path_str) {
-                Ok(safe_path) => picture::embed_cover_art(&safe_path, &image_data).map_err(|e| {
-                    tracing::warn!("cover art embed failed for {:?}: {}", path_str, e);
-                    format!("file {}: embed failed", i)
-                }),
-                Err(e) => {
-                    tracing::warn!("path resolution failed for {:?}: {}", path_str, e);
-                    Err(format!("file {}: invalid path", i))
-                }
-            })
+            .map(
+                |(i, path_str)| match scanner::resolve_safe_path(&data_root, path_str) {
+                    Ok(safe_path) => {
+                        picture::embed_cover_art(&safe_path, &image_data).map_err(|e| {
+                            tracing::warn!("cover art embed failed for {:?}: {}", path_str, e);
+                            format!("file {}: embed failed", i)
+                        })
+                    }
+                    Err(e) => {
+                        tracing::warn!("path resolution failed for {:?}: {}", path_str, e);
+                        Err(format!("file {}: invalid path", i))
+                    }
+                },
+            )
             .collect()
     })
     .await
@@ -234,10 +239,7 @@ pub async fn upload_cover_art(
     let mut image_data: Option<Vec<u8>> = None;
 
     fn multipart_err(msg: &str) -> AppError {
-        AppError(TunewrightError::Io(std::io::Error::new(
-            std::io::ErrorKind::InvalidData,
-            msg.to_string(),
-        )))
+        AppError(TunewrightError::InvalidInput(msg.to_string()))
     }
 
     loop {

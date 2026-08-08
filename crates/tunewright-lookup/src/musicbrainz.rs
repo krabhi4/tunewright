@@ -28,19 +28,14 @@ struct CaaImage {
 /// Fetch the front cover art URL from CoverArtArchive JSON API
 async fn fetch_cover_art_url(client: &Client, mbid: &str) -> Option<String> {
     let url = format!("https://coverartarchive.org/release/{}", mbid);
-    let resp = client
-        .get(&url)
-        .header("User-Agent", USER_AGENT)
-        .header("Accept", "application/json")
-        .send()
-        .await
-        .ok()?;
-
-    if !resp.status().is_success() {
-        return None;
-    }
-
-    let caa: CaaResponse = resp.json().await.ok()?;
+    let caa: CaaResponse = crate::get_json(
+        client,
+        &url,
+        &[("User-Agent", USER_AGENT), ("Accept", "application/json")],
+        "CoverArtArchive",
+    )
+    .await
+    .ok()?;
     let front = caa.images.iter().find(|img| img.front)?;
 
     // Prefer 500px thumbnail, fall back to 250, then full image
@@ -155,9 +150,13 @@ pub async fn search_releases(
 }
 
 /// Get detailed release info with track listing
+/// A MusicBrainz ID is a UUID; validating up front prevents path injection.
+pub fn is_valid_mbid(mbid: &str) -> bool {
+    mbid.len() == 36 && mbid.chars().all(|c| c.is_ascii_hexdigit() || c == '-')
+}
+
 pub async fn get_release(client: &Client, mbid: &str) -> Result<ReleaseDetail, String> {
-    // Validate MBID is a valid UUID (hex + dashes) to prevent path injection
-    if !mbid.chars().all(|c| c.is_ascii_hexdigit() || c == '-') || mbid.len() != 36 {
+    if !is_valid_mbid(mbid) {
         return Err("Invalid MusicBrainz ID".to_string());
     }
 

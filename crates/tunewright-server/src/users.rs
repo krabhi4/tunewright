@@ -266,6 +266,14 @@ impl UserManager {
     }
 
     /// Atomically consume invite and create user. Returns Err on invalid invite, duplicate username, or save failure.
+    pub fn invite_is_usable(&self, token: &str) -> bool {
+        let store = self.store.lock().unwrap_or_else(|e| e.into_inner());
+        store
+            .invites
+            .iter()
+            .any(|i| i.token == token && !i.used && i.expires_at >= Utc::now())
+    }
+
     pub fn register_with_invite(
         &self,
         token: &str,

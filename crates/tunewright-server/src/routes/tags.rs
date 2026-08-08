@@ -7,7 +7,7 @@ use tunewright_core::audio;
 use tunewright_core::scanner;
 use tunewright_core::types::{TagData, TagWriteChanges, WriteResult};
 
-use crate::error::{join_error, AppError};
+use crate::error::{check_batch_size, join_error, AppError};
 use crate::state::AppState;
 
 #[derive(Deserialize)]
@@ -30,6 +30,7 @@ async fn read_with(
     body: ReadTagsRequest,
     batch_read: BatchReadFn,
 ) -> Result<Json<ReadTagsResponse>, AppError> {
+    check_batch_size(body.ids.len().max(body.paths.len()))?;
     let data_root = state.data_root.clone();
 
     let result = tokio::task::spawn_blocking(move || {
@@ -95,6 +96,7 @@ pub async fn write_tags(
     State(state): State<AppState>,
     Json(body): Json<WriteTagsRequest>,
 ) -> Result<Json<WriteTagsResponse>, AppError> {
+    check_batch_size(body.changes.len())?;
     let data_root = state.data_root.clone();
 
     let results = tokio::task::spawn_blocking(move || {

@@ -5,7 +5,7 @@ use std::path::PathBuf;
 use tunewright_core::rename::{self, RenamePreview, RenameResult};
 use tunewright_core::scanner;
 
-use crate::error::{join_error, AppError};
+use crate::error::{check_batch_size, join_error, AppError};
 use crate::state::AppState;
 
 #[derive(Deserialize)]
@@ -34,6 +34,7 @@ pub async fn preview(
     State(state): State<AppState>,
     Json(body): Json<RenameRequest>,
 ) -> Result<Json<PreviewResponse>, AppError> {
+    check_batch_size(body.files.len())?;
     let data_root = state.data_root.clone();
     let format = body.format.clone();
 
@@ -60,6 +61,7 @@ pub async fn execute(
     State(state): State<AppState>,
     Json(body): Json<RenameRequest>,
 ) -> Result<Json<ExecuteResponse>, AppError> {
+    check_batch_size(body.files.len())?;
     let data_root = state.data_root.clone();
     let format = body.format.clone();
 

@@ -60,9 +60,24 @@ fn create_session_response(
 
 // --- New-account credential validation + hashing (shared by setup/register) ---
 
+fn constant_time_eq(a: &[u8], b: &[u8]) -> bool {
+    if a.len() != b.len() {
+        return false;
+    }
+    let mut diff = 0u8;
+    for (x, y) in a.iter().zip(b.iter()) {
+        diff |= x ^ y;
+    }
+    diff == 0
+}
+
 /// Normalize and validate a new account's username/password, then hash the
 /// password. On failure returns the user-facing error `Response` to send back.
-async fn validate_and_hash(username: &str, password: &str) -> Result<(String, String), Response> {
+async fn validate_and_hash(
+    state: &AppState,
+    username: &str,
+    password: &str,
+) -> Result<(String, String), Response> {
     let username = username.trim().to_lowercase();
     if username.is_empty() {
         return Err((
@@ -78,6 +93,14 @@ async fn validate_and_hash(username: &str, password: &str) -> Result<(String, St
         )
             .into_response());
     }
+
+    let Ok(_permit) = state.password_hash_limit.clone().acquire_owned().await else {
+        return Err((
+            StatusCode::SERVICE_UNAVAILABLE,
+            Json(serde_json::json!({ "error": "Server busy, try again" })),
+        )
+            .into_response());
+    };
 
     let password = password.to_string();
     match tokio::task::spawn_blocking(move || users::hash_password(&password)).await {
@@ -101,10 +124,19 @@ pub struct SetupRequest {
 }
 
 pub async fn setup(State(state): State<AppState>, Json(body): Json<SetupRequest>) -> Response {
+    if state.users.has_users() {
+        return (
+            StatusCode::CONFLICT,
+            Json(serde_json::json!({ "error": "Setup already completed" })),
+        )
+            .into_response();
+    }
+
     // When configured, the setup token gates first-admin creation so a
     // network-exposed instance can't be claimed by whoever connects first.
     if let Some(required) = &state.config.setup_token {
-        if body.setup_token.as_deref() != Some(required.as_str()) {
+        let supplied = body.setup_token.as_deref().unwrap_or("");
+        if !constant_time_eq(supplied.as_bytes(), required.as_bytes()) {
             return (
                 StatusCode::FORBIDDEN,
                 Json(serde_json::json!({ "error": "Invalid setup token" })),
@@ -113,7 +145,7 @@ pub async fn setup(State(state): State<AppState>, Json(body): Json<SetupRequest>
         }
     }
 
-    let (username, hash) = match validate_and_hash(&body.username, &body.password).await {
+    let (username, hash) = match validate_and_hash(&state, &body.username, &body.password).await {
         Ok(ok) => ok,
         Err(resp) => return resp,
     };
@@ -128,11 +160,14 @@ pub async fn setup(State(state): State<AppState>, Json(body): Json<SetupRequest>
             Json(serde_json::json!({ "error": msg })),
         )
             .into_response(),
-        Err(e) => (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(serde_json::json!({ "error": format!("Spawn blocking failed: {e}") })),
-        )
-            .into_response(),
+        Err(e) => {
+            tracing::error!("Blocking task failed: {e}");
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({ "error": "Internal server error" })),
+            )
+                .into_response()
+        }
     }
 }
 
@@ -150,6 +185,10 @@ pub struct LoginRequest {
 const MAX_FAILED_LOGIN_ENTRIES: usize = 1000;
 /// A username's failure counter resets after this much quiet time.
 const FAILED_LOGIN_DECAY_SECS: u64 = 60;
+
+const MAX_LOGIN_DELAY_MS: u64 = 2_000;
+/// Bounds the key stored in the throttle and gate maps.
+const MAX_USERNAME_BYTES: usize = 256;
 
 fn record_failed_login(
     map: &mut std::collections::HashMap<String, (u32, std::time::Instant)>,
@@ -173,33 +212,53 @@ fn record_failed_login(
     entry.1 = std::time::Instant::now();
 }
 
+fn too_many_requests(retry_after_secs: u64) -> Response {
+    let retry_after = retry_after_secs.to_string();
+    (
+        StatusCode::TOO_MANY_REQUESTS,
+        [("Retry-After", retry_after.as_str())],
+        Json(serde_json::json!({ "error": "Too many login attempts, try again shortly" })),
+    )
+        .into_response()
+}
+
 pub async fn login(State(state): State<AppState>, Json(body): Json<LoginRequest>) -> Response {
     // Brute-force throttling, keyed per normalized username (matches the
     // normalization applied at account creation).
     let throttle_key = body.username.trim().to_lowercase();
-    let delay = {
-        let mut guard = state
-            .failed_logins
-            .lock()
-            .unwrap_or_else(|e| e.into_inner());
-        match guard.get_mut(&throttle_key) {
-            Some(entry) => {
-                if entry.0 > 0 && entry.1.elapsed().as_secs() > FAILED_LOGIN_DECAY_SECS {
-                    entry.0 = 0;
-                }
-                let secs = (entry.0 as u64).min(10);
-                std::time::Duration::from_millis(secs * 500)
-            }
-            None => std::time::Duration::ZERO,
-        }
-    };
-    if !delay.is_zero() {
-        tokio::time::sleep(delay).await;
+
+    // The key is stored in two long-lived maps, so bound it before it gets there.
+    if throttle_key.len() > MAX_USERNAME_BYTES {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({ "error": "Username too long" })),
+        )
+            .into_response();
     }
+
+    // Global bound on concurrent Argon2 work, taken before the per-username
+    // gate so that gate is only ever held for the verify itself.
+    let Ok(_permit) = state.password_hash_limit.clone().acquire_owned().await else {
+        return (
+            StatusCode::SERVICE_UNAVAILABLE,
+            Json(serde_json::json!({ "error": "Server busy, try again" })),
+        )
+            .into_response();
+    };
+
+    // One verify per username at a time, so guesses cannot be parallelized.
+    // Excess attempts are refused immediately rather than queued.
+    let gate = state.login_gate(&throttle_key);
+    let Ok(gate_guard) = gate.try_lock() else {
+        return too_many_requests(1);
+    };
 
     let user = state.users.find_by_username(&body.username);
     let password = body.password.clone();
 
+    // The password is always verified. Throttling must never be able to reject
+    // valid credentials, or an attacker could lock the owner out of their own
+    // account simply by failing repeatedly.
     let valid = match &user {
         Some(u) => {
             let hash = u.password_hash.clone();
@@ -218,27 +277,37 @@ pub async fn login(State(state): State<AppState>, Json(body): Json<LoginRequest>
     };
 
     if valid {
-        let user = user.unwrap();
         let mut guard = state
             .failed_logins
             .lock()
             .unwrap_or_else(|e| e.into_inner());
         guard.remove(&throttle_key);
         drop(guard);
-        create_session_response(&state, &user.id, &user.username, user.role)
-    } else {
+        let user = user.unwrap();
+        return create_session_response(&state, &user.id, &user.username, user.role);
+    }
+
+    // Wrong password: record it, then slow the response down. The delay is
+    // applied after releasing the gate so a flood cannot keep the owner locked
+    // out, and it is capped so it can never become a denial of service.
+    let penalty = {
         let mut guard = state
             .failed_logins
             .lock()
             .unwrap_or_else(|e| e.into_inner());
-        record_failed_login(&mut guard, throttle_key);
-        drop(guard);
-        (
-            StatusCode::UNAUTHORIZED,
-            Json(serde_json::json!({ "error": "Invalid credentials" })),
-        )
-            .into_response()
-    }
+        record_failed_login(&mut guard, throttle_key.clone());
+        let count = guard.get(&throttle_key).map(|e| e.0).unwrap_or(1);
+        std::time::Duration::from_millis((100u64 * count as u64).min(MAX_LOGIN_DELAY_MS))
+    };
+    drop(gate_guard);
+    drop(_permit);
+    tokio::time::sleep(penalty).await;
+
+    (
+        StatusCode::UNAUTHORIZED,
+        Json(serde_json::json!({ "error": "Invalid credentials" })),
+    )
+        .into_response()
 }
 
 // --- Logout ---
@@ -247,10 +316,17 @@ pub async fn logout(State(state): State<AppState>, req: Request<Body>) -> Respon
     if let Some(token) = extract_token(&req) {
         state.remove_session(&token);
     }
-    let cookie = format!(
-        "{}=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0",
-        SESSION_COOKIE
-    );
+    let cookie = if state.config.cookie_secure {
+        format!(
+            "{}=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0; Secure",
+            SESSION_COOKIE
+        )
+    } else {
+        format!(
+            "{}=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0",
+            SESSION_COOKIE
+        )
+    };
     (
         StatusCode::OK,
         [("Set-Cookie", cookie.as_str())],
@@ -303,7 +379,15 @@ pub async fn register(
     State(state): State<AppState>,
     Json(body): Json<RegisterRequest>,
 ) -> Response {
-    let (username, hash) = match validate_and_hash(&body.username, &body.password).await {
+    if !state.users.invite_is_usable(&body.token) {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({ "error": "Invalid or expired invite" })),
+        )
+            .into_response();
+    }
+
+    let (username, hash) = match validate_and_hash(&state, &body.username, &body.password).await {
         Ok(ok) => ok,
         Err(resp) => return resp,
     };
@@ -324,11 +408,14 @@ pub async fn register(
             };
             (status, Json(serde_json::json!({ "error": msg }))).into_response()
         }
-        Err(e) => (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(serde_json::json!({ "error": format!("Spawn blocking failed: {e}") })),
-        )
-            .into_response(),
+        Err(e) => {
+            tracing::error!("Blocking task failed: {e}");
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({ "error": "Internal server error" })),
+            )
+                .into_response()
+        }
     }
 }
 
@@ -351,7 +438,7 @@ pub async fn create_invite(State(state): State<AppState>, req: Request<Body>) ->
                 "token": invite.token,
                 "created_by": invite.created_by,
                 "expires_at": invite.expires_at,
-                "link": format!("/register?token={}", invite.token)
+                "link": format!("/register#token={}", invite.token)
             })),
         )
             .into_response(),
@@ -360,11 +447,14 @@ pub async fn create_invite(State(state): State<AppState>, req: Request<Body>) ->
             Json(serde_json::json!({ "error": msg })),
         )
             .into_response(),
-        Err(e) => (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(serde_json::json!({ "error": format!("Spawn blocking failed: {e}") })),
-        )
-            .into_response(),
+        Err(e) => {
+            tracing::error!("Blocking task failed: {e}");
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({ "error": "Internal server error" })),
+            )
+                .into_response()
+        }
     }
 }
 
@@ -382,7 +472,7 @@ pub async fn list_invites(State(state): State<AppState>, req: Request<Body>) -> 
                 "token": i.token,
                 "created_by": i.created_by,
                 "expires_at": i.expires_at,
-                "link": format!("/register?token={}", i.token)
+                "link": format!("/register#token={}", i.token)
             })
         })
         .collect();
@@ -417,11 +507,14 @@ pub async fn delete_invite(
             Json(serde_json::json!({ "error": msg })),
         )
             .into_response(),
-        Err(e) => (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(serde_json::json!({ "error": format!("Spawn blocking failed: {e}") })),
-        )
-            .into_response(),
+        Err(e) => {
+            tracing::error!("Blocking task failed: {e}");
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({ "error": "Internal server error" })),
+            )
+                .into_response()
+        }
     }
 }
 
@@ -476,11 +569,14 @@ pub async fn delete_user(
             Json(serde_json::json!({ "error": msg })),
         )
             .into_response(),
-        Err(e) => (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(serde_json::json!({ "error": format!("Spawn blocking failed: {e}") })),
-        )
-            .into_response(),
+        Err(e) => {
+            tracing::error!("Blocking task failed: {e}");
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({ "error": "Internal server error" })),
+            )
+                .into_response()
+        }
     }
 }
 
@@ -841,6 +937,92 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn correct_password_survives_a_flood_of_failures() {
+        let temp_dir = std::env::temp_dir().join(format!("tunewright_srv_test_{}", rand_num()));
+        std::fs::create_dir_all(&temp_dir).unwrap();
+        let users_path = temp_dir.join("users.json");
+        let user_manager = UserManager::load(users_path);
+        let config = Config {
+            data_dir: temp_dir.clone(),
+            static_dir: temp_dir.clone(),
+            port: 8080,
+            host: "127.0.0.1".to_string(),
+            cookie_secure: false,
+            setup_token: None,
+        };
+        let state = AppState::new(config, user_manager);
+        let hash = users::hash_password("correct horse battery").unwrap();
+        state.users.add_first_user("victim", hash).unwrap();
+
+        // Flood the account with failures.
+        for _ in 0..8 {
+            let resp = login(
+                State(state.clone()),
+                Json(LoginRequest {
+                    username: "victim".to_string(),
+                    password: "wrong".to_string(),
+                }),
+            )
+            .await;
+            assert_eq!(resp.status(), StatusCode::UNAUTHORIZED);
+        }
+
+        // The owner must still be able to log in: throttling may never reject
+        // valid credentials, or an attacker could lock the account.
+        let resp = login(
+            State(state.clone()),
+            Json(LoginRequest {
+                username: "victim".to_string(),
+                password: "correct horse battery".to_string(),
+            }),
+        )
+        .await;
+        assert_eq!(
+            resp.status(),
+            StatusCode::OK,
+            "a correct password must never be refused by the throttle"
+        );
+
+        let _ = std::fs::remove_dir_all(&temp_dir);
+    }
+
+    #[tokio::test]
+    async fn overlong_username_is_rejected_before_being_stored() {
+        let temp_dir = std::env::temp_dir().join(format!("tunewright_srv_test_{}", rand_num()));
+        std::fs::create_dir_all(&temp_dir).unwrap();
+        let user_manager = UserManager::load(temp_dir.join("users.json"));
+        let config = Config {
+            data_dir: temp_dir.clone(),
+            static_dir: temp_dir.clone(),
+            port: 8080,
+            host: "127.0.0.1".to_string(),
+            cookie_secure: false,
+            setup_token: None,
+        };
+        let state = AppState::new(config, user_manager);
+
+        let resp = login(
+            State(state.clone()),
+            Json(LoginRequest {
+                username: "a".repeat(100_000),
+                password: "whatever".to_string(),
+            }),
+        )
+        .await;
+        assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
+        assert!(
+            state.failed_logins.lock().unwrap().is_empty(),
+            "an oversized key must never reach the throttle map"
+        );
+        assert!(
+            state.login_gates.lock().unwrap().is_empty(),
+            "an oversized key must never reach the gate map"
+        );
+
+        let _ = std::fs::remove_dir_all(&temp_dir);
+    }
+
+    #[tokio::test]
     async fn test_failed_login_key_normalized() {
         let temp_dir = std::env::temp_dir().join(format!("tunewright_srv_test_{}", rand_num()));
         std::fs::create_dir_all(&temp_dir).unwrap();
@@ -888,10 +1070,16 @@ mod tests {
     }
 
     fn rand_num() -> u64 {
+        use std::sync::atomic::{AtomicU64, Ordering};
         use std::time::{SystemTime, UNIX_EPOCH};
-        SystemTime::now()
+        static COUNTER: AtomicU64 = AtomicU64::new(0);
+        let nanos = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .unwrap()
-            .as_nanos() as u64
+            .as_nanos() as u64;
+        nanos
+            .wrapping_mul(1000)
+            .wrapping_add(COUNTER.fetch_add(1, Ordering::Relaxed))
+            .wrapping_add(std::process::id() as u64)
     }
 }

@@ -248,14 +248,17 @@ pub fn execute_renames(
                     new_relative_path: target_rel,
                     error: None,
                 },
-                Err(e) => RenameResult {
-                    id: preview.id,
-                    status: "error".to_string(),
-                    old_name: preview.old_name,
-                    new_name: preview.new_name,
-                    new_relative_path: unchanged_rel,
-                    error: Some(e.to_string()),
-                },
+                Err(e) => {
+                    tracing::error!("Rename failed for {}: {e}", old_path.display());
+                    RenameResult {
+                        id: preview.id,
+                        status: "error".to_string(),
+                        old_name: preview.old_name,
+                        new_name: preview.new_name,
+                        new_relative_path: unchanged_rel,
+                        error: Some("Rename failed".to_string()),
+                    }
+                }
             }
         })
         .collect()

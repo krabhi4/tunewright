@@ -8,7 +8,7 @@ use tunewright_core::audio;
 use tunewright_core::scanner;
 use tunewright_core::types::{TagWriteChanges, TunewrightError, WriteResult};
 
-use crate::error::{join_error, AppError};
+use crate::error::{check_action_batch, join_error, AppError};
 use crate::state::AppState;
 
 /// Filter request entries to those resolving to a safe path, as `(id, rel_path, canonical_path)`.
@@ -52,6 +52,7 @@ pub async fn execute(
     State(state): State<AppState>,
     Json(body): Json<ExecuteActionsRequest>,
 ) -> Result<Json<ExecuteActionsResponse>, AppError> {
+    check_action_batch(body.files.len(), body.actions.len())?;
     let data_root = state.data_root.clone();
 
     let results = tokio::task::spawn_blocking(move || {
@@ -68,10 +69,11 @@ pub async fn execute(
                 let mut tags = match audio::read_tags_fast(canonical_path) {
                     Ok(t) => t,
                     Err(e) => {
+                        tracing::error!("Action read failed for {}: {e}", canonical_path.display());
                         return WriteResult {
                             id: id.clone(),
                             status: "error".to_string(),
-                            error: Some(format!("Read failed: {e}")),
+                            error: Some("Failed to read tags".to_string()),
                         };
                     }
                 };
@@ -96,11 +98,17 @@ pub async fn execute(
                         status: "ok".to_string(),
                         error: None,
                     },
-                    Err(e) => WriteResult {
-                        id: id.clone(),
-                        status: "error".to_string(),
-                        error: Some(e.to_string()),
-                    },
+                    Err(e) => {
+                        tracing::error!(
+                            "Action write failed for {}: {e}",
+                            canonical_path.display()
+                        );
+                        WriteResult {
+                            id: id.clone(),
+                            status: "error".to_string(),
+                            error: Some("Failed to write tags".to_string()),
+                        }
+                    }
                 }
             })
             .collect();
@@ -140,6 +148,7 @@ pub async fn preview(
     State(state): State<AppState>,
     Json(body): Json<ExecuteActionsRequest>,
 ) -> Result<Json<PreviewActionsResponse>, AppError> {
+    check_action_batch(body.files.len(), body.actions.len())?;
     let data_root = state.data_root.clone();
 
     let previews = tokio::task::spawn_blocking(move || {

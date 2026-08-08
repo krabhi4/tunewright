@@ -1,6 +1,9 @@
 use crate::expr::{self, ExprContext};
 use crate::types::TagData;
 
+/// Leaves room for an extension within the usual 255-byte NAME_MAX.
+const MAX_FILENAME_BYTES: usize = 240;
+
 /// Evaluate a format string against tag data, producing a sanitized filename
 /// (without extension). Supports both `%variable%` and `$function()` syntax.
 pub fn evaluate(format: &str, tags: &TagData) -> String {
@@ -18,14 +21,28 @@ pub fn evaluate_with_filename(format: &str, tags: &TagData, filename: &str) -> S
 
 /// Remove or replace characters that are invalid in filenames
 pub fn sanitize_filename(name: &str) -> String {
-    name.chars()
+    // Trim first: mapping control characters ahead of the trim would turn a
+    // trailing newline into an underscore and then keep it.
+    let cleaned = name
+        .trim()
+        .chars()
         .map(|c| match c {
             '/' | '\\' | ':' | '*' | '?' | '"' | '<' | '>' | '|' => '_',
+            c if c.is_control() => '_',
             _ => c,
         })
-        .collect::<String>()
-        .trim()
-        .to_string()
+        .collect::<String>();
+
+    let trimmed = cleaned.trim();
+    if trimmed.len() <= MAX_FILENAME_BYTES {
+        return trimmed.to_string();
+    }
+
+    let cut = (0..=MAX_FILENAME_BYTES)
+        .rev()
+        .find(|&i| trimmed.is_char_boundary(i))
+        .unwrap_or(0);
+    trimmed[..cut].trim_end().to_string()
 }
 
 #[cfg(test)]

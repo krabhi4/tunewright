@@ -106,8 +106,8 @@ pub fn compile_regexes(actions: &[Action]) -> Result<HashMap<String, Regex>, Str
         } = action
         {
             if !regexes.contains_key(search) {
-                let re =
-                    Regex::new(search).map_err(|e| format!("invalid regex '{search}': {e}"))?;
+                let re = crate::expr::build_regex(search)
+                    .map_err(|e| format!("invalid regex '{search}': {e}"))?;
                 regexes.insert(search.clone(), re);
             }
         }
@@ -568,7 +568,11 @@ mod tests {
                 },
             ],
         };
-        group.apply(&mut tags, &ctx(0), &compile_regexes(&group.actions).unwrap());
+        group.apply(
+            &mut tags,
+            &ctx(0),
+            &compile_regexes(&group.actions).unwrap(),
+        );
         assert_eq!(tags.title.as_deref(), Some("Hello World"));
     }
 

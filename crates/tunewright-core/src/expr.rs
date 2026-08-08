@@ -7,6 +7,15 @@
 
 use crate::types::TagData;
 
+/// Bounded so the process-global cache cannot retain more than
+/// MAX_CACHED_REGEXES * REGEX_SIZE_LIMIT.
+const MAX_CACHED_REGEXES: usize = 32;
+const MAX_REGEX_PATTERN_BYTES: usize = 1024;
+/// Measured against real-world patterns: 64 KiB rejected ordinary ones such as
+/// `(?i)[a-z]{200}` and `[a-z]{1000}`, while 1 MiB accepts them and still
+/// rejects the automaton-blowup patterns used to pin memory.
+pub(crate) const REGEX_SIZE_LIMIT: usize = 1024 * 1024;
+
 /// AST node
 #[derive(Debug, Clone, PartialEq)]
 pub enum Node {
@@ -428,10 +437,59 @@ fn fn_regex(args: &[String]) -> String {
     if args[1].is_empty() {
         return args[0].clone();
     }
-    match regex::Regex::new(&args[1]) {
-        Ok(re) => re.replace_all(&args[0], args[2].as_str()).to_string(),
-        Err(_) => args[0].clone(),
+    match cached_regex(&args[1]) {
+        Some(re) => re.replace_all(&args[0], args[2].as_str()).to_string(),
+        None => {
+            // The expression engine has no error channel, so surface this in
+            // the log; the caller sees the value pass through unmodified.
+            tracing::warn!(
+                "$regex() pattern rejected, leaving value unchanged: {}",
+                args[1].chars().take(120).collect::<String>()
+            );
+            args[0].clone()
+        }
     }
+}
+
+fn cached_regex(pattern: &str) -> Option<std::sync::Arc<regex::Regex>> {
+    use std::collections::HashMap;
+    use std::sync::{Arc, Mutex, OnceLock};
+
+    static CACHE: OnceLock<Mutex<HashMap<String, Arc<regex::Regex>>>> = OnceLock::new();
+    let cache = CACHE.get_or_init(|| Mutex::new(HashMap::new()));
+
+    // Oversized patterns still compile, they are just never retained, so a long
+    // pattern behaves correctly instead of silently skipping the replacement.
+    if pattern.len() > MAX_REGEX_PATTERN_BYTES {
+        return build_regex(pattern).ok().map(Arc::new);
+    }
+
+    {
+        let guard = cache.lock().unwrap_or_else(|e| e.into_inner());
+        if let Some(hit) = guard.get(pattern) {
+            return Some(hit.clone());
+        }
+    }
+
+    // Compiled outside the lock so one expensive pattern cannot stall every
+    // other format-string evaluation in the process.
+    let compiled = Arc::new(build_regex(pattern).ok()?);
+
+    let mut guard = cache.lock().unwrap_or_else(|e| e.into_inner());
+    if guard.len() >= MAX_CACHED_REGEXES {
+        guard.clear();
+    }
+    guard.insert(pattern.to_string(), compiled.clone());
+    Some(compiled)
+}
+
+/// Compile with a tight size budget: the default 10 MiB lets a single pattern
+/// pin a large automaton, and these patterns come from request bodies.
+pub fn build_regex(pattern: &str) -> Result<regex::Regex, regex::Error> {
+    regex::RegexBuilder::new(pattern)
+        .size_limit(REGEX_SIZE_LIMIT)
+        .dfa_size_limit(REGEX_SIZE_LIMIT)
+        .build()
 }
 
 fn fn_left(args: &[String]) -> String {
@@ -1058,5 +1116,60 @@ mod tests {
         let t = tags();
         let ctx = ExprContext::new(&t).with_index(5);
         assert_eq!(evaluate("%_index%", &ctx), "5");
+    }
+    #[test]
+    fn regex_beyond_cache_limit_still_applies() {
+        // A pattern too large to cache must still be compiled and applied,
+        // not silently skipped.
+        let alt = (0..300)
+            .map(|i| format!("zz{i}"))
+            .collect::<Vec<_>>()
+            .join("|");
+        assert!(alt.len() > MAX_REGEX_PATTERN_BYTES);
+        let pattern = format!("({alt}|hello)");
+
+        let out = fn_regex(&["hello world".to_string(), pattern, "bye".to_string()]);
+        assert_eq!(out, "bye world");
+    }
+
+    #[test]
+    fn regex_exceeding_size_limit_is_a_noop_not_a_panic() {
+        // Guard the limit itself, so this fails if REGEX_SIZE_LIMIT is ever
+        // raised enough to accept the automaton-blowup pattern.
+        let attack = "(?:a{250}x){250}";
+        assert!(
+            build_regex(attack).is_err(),
+            "size limit must still reject the blowup pattern"
+        );
+        assert_eq!(
+            fn_regex(&["abc".to_string(), attack.to_string(), "z".to_string()]),
+            "abc"
+        );
+    }
+
+    #[test]
+    fn ordinary_patterns_are_not_rejected_by_the_size_limit() {
+        // Regression guard: a 64 KiB limit rejected all of these.
+        for p in [
+            r"(?i)[a-z]{200}",
+            r"[a-z]{1000}",
+            r"(?i)\s*[\(\[]?\s*(feat|ft|featuring)\.?\s+",
+            r"\((19|20)\d{2}\)",
+            r"[\p{L}\p{N}]+",
+        ] {
+            assert!(build_regex(p).is_ok(), "ordinary pattern rejected: {p}");
+        }
+    }
+
+    #[test]
+    fn regex_replacement_actually_applies() {
+        assert_eq!(
+            fn_regex(&[
+                "01 - Song".to_string(),
+                r"^\d+\s*-\s*".to_string(),
+                String::new()
+            ]),
+            "Song"
+        );
     }
 }
