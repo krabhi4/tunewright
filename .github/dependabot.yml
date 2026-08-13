@@ -34,6 +34,19 @@ updates:
     groups:
       frontend:
         patterns: ["*"]
+    ignore:
+      # TypeScript 7 is the native (Go) port: the `typescript` package's main
+      # entry is now just ./lib/version.cjs, so `require("typescript")` returns
+      # only { version, versionMajorMinor } and the JS compiler API (ts.sys,
+      # createProgram, ...) is gone -- it moved behind ./unstable/* entrypoints.
+      # svelte-check consumes that old API, so `pnpm run check` dies with
+      # "Cannot read properties of undefined (reading 'useCaseSensitiveFileNames')".
+      # svelte-check 4.7.6 tightened its peer range to ^5.0.0 || ^6.0.0,
+      # confirming TS 7 is not supported upstream yet. Nothing here needs tsc
+      # (Vite transpiles via esbuild), so we stay on 6.x.
+      # Remove this once svelte-check declares support for typescript ^7.
+      - dependency-name: "typescript"
+        update-types: ["version-update:semver-major"]
 
   # --- GitHub Actions used by ci.yml / release.yml ---
   # Actions have also seen high-profile supply-chain compromises
