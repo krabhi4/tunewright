@@ -23,10 +23,10 @@
     "@sveltejs/kit": "^2.69.3",
     "@sveltejs/vite-plugin-svelte": "^7.2.0",
     "@types/node": "^26.1.1",
-    "svelte": "^5.56.4",
-    "svelte-check": "^4.7.2",
+    "svelte": "^5.56.6",
+    "svelte-check": "^4.7.3",
     "typescript": "^6.0.3",
-    "vite": "^8.1.4",
+    "vite": "^8.1.5",
     "vitest": "^4.1.10"
   },
   "dependencies": {
