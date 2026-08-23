@@ -73,6 +73,7 @@ fn constant_time_eq(a: &[u8], b: &[u8]) -> bool {
 
 /// Normalize and validate a new account's username/password, then hash the
 /// password. On failure returns the user-facing error `Response` to send back.
+#[allow(clippy::result_large_err)]
 async fn validate_and_hash(
     state: &AppState,
     username: &str,

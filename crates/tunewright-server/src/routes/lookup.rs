@@ -37,6 +37,7 @@ fn bad_gateway(e: String) -> Response {
 
 /// Enforce minimum gap between MusicBrainz requests globally.
 /// Tracks next-allowed time to properly serialize concurrent requests.
+#[allow(clippy::result_large_err)]
 async fn rate_limit_musicbrainz(state: &AppState) -> Result<(), Response> {
     let wait = {
         let mut next_allowed = state
@@ -102,6 +103,7 @@ pub async fn musicbrainz_release(
     }
 }
 
+#[allow(clippy::result_large_err)]
 pub async fn applemusic_search(
     State(state): State<AppState>,
     Query(params): Query<SearchQuery>,
@@ -112,6 +114,7 @@ pub async fn applemusic_search(
         .map_err(bad_gateway)
 }
 
+#[allow(clippy::result_large_err)]
 pub async fn applemusic_release(
     State(state): State<AppState>,
     Path(id): Path<String>,
