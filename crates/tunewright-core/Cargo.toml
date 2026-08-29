@@ -6,7 +6,7 @@ license.workspace = true
 rust-version.workspace = true
 
 [dependencies]
-lofty = "0.24"
+lofty = "0.25"
 image = { version = ">=0.25.0, <0.25.11", default-features = false, features = ["jpeg", "png"] }
 serde = { workspace = true }
 serde_json = { workspace = true }
