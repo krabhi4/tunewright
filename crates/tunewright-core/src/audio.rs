@@ -223,7 +223,13 @@ fn apply_tag_changes(path: &Path, changes: &TagWriteChanges) -> Result<(), Tunew
         if let Some(t) = tagged.remove(t_type) {
             secondary_tags.push(t);
         }
-        let _ = t_type.remove_from_path(path);
+        if let Ok(mut fh) = std::fs::OpenOptions::new()
+            .read(true)
+            .write(true)
+            .open(path)
+        {
+            let _ = t_type.remove_from(&mut fh, WriteOptions::default());
+        }
     }
 
     // Get the primary tag (inserting a new one if not present)
