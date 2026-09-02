@@ -223,12 +223,27 @@ fn apply_tag_changes(path: &Path, changes: &TagWriteChanges) -> Result<(), Tunew
         if let Some(t) = tagged.remove(t_type) {
             secondary_tags.push(t);
         }
-        if let Ok(mut fh) = std::fs::OpenOptions::new()
+        match std::fs::OpenOptions::new()
             .read(true)
             .write(true)
             .open(path)
         {
-            let _ = t_type.remove_from(&mut fh, WriteOptions::default());
+            Ok(mut fh) => {
+                if let Err(e) = t_type.remove_from(&mut fh, WriteOptions::default()) {
+                    tracing::warn!(
+                        "Failed to remove {:?} tag from {}: {}",
+                        t_type,
+                        path.display(),
+                        e
+                    );
+                }
+            }
+            Err(e) => tracing::warn!(
+                "Failed to open {} to remove {:?} tag: {}",
+                path.display(),
+                t_type,
+                e
+            ),
         }
     }
 
