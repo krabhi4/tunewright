@@ -191,6 +191,9 @@ const MAX_LOGIN_DELAY_MS: u64 = 2_000;
 /// Bounds the key stored in the throttle and gate maps.
 const MAX_USERNAME_BYTES: usize = 256;
 
+const DUMMY_PASSWORD_HASH: &str =
+    "$argon2id$v=19$m=19456,t=2,p=1$dW50cnVzdGVk$AAAAAAAAAAAAAAAAAAAAAA";
+
 fn record_failed_login(
     map: &mut std::collections::HashMap<String, (u32, std::time::Instant)>,
     key: String,
@@ -269,10 +272,10 @@ pub async fn login(State(state): State<AppState>, Json(body): Json<LoginRequest>
         }
         None => {
             // Dummy verify to prevent timing oracle
-            let dummy =
-                "$argon2id$v=19$m=19456,t=2,p=1$dW50cnVzdGVk$AAAAAAAAAAAAAAAAAAAAAA".to_string();
-            let _ = tokio::task::spawn_blocking(move || users::verify_password(&password, &dummy))
-                .await;
+            let _ = tokio::task::spawn_blocking(move || {
+                users::verify_password(&password, DUMMY_PASSWORD_HASH)
+            })
+            .await;
             false
         }
     };
@@ -672,6 +675,14 @@ mod tests {
     use super::*;
     use crate::config::Config;
     use crate::users::UserManager;
+
+    #[test]
+    fn dummy_hash_still_parses() {
+        assert!(
+            argon2::password_hash::phc::PasswordHash::new(DUMMY_PASSWORD_HASH).is_ok(),
+            "the dummy hash must parse, or the unknown-username path returns early and leaks account existence by timing"
+        );
+    }
 
     #[test]
     fn test_set_session_cookie_secure() {
