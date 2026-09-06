@@ -1,5 +1,5 @@
 use argon2::{
-    password_hash::{PasswordHash, PasswordHasher, PasswordVerifier, SaltString},
+    password_hash::{PasswordHasher, PasswordVerifier},
     Argon2,
 };
 use chrono::{DateTime, Duration, Utc};
@@ -364,26 +364,16 @@ impl UserManager {
 
 /// Hash a password with argon2. Call from spawn_blocking.
 pub fn hash_password(password: &str) -> Result<String, argon2::password_hash::Error> {
-    let mut salt_bytes = [0u8; 16];
-    rand::fill(&mut salt_bytes);
-    let salt = SaltString::encode_b64(&salt_bytes).map_err(|_| {
-        argon2::password_hash::Error::SaltInvalid(
-            argon2::password_hash::errors::InvalidValue::Malformed,
-        )
-    })?;
-    let argon2 = Argon2::default();
-    let hash = argon2.hash_password(password.as_bytes(), &salt)?;
-    Ok(hash.to_string())
+    Ok(Argon2::default()
+        .hash_password(password.as_bytes())?
+        .to_string())
 }
 
 /// Verify a password against an argon2 hash. Call from spawn_blocking.
 pub fn verify_password(password: &str, hash: &str) -> bool {
-    match PasswordHash::new(hash) {
-        Ok(parsed) => Argon2::default()
-            .verify_password(password.as_bytes(), &parsed)
-            .is_ok(),
-        Err(_) => false,
-    }
+    Argon2::default()
+        .verify_password(password.as_bytes(), hash)
+        .is_ok()
 }
 
 #[cfg(test)]

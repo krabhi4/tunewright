@@ -22,7 +22,7 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 rand = "0.10"
 rayon = { workspace = true }
 hex = { workspace = true }
-argon2 = "0.5"
+argon2 = "0.6"
 uuid = { version = "1", features = ["v4"] }
 chrono = { version = "0.4", default-features = false, features = ["serde", "now", "std"] }
 
