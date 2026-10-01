@@ -114,10 +114,16 @@ pub fn extract_from_filename(
 
 /// Convert extracted string values to TagWriteChanges.
 pub fn values_to_changes(values: &HashMap<String, String>) -> TagWriteChanges {
-    let get = |key: &str| -> Option<String> { values.get(key).filter(|s| !s.is_empty()).cloned() };
+    let lower: HashMap<String, &String> =
+        values.iter().map(|(k, v)| (k.to_lowercase(), v)).collect();
+    let get = |key: &str| -> Option<String> {
+        lower
+            .get(key)
+            .filter(|s| !s.is_empty())
+            .map(|s| s.to_string())
+    };
 
-    let get_u32 =
-        |key: &str| -> Option<u32> { values.get(key).and_then(|s| s.trim().parse().ok()) };
+    let get_u32 = |key: &str| -> Option<u32> { lower.get(key).and_then(|s| s.trim().parse().ok()) };
 
     let mut extra = HashMap::new();
     for (key, val) in values {
@@ -143,23 +149,23 @@ pub fn values_to_changes(values: &HashMap<String, String>) -> TagWriteChanges {
                 | "ext"
         );
         if !is_standard && !val.is_empty() {
-            extra.insert(key.clone(), val.clone());
+            extra.insert(key.clone(), Some(val.clone()));
         }
     }
 
     TagWriteChanges {
-        title: get("title"),
-        artist: get("artist"),
-        album: get("album"),
-        album_artist: get("albumartist").or_else(|| get("album_artist")),
-        year: get_u32("year"),
-        track_number: get_u32("track").or(get_u32("track_number")),
-        track_total: get_u32("track_total"),
-        disc_number: get_u32("disc").or(get_u32("disc_number")),
-        disc_total: get_u32("disc_total"),
-        genre: get("genre"),
-        comment: get("comment"),
-        composer: get("composer"),
+        title: get("title").map(Some),
+        artist: get("artist").map(Some),
+        album: get("album").map(Some),
+        album_artist: get("albumartist").or_else(|| get("album_artist")).map(Some),
+        year: get_u32("year").map(Some),
+        track_number: get_u32("track").or(get_u32("track_number")).map(Some),
+        track_total: get_u32("track_total").map(Some),
+        disc_number: get_u32("disc").or(get_u32("disc_number")).map(Some),
+        disc_total: get_u32("disc_total").map(Some),
+        genre: get("genre").map(Some),
+        comment: get("comment").map(Some),
+        composer: get("composer").map(Some),
         extra: if extra.is_empty() { None } else { Some(extra) },
     }
 }
@@ -250,10 +256,22 @@ mod tests {
         values.insert("year".to_string(), "2023".to_string());
 
         let changes = values_to_changes(&values);
-        assert_eq!(changes.artist.as_deref(), Some("The Band"));
-        assert_eq!(changes.title.as_deref(), Some("Song"));
-        assert_eq!(changes.track_number, Some(3));
-        assert_eq!(changes.year, Some(2023));
+        assert_eq!(changes.artist, Some(Some("The Band".to_string())));
+        assert_eq!(changes.title, Some(Some("Song".to_string())));
+        assert_eq!(changes.track_number, Some(Some(3)));
+        assert_eq!(changes.year, Some(Some(2023)));
+    }
+
+    #[test]
+    fn test_values_to_changes_standard_keys_are_case_insensitive() {
+        let mut values = HashMap::new();
+        values.insert("Artist".to_string(), "The Band".to_string());
+        values.insert("TRACK".to_string(), "03".to_string());
+
+        let changes = values_to_changes(&values);
+        assert_eq!(changes.artist, Some(Some("The Band".to_string())));
+        assert_eq!(changes.track_number, Some(Some(3)));
+        assert_eq!(changes.extra, None);
     }
 
     #[test]
@@ -269,8 +287,8 @@ mod tests {
 
         assert!(previews[0].matched);
         let tags = previews[0].tags.as_ref().unwrap();
-        assert_eq!(tags.artist.as_deref(), Some("The Band"));
-        assert_eq!(tags.title.as_deref(), Some("First Song"));
+        assert_eq!(tags.artist, Some(Some("The Band".to_string())));
+        assert_eq!(tags.title, Some(Some("First Song".to_string())));
 
         assert!(previews[1].matched);
         assert!(!previews[2].matched);
@@ -285,6 +303,6 @@ mod tests {
 
         let changes = values_to_changes(&values);
         let extra = changes.extra.unwrap();
-        assert_eq!(extra.get("BPM").unwrap(), "120");
+        assert_eq!(extra.get("BPM"), Some(&Some("120".to_string())));
     }
 }

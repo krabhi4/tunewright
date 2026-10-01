@@ -13,11 +13,33 @@ use axum::middleware;
 use axum::response::IntoResponse;
 use axum::routing::{delete, get, post};
 use axum::Router;
+use std::path::Path;
 use tower_http::services::{ServeDir, ServeFile};
 use tower_http::set_header::SetResponseHeaderLayer;
 use tower_http::trace::TraceLayer;
 
-const CSP: &str = "img-src 'self' data: https:; style-src 'self' 'unsafe-inline'; connect-src 'self'; object-src 'none'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'";
+const CSP: &str = "default-src 'self'; script-src 'self'; img-src 'self' data: https://coverartarchive.org https://archive.org https://*.archive.org https://mzstatic.com https://*.mzstatic.com; style-src 'self' 'unsafe-inline'; font-src 'self' data:; connect-src 'self'; object-src 'none'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'";
+
+fn content_security_policy(static_dir: &Path) -> HeaderValue {
+    let index = std::fs::read_to_string(static_dir.join("index.html")).unwrap_or_default();
+    let hashes: String = index
+        .split('\'')
+        .filter(|t| {
+            t.strip_prefix("sha256-").is_some_and(|h| {
+                !h.is_empty()
+                    && h.chars()
+                        .all(|c| c.is_ascii_alphanumeric() || matches!(c, '+' | '/' | '='))
+            })
+        })
+        .map(|t| format!(" '{t}'"))
+        .collect();
+    let csp = CSP.replacen(
+        "script-src 'self'",
+        &format!("script-src 'self'{hashes}"),
+        1,
+    );
+    HeaderValue::from_str(&csp).unwrap_or_else(|_| HeaderValue::from_static(CSP))
+}
 
 use crate::auth;
 use crate::state::AppState;
@@ -80,10 +102,12 @@ pub fn create_router(state: AppState) -> Router {
 
     let static_dir = state.config.static_dir.clone();
     let index_file = static_dir.join("index.html");
+    let csp = content_security_policy(&static_dir);
 
     Router::new()
         .nest("/api/v1", api)
-        .fallback_service(ServeDir::new(&static_dir).not_found_service(ServeFile::new(index_file)))
+        .nest_service("/_app", ServeDir::new(static_dir.join("_app")))
+        .fallback_service(ServeDir::new(&static_dir).fallback(ServeFile::new(index_file)))
         .layer(SetResponseHeaderLayer::if_not_present(
             header::X_CONTENT_TYPE_OPTIONS,
             HeaderValue::from_static("nosniff"),
@@ -98,7 +122,7 @@ pub fn create_router(state: AppState) -> Router {
         ))
         .layer(SetResponseHeaderLayer::if_not_present(
             header::CONTENT_SECURITY_POLICY,
-            HeaderValue::from_static(CSP),
+            csp,
         ))
         .layer(SetResponseHeaderLayer::if_not_present(
             header::HeaderName::from_static("permissions-policy"),
@@ -116,4 +140,30 @@ async fn api_not_found() -> axum::response::Response {
         axum::Json(serde_json::json!({ "error": "Not found" })),
     )
         .into_response()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn csp_carries_sveltekit_script_hashes_only() {
+        let dir = std::env::temp_dir().join(format!("tunewright_csp_{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(
+            dir.join("index.html"),
+            r#"<meta http-equiv="content-security-policy" content="script-src 'self' 'sha256-AbC+/12='"><script>x='sha256-bad;script-src *'</script>"#,
+        )
+        .unwrap();
+
+        let csp = content_security_policy(&dir);
+        let csp = csp.to_str().unwrap();
+        assert!(csp.contains("default-src 'self'; script-src 'self' 'sha256-AbC+/12=';"));
+        assert!(!csp.contains("bad"));
+
+        let empty = content_security_policy(&dir.join("missing"));
+        assert!(empty.to_str().unwrap().contains("script-src 'self';"));
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 }

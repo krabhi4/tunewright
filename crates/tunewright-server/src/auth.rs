@@ -71,6 +71,8 @@ fn constant_time_eq(a: &[u8], b: &[u8]) -> bool {
     diff == 0
 }
 
+const MAX_NEW_USERNAME_CHARS: usize = 64;
+
 /// Normalize and validate a new account's username/password, then hash the
 /// password. On failure returns the user-facing error `Response` to send back.
 #[allow(clippy::result_large_err)]
@@ -84,6 +86,15 @@ async fn validate_and_hash(
         return Err((
             StatusCode::BAD_REQUEST,
             Json(serde_json::json!({ "error": "Username cannot be empty" })),
+        )
+            .into_response());
+    }
+    if username.chars().count() > MAX_NEW_USERNAME_CHARS || username.chars().any(char::is_control) {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({
+                "error": "Username must be at most 64 characters with no control characters"
+            })),
         )
             .into_response());
     }
@@ -180,11 +191,11 @@ pub struct LoginRequest {
     pub password: String,
 }
 
-/// Upper bound on tracked failed-login usernames; prevents unbounded memory
+/// Upper bound on tracked failed-login username/client pairs; prevents unbounded memory
 /// growth from spraying random usernames. Decayed entries are dropped first,
 /// then the stalest entry if the map is still full.
 const MAX_FAILED_LOGIN_ENTRIES: usize = 1000;
-/// A username's failure counter resets after this much quiet time.
+/// A username/client failure counter resets after this much quiet time.
 const FAILED_LOGIN_DECAY_SECS: u64 = 60;
 
 const MAX_LOGIN_DELAY_MS: u64 = 2_000;
@@ -216,6 +227,20 @@ fn record_failed_login(
     entry.1 = std::time::Instant::now();
 }
 
+fn login_penalty(count: u32) -> std::time::Duration {
+    std::time::Duration::from_millis((100u64 * count as u64).min(MAX_LOGIN_DELAY_MS))
+}
+
+fn penalty_remaining(
+    map: &std::collections::HashMap<String, (u32, std::time::Instant)>,
+    key: &str,
+) -> Option<std::time::Duration> {
+    let (count, last) = map.get(key)?;
+    login_penalty(*count)
+        .checked_sub(last.elapsed())
+        .filter(|d| !d.is_zero())
+}
+
 fn too_many_requests(retry_after_secs: u64) -> Response {
     let retry_after = retry_after_secs.to_string();
     (
@@ -226,35 +251,107 @@ fn too_many_requests(retry_after_secs: u64) -> Response {
         .into_response()
 }
 
-pub async fn login(State(state): State<AppState>, Json(body): Json<LoginRequest>) -> Response {
-    // Brute-force throttling, keyed per normalized username (matches the
-    // normalization applied at account creation).
-    let throttle_key = body.username.trim().to_lowercase();
+pub struct ClientIp(pub std::net::IpAddr);
 
-    // The key is stored in two long-lived maps, so bound it before it gets there.
-    if throttle_key.len() > MAX_USERNAME_BYTES {
+impl axum::extract::FromRequestParts<AppState> for ClientIp {
+    type Rejection = std::convert::Infallible;
+
+    async fn from_request_parts(
+        parts: &mut axum::http::request::Parts,
+        state: &AppState,
+    ) -> Result<Self, Self::Rejection> {
+        let peer = parts
+            .extensions
+            .get::<axum::extract::ConnectInfo<std::net::SocketAddr>>()
+            .map(|c| c.0.ip());
+        if !state.config.trust_proxy && parts.headers.contains_key("x-forwarded-for") {
+            static WARNED: std::sync::Once = std::sync::Once::new();
+            WARNED.call_once(|| {
+                tracing::warn!(
+                    "Login request carries X-Forwarded-For but TUNEWRIGHT_TRUST_PROXY is off, so all clients share the proxy's throttle. Set TUNEWRIGHT_TRUST_PROXY=true if you run behind a trusted reverse proxy"
+                )
+            });
+        }
+        Ok(ClientIp(client_ip(
+            peer,
+            &parts.headers,
+            state.config.trust_proxy,
+        )))
+    }
+}
+
+fn client_ip(
+    peer: Option<std::net::IpAddr>,
+    headers: &axum::http::HeaderMap,
+    trust_proxy: bool,
+) -> std::net::IpAddr {
+    let forwarded = trust_proxy
+        .then(|| {
+            headers
+                .get_all("x-forwarded-for")
+                .iter()
+                .filter_map(|v| v.to_str().ok())
+                .flat_map(|v| v.split(','))
+                .rev()
+                .find_map(|s| s.trim().parse().ok())
+        })
+        .flatten();
+    let ip = forwarded
+        .or(peer)
+        .unwrap_or(std::net::IpAddr::V4(std::net::Ipv4Addr::UNSPECIFIED));
+    match ip.to_canonical() {
+        std::net::IpAddr::V6(v6) => std::net::IpAddr::V6((u128::from(v6) >> 64 << 64).into()),
+        v4 => v4,
+    }
+}
+
+pub async fn login(
+    State(state): State<AppState>,
+    ClientIp(ip): ClientIp,
+    Json(body): Json<LoginRequest>,
+) -> Response {
+    // Brute-force throttling, keyed per normalized username (matches the
+    // normalization applied at account creation) and client address, so one
+    // client's failures never throttle the same account for another client.
+    let username = body.username.trim().to_lowercase();
+
+    // The key is stored in a long-lived map, so bound it before it gets there.
+    if username.len() > MAX_USERNAME_BYTES {
         return (
             StatusCode::BAD_REQUEST,
             Json(serde_json::json!({ "error": "Username too long" })),
         )
             .into_response();
     }
+    let throttle_key = format!("{ip} {username}");
 
-    // Global bound on concurrent Argon2 work, taken before the per-username
-    // gate so that gate is only ever held for the verify itself.
-    let Ok(_permit) = state.password_hash_limit.clone().acquire_owned().await else {
+    let remaining = {
+        let guard = state
+            .failed_logins
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        penalty_remaining(&guard, &throttle_key)
+    };
+    if let Some(wait) = remaining {
+        return too_many_requests(wait.as_millis().div_ceil(1000) as u64);
+    }
+
+    // One verify per client address at a time, taken before the global Argon2
+    // pool so a single client can never hold more than one permit. Excess
+    // attempts are refused immediately rather than queued.
+    let gate = state.login_gate(&ip.to_string());
+    let Ok(gate_guard) = gate.try_lock() else {
+        return too_many_requests(1);
+    };
+
+    // Global bound on concurrent Argon2 work. Never queued: a saturated pool
+    // answers 503 instead of stalling every login behind it.
+    let Ok(_permit) = state.password_hash_limit.clone().try_acquire_owned() else {
         return (
             StatusCode::SERVICE_UNAVAILABLE,
             Json(serde_json::json!({ "error": "Server busy, try again" })),
         )
             .into_response();
-    };
-
-    // One verify per username at a time, so guesses cannot be parallelized.
-    // Excess attempts are refused immediately rather than queued.
-    let gate = state.login_gate(&throttle_key);
-    let Ok(gate_guard) = gate.try_lock() else {
-        return too_many_requests(1);
     };
 
     let user = state.users.find_by_username(&body.username);
@@ -291,17 +388,17 @@ pub async fn login(State(state): State<AppState>, Json(body): Json<LoginRequest>
         return create_session_response(&state, &user.id, &user.username, user.role);
     }
 
-    // Wrong password: record it, then slow the response down. The delay is
-    // applied after releasing the gate so a flood cannot keep the owner locked
-    // out, and it is capped so it can never become a denial of service.
+    // Wrong password: record it, then slow the response down. Further attempts
+    // on this username from this client are refused with 429 until the penalty
+    // window passes, so parallel requests cannot skip the delay. The window is
+    // capped and refused attempts do not extend it.
     let penalty = {
         let mut guard = state
             .failed_logins
             .lock()
             .unwrap_or_else(|e| e.into_inner());
         record_failed_login(&mut guard, throttle_key.clone());
-        let count = guard.get(&throttle_key).map(|e| e.0).unwrap_or(1);
-        std::time::Duration::from_millis((100u64 * count as u64).min(MAX_LOGIN_DELAY_MS))
+        login_penalty(guard.get(&throttle_key).map(|e| e.0).unwrap_or(1))
     };
     drop(gate_guard);
     drop(_permit);
@@ -676,6 +773,9 @@ mod tests {
     use crate::config::Config;
     use crate::users::UserManager;
 
+    const IP_A: std::net::IpAddr = std::net::IpAddr::V4(std::net::Ipv4Addr::new(10, 0, 0, 1));
+    const IP_B: std::net::IpAddr = std::net::IpAddr::V4(std::net::Ipv4Addr::new(10, 0, 0, 2));
+
     #[test]
     fn dummy_hash_still_parses() {
         assert!(
@@ -702,10 +802,12 @@ mod tests {
         let user_manager = UserManager::load(users_path);
         let config = Config {
             data_dir: temp_dir.clone(),
+            state_dir: None,
             static_dir: temp_dir.clone(),
             port: 8080,
             host: "127.0.0.1".to_string(),
             cookie_secure: false,
+            trust_proxy: false,
             setup_token: None,
         };
         let state = AppState::new(config, user_manager);
@@ -721,15 +823,15 @@ mod tests {
             username: "user1".to_string(),
             password: "wrong_password".to_string(),
         };
-        let resp = login(State(state.clone()), Json(req1)).await;
+        let resp = login(State(state.clone()), ClientIp(IP_A), Json(req1)).await;
         assert_eq!(resp.status(), StatusCode::UNAUTHORIZED);
 
         // Verify that user1's failed login count is 1
         {
             let guard = state.failed_logins.lock().unwrap();
-            assert_eq!(guard.get("user1").unwrap().0, 1);
+            assert_eq!(guard.get("10.0.0.1 user1").unwrap().0, 1);
             // user2 should still have no entries
-            assert!(guard.get("user2").is_none());
+            assert!(guard.get("10.0.0.1 user2").is_none());
         }
 
         // Simulate a failed login for user2
@@ -737,14 +839,14 @@ mod tests {
             username: "user2".to_string(),
             password: "wrong_password".to_string(),
         };
-        let resp2 = login(State(state.clone()), Json(req2)).await;
+        let resp2 = login(State(state.clone()), ClientIp(IP_A), Json(req2)).await;
         assert_eq!(resp2.status(), StatusCode::UNAUTHORIZED);
 
         // Verify that user2's failed login count is 1, and user1 is still 1
         {
             let guard = state.failed_logins.lock().unwrap();
-            assert_eq!(guard.get("user1").unwrap().0, 1);
-            assert_eq!(guard.get("user2").unwrap().0, 1);
+            assert_eq!(guard.get("10.0.0.1 user1").unwrap().0, 1);
+            assert_eq!(guard.get("10.0.0.1 user2").unwrap().0, 1);
         }
 
         let _ = std::fs::remove_dir_all(&temp_dir);
@@ -773,10 +875,12 @@ mod tests {
         let user_manager = UserManager::load(users_path);
         let config = Config {
             data_dir: temp_dir.clone(),
+            state_dir: None,
             static_dir: temp_dir.clone(),
             port: 8080,
             host: "127.0.0.1".to_string(),
             cookie_secure: false,
+            trust_proxy: false,
             setup_token: None,
         };
         let state = AppState::new(config, user_manager);
@@ -844,10 +948,12 @@ mod tests {
         let user_manager = UserManager::load(users_path);
         let config = Config {
             data_dir: temp_dir.clone(),
+            state_dir: None,
             static_dir: temp_dir.clone(),
             port: 8080,
             host: "127.0.0.1".to_string(),
             cookie_secure: false,
+            trust_proxy: false,
             setup_token: Some("sekret123".to_string()),
         };
         let state = AppState::new(config, user_manager);
@@ -903,10 +1009,12 @@ mod tests {
         let user_manager = UserManager::load(users_path);
         let config = Config {
             data_dir: temp_dir.clone(),
+            state_dir: None,
             static_dir: temp_dir.clone(),
             port: 8080,
             host: "127.0.0.1".to_string(),
             cookie_secure: false,
+            trust_proxy: false,
             setup_token: Some("sekret123".to_string()),
         };
         let state = AppState::new(config, user_manager);
@@ -956,10 +1064,12 @@ mod tests {
         let user_manager = UserManager::load(users_path);
         let config = Config {
             data_dir: temp_dir.clone(),
+            state_dir: None,
             static_dir: temp_dir.clone(),
             port: 8080,
             host: "127.0.0.1".to_string(),
             cookie_secure: false,
+            trust_proxy: false,
             setup_token: None,
         };
         let state = AppState::new(config, user_manager);
@@ -970,6 +1080,7 @@ mod tests {
         for _ in 0..8 {
             let resp = login(
                 State(state.clone()),
+                ClientIp(IP_A),
                 Json(LoginRequest {
                     username: "victim".to_string(),
                     password: "wrong".to_string(),
@@ -983,6 +1094,7 @@ mod tests {
         // valid credentials, or an attacker could lock the account.
         let resp = login(
             State(state.clone()),
+            ClientIp(IP_A),
             Json(LoginRequest {
                 username: "victim".to_string(),
                 password: "correct horse battery".to_string(),
@@ -999,22 +1111,101 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn login_refused_during_penalty_window_and_when_hash_pool_full() {
+        let temp_dir = std::env::temp_dir().join(format!("tunewright_srv_test_{}", rand_num()));
+        std::fs::create_dir_all(&temp_dir).unwrap();
+        let user_manager = UserManager::load(temp_dir.join("users.json"));
+        let config = Config {
+            data_dir: temp_dir.clone(),
+            state_dir: None,
+            static_dir: temp_dir.clone(),
+            port: 8080,
+            host: "127.0.0.1".to_string(),
+            cookie_secure: false,
+            trust_proxy: false,
+            setup_token: None,
+        };
+        let state = AppState::new(config, user_manager);
+        let attempt = |name: &str| LoginRequest {
+            username: name.to_string(),
+            password: "wrong".to_string(),
+        };
+
+        state.failed_logins.lock().unwrap().insert(
+            "10.0.0.1 victim".to_string(),
+            (5, std::time::Instant::now()),
+        );
+        let resp = login(
+            State(state.clone()),
+            ClientIp(IP_A),
+            Json(attempt("victim")),
+        )
+        .await;
+        assert_eq!(resp.status(), StatusCode::TOO_MANY_REQUESTS);
+        assert_eq!(resp.headers()["Retry-After"], "1");
+        assert_eq!(state.failed_logins.lock().unwrap()["10.0.0.1 victim"].0, 5);
+
+        let _held = state
+            .password_hash_limit
+            .clone()
+            .try_acquire_many_owned(state.password_hash_limit.available_permits() as u32)
+            .unwrap();
+        let resp = login(State(state.clone()), ClientIp(IP_A), Json(attempt("other"))).await;
+        assert_eq!(resp.status(), StatusCode::SERVICE_UNAVAILABLE);
+
+        let _ = std::fs::remove_dir_all(&temp_dir);
+    }
+
+    #[tokio::test]
+    async fn new_usernames_are_length_and_charset_limited() {
+        let temp_dir = std::env::temp_dir().join(format!("tunewright_srv_test_{}", rand_num()));
+        std::fs::create_dir_all(&temp_dir).unwrap();
+        let user_manager = UserManager::load(temp_dir.join("users.json"));
+        let config = Config {
+            data_dir: temp_dir.clone(),
+            state_dir: None,
+            static_dir: temp_dir.clone(),
+            port: 8080,
+            host: "127.0.0.1".to_string(),
+            cookie_secure: false,
+            trust_proxy: false,
+            setup_token: None,
+        };
+        let state = AppState::new(config, user_manager);
+
+        for bad in ["a".repeat(65), "ad\u{7}min".to_string()] {
+            let resp = validate_and_hash(&state, &bad, "password123").await;
+            assert_eq!(resp.unwrap_err().status(), StatusCode::BAD_REQUEST);
+        }
+        let (name, _) =
+            validate_and_hash(&state, &format!("  {}  ", "é".repeat(64)), "password123")
+                .await
+                .unwrap();
+        assert_eq!(name.chars().count(), 64);
+
+        let _ = std::fs::remove_dir_all(&temp_dir);
+    }
+
+    #[tokio::test]
     async fn overlong_username_is_rejected_before_being_stored() {
         let temp_dir = std::env::temp_dir().join(format!("tunewright_srv_test_{}", rand_num()));
         std::fs::create_dir_all(&temp_dir).unwrap();
         let user_manager = UserManager::load(temp_dir.join("users.json"));
         let config = Config {
             data_dir: temp_dir.clone(),
+            state_dir: None,
             static_dir: temp_dir.clone(),
             port: 8080,
             host: "127.0.0.1".to_string(),
             cookie_secure: false,
+            trust_proxy: false,
             setup_token: None,
         };
         let state = AppState::new(config, user_manager);
 
         let resp = login(
             State(state.clone()),
+            ClientIp(IP_A),
             Json(LoginRequest {
                 username: "a".repeat(100_000),
                 password: "whatever".to_string(),
@@ -1043,10 +1234,12 @@ mod tests {
         let user_manager = UserManager::load(users_path);
         let config = Config {
             data_dir: temp_dir.clone(),
+            state_dir: None,
             static_dir: temp_dir.clone(),
             port: 8080,
             host: "127.0.0.1".to_string(),
             cookie_secure: false,
+            trust_proxy: false,
             setup_token: None,
         };
         let state = AppState::new(config, user_manager);
@@ -1054,6 +1247,7 @@ mod tests {
         // Case/whitespace variants of the same username share one throttle entry
         let resp = login(
             State(state.clone()),
+            ClientIp(IP_A),
             Json(LoginRequest {
                 username: "  User1 ".to_string(),
                 password: "wrong_password".to_string(),
@@ -1064,6 +1258,7 @@ mod tests {
 
         let resp = login(
             State(state.clone()),
+            ClientIp(IP_A),
             Json(LoginRequest {
                 username: "user1".to_string(),
                 password: "wrong_password".to_string(),
@@ -1075,10 +1270,97 @@ mod tests {
         {
             let guard = state.failed_logins.lock().unwrap();
             assert_eq!(guard.len(), 1, "variants must share a single entry");
-            assert_eq!(guard.get("user1").unwrap().0, 2);
+            assert_eq!(guard.get("10.0.0.1 user1").unwrap().0, 2);
         }
 
         let _ = std::fs::remove_dir_all(&temp_dir);
+    }
+
+    #[tokio::test]
+    async fn login_throttle_is_per_client() {
+        let temp_dir = std::env::temp_dir().join(format!("tunewright_srv_test_{}", rand_num()));
+        std::fs::create_dir_all(&temp_dir).unwrap();
+        let user_manager = UserManager::load(temp_dir.join("users.json"));
+        let config = Config {
+            data_dir: temp_dir.clone(),
+            state_dir: None,
+            static_dir: temp_dir.clone(),
+            port: 8080,
+            host: "127.0.0.1".to_string(),
+            cookie_secure: false,
+            trust_proxy: false,
+            setup_token: None,
+        };
+        let state = AppState::new(config, user_manager);
+        let hash = users::hash_password("correct horse battery").unwrap();
+        state.users.add_first_user("victim", hash).unwrap();
+        let attempt = |ip, password: &str| {
+            login(
+                State(state.clone()),
+                ClientIp(ip),
+                Json(LoginRequest {
+                    username: "victim".to_string(),
+                    password: password.to_string(),
+                }),
+            )
+        };
+
+        for _ in 0..3 {
+            assert_eq!(
+                attempt(IP_A, "wrong").await.status(),
+                StatusCode::UNAUTHORIZED
+            );
+        }
+        {
+            let mut guard = state.failed_logins.lock().unwrap();
+            assert_eq!(guard.len(), 1);
+            guard.get_mut("10.0.0.1 victim").unwrap().1 = std::time::Instant::now();
+        }
+
+        assert_eq!(
+            attempt(IP_A, "correct horse battery").await.status(),
+            StatusCode::TOO_MANY_REQUESTS,
+            "the penalty window still applies to the failing client"
+        );
+        assert_eq!(
+            attempt(IP_B, "correct horse battery").await.status(),
+            StatusCode::OK,
+            "another client's failures must not throttle this one"
+        );
+
+        let _ = std::fs::remove_dir_all(&temp_dir);
+    }
+
+    #[test]
+    fn forwarded_for_is_honored_only_when_proxy_trusted() {
+        let mut headers = axum::http::HeaderMap::new();
+        headers.append("x-forwarded-for", "1.1.1.1, 10.0.0.2".parse().unwrap());
+        headers.append("x-forwarded-for", "10.0.0.2, junk".parse().unwrap());
+        let peer = Some(IP_A);
+
+        assert_eq!(client_ip(peer, &headers, false), IP_A);
+        assert_eq!(client_ip(peer, &headers, true), IP_B);
+        assert_eq!(client_ip(peer, &axum::http::HeaderMap::new(), true), IP_A);
+        assert_eq!(
+            client_ip(None, &headers, false),
+            std::net::IpAddr::V4(std::net::Ipv4Addr::UNSPECIFIED)
+        );
+    }
+
+    #[test]
+    fn client_ip_groups_ipv6_by_64_and_unmaps_ipv4() {
+        let none = axum::http::HeaderMap::new();
+        let ip = |s: &str| Some(s.parse::<std::net::IpAddr>().unwrap());
+        assert_eq!(
+            client_ip(ip("2001:db8:1:2:aaaa::1"), &none, false),
+            client_ip(ip("2001:db8:1:2:bbbb::2"), &none, false)
+        );
+        assert_ne!(
+            client_ip(ip("2001:db8:1:2::1"), &none, false),
+            client_ip(ip("2001:db8:1:3::1"), &none, false)
+        );
+        assert_eq!(client_ip(ip("::ffff:10.0.0.1"), &none, false), IP_A);
+        assert_eq!(client_ip(Some(IP_A), &none, false), IP_A);
     }
 
     fn rand_num() -> u64 {

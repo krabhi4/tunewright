@@ -10,6 +10,7 @@ export interface RenamePreview {
 	old_name: string;
 	new_name: string;
 	conflict: boolean;
+	error?: string;
 }
 
 export interface RenameResult {

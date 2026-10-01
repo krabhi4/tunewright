@@ -1,8 +1,20 @@
 use crate::types::{TagData, TagWriteChanges, TunewrightError, WriteResult};
+use lofty::aac::AacFile;
+use lofty::ape::{ApeFile, ApeItem, ApeTag};
 use lofty::config::{ParseOptions, ParsingMode, WriteOptions};
-use lofty::file::{AudioFile, TaggedFileExt};
+use lofty::file::{AudioFile, FileType, TaggedFile, TaggedFileExt};
+use lofty::flac::FlacFile;
+use lofty::id3::v2::{ExtendedTextFrame, Frame, Id3v2Tag, Id3v2Version};
+use lofty::iff::aiff::AiffFile;
+use lofty::iff::wav::{RiffInfoList, WavFile};
+use lofty::mp4::{Atom, AtomData, AtomIdent, Ilst};
+use lofty::mpeg::MpegFile;
+use lofty::musepack::MpcFile;
+use lofty::ogg::tag::VorbisComments;
+use lofty::ogg::{OggPictureStorage, OpusFile, SpeexFile, VorbisFile};
 use lofty::probe::Probe;
-use lofty::tag::{Accessor, ItemKey, ItemValue, Tag, TagItem, TagType};
+use lofty::tag::{Accessor, ItemKey, ItemValue, MergeTag, SplitTag, Tag, TagExt, TagItem, TagType};
+use lofty::wavpack::WavPackFile;
 use rayon::prelude::*;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -29,6 +41,10 @@ fn full_parse_options() -> ParseOptions {
 /// Returns tag text fields only (title, artist, album, etc.).
 /// Use this for populating the grid quickly.
 pub fn read_tags_fast(path: &Path) -> Result<TagData, TunewrightError> {
+    read_tags_fast_with(path, false)
+}
+
+pub fn read_tags_fast_with(path: &Path, unfiltered: bool) -> Result<TagData, TunewrightError> {
     let tagged = Probe::open(path)
         .map_err(|e| TunewrightError::TagReadError(format!("{}: {}", path.display(), e)))?
         .options(fast_parse_options())
@@ -60,7 +76,12 @@ pub fn read_tags_fast(path: &Path) -> Result<TagData, TunewrightError> {
     // Check picture count without loading picture data
     let has_cover = tags.iter().any(|t| !t.pictures().is_empty());
 
-    let extra = collect_extra_tags(&tags, false);
+    let extra = collect_extra_tags(
+        &tags,
+        unfiltered,
+        !unfiltered,
+        primary_custom(path, &tagged),
+    );
 
     Ok(TagData {
         title,
@@ -128,7 +149,7 @@ pub fn read_tags_full(path: &Path) -> Result<TagData, TunewrightError> {
 
     let has_cover = tags.iter().any(|t| !t.pictures().is_empty());
 
-    let extra = collect_extra_tags(&tags, true);
+    let extra = collect_extra_tags(&tags, true, true, primary_custom(path, &tagged));
 
     Ok(TagData {
         title,
@@ -196,159 +217,506 @@ pub fn write_tags(path: &Path, changes: &TagWriteChanges) -> Result<(), Tunewrig
     crate::fsutil::atomic_file_update(path, |tmp| apply_tag_changes(tmp, changes))
 }
 
+pub fn modify_tags<F>(path: &Path, modify: F) -> Result<(), TunewrightError>
+where
+    F: FnOnce(&mut TagData),
+{
+    let _lock = crate::locks::lock_file(path);
+    let original = read_tags_fast_with(path, true)?;
+    let mut modified = original.clone();
+    modify(&mut modified);
+    let changes = TagWriteChanges::diff(&original, &modified);
+    if changes == TagWriteChanges::default() {
+        return Ok(());
+    }
+    crate::fsutil::atomic_file_update(path, |tmp| apply_tag_changes(tmp, &changes))
+}
+
+fn write_error(path: &Path, e: impl std::fmt::Display) -> TunewrightError {
+    TunewrightError::TagWriteError(format!("{}: {}", path.display(), e))
+}
+
+type ExtraChanges = Vec<(ItemKey, Option<String>)>;
+
 fn apply_tag_changes(path: &Path, changes: &TagWriteChanges) -> Result<(), TunewrightError> {
     // Keep cover art (default) so existing pictures survive the save, but
     // skip audio properties — they aren't needed for tag writes.
     let mut tagged = Probe::open(path)
-        .map_err(|e| TunewrightError::TagWriteError(format!("{}: {}", path.display(), e)))?
+        .map_err(|e| write_error(path, e))?
         .options(ParseOptions::new().read_properties(false))
         .read()
-        .map_err(|e| TunewrightError::TagWriteError(format!("{}: {}", path.display(), e)))?;
+        .map_err(|e| write_error(path, e))?;
 
     let primary_type = tagged
         .primary_tag()
         .map(|t| t.tag_type())
         .unwrap_or_else(|| tagged.primary_tag_type());
+    let options = write_options(path, &tagged);
 
-    // Collect and remove all secondary tags
+    let file_custom = changes
+        .extra
+        .as_ref()
+        .map(|_| primary_custom(path, &tagged))
+        .unwrap_or_default();
+    let custom_key = |key: &str| {
+        let mut keys = file_custom.iter().map(|(k, _)| k.as_str());
+        keys.clone()
+            .find(|k| *k == key)
+            .or_else(|| keys.find(|k| k.eq_ignore_ascii_case(key)))
+    };
+    let mut extra = ExtraChanges::new();
+    let mut primary_extra = ExtraChanges::new();
+    let mut custom = Vec::new();
+    for (key, value) in changes.extra.iter().flatten() {
+        let item_key = string_to_item_key(key).filter(|k| !is_standard_key(*k));
+        extra.extend(item_key.map(|k| (k, value.clone())));
+        let file_key = custom_key(key);
+        match item_key.filter(|k| {
+            k.map_key(primary_type).is_some()
+                && file_key.is_none_or(|c| c != key && item_key_to_string(*k) == *key)
+        }) {
+            Some(k) => primary_extra.push((k, value.clone())),
+            None => custom.push((file_key.unwrap_or(key), value.as_deref())),
+        }
+    }
+
     let secondary_types: Vec<TagType> = tagged
         .tags()
         .iter()
         .map(|t| t.tag_type())
         .filter(|&t| t != primary_type)
         .collect();
-
-    let mut secondary_tags = Vec::new();
+    let mut concrete_types = Vec::new();
     for t_type in secondary_types {
-        if let Some(t) = tagged.remove(t_type) {
-            secondary_tags.push(t);
-        }
-        match std::fs::OpenOptions::new()
-            .read(true)
-            .write(true)
-            .open(path)
-        {
-            Ok(mut fh) => {
-                if let Err(e) = t_type.remove_from(&mut fh, WriteOptions::default()) {
-                    tracing::warn!(
-                        "Failed to remove {:?} tag from {}: {}",
-                        t_type,
-                        path.display(),
-                        e
-                    );
-                }
+        let unchanged = match tagged.tag_mut(t_type) {
+            Some(_) if matches!(t_type, TagType::Ape | TagType::RiffInfo) => {
+                concrete_types.push(t_type);
+                true
             }
-            Err(e) => tracing::warn!(
-                "Failed to open {} to remove {:?} tag: {}",
-                path.display(),
-                t_type,
-                e
-            ),
+            Some(tag) => !apply_changes(tag, changes, &extra, false)?,
+            None => false,
+        };
+        if unchanged {
+            tagged.remove(t_type);
         }
     }
 
-    // Get the primary tag (inserting a new one if not present)
-    let tag = match tagged.tag_mut(primary_type) {
-        Some(t) => t,
-        None => {
-            tagged.insert_tag(Tag::new(primary_type));
-            tagged.tag_mut(primary_type).unwrap()
+    update_primary(path, &mut tagged, primary_type, &custom, options, |tag| {
+        apply_changes(tag, changes, &primary_extra, true).map(drop)
+    })?;
+
+    tagged
+        .save_to_path(path, options)
+        .map_err(|e| write_error(path, e))?;
+
+    for t_type in concrete_types {
+        match t_type {
+            TagType::Ape => update_mpeg_ape(path, changes, &extra)?,
+            _ => update_wav_riff_info(path, changes, &extra)?,
         }
+    }
+    Ok(())
+}
+
+pub(crate) fn update_primary(
+    path: &Path,
+    tagged: &mut TaggedFile,
+    primary_type: TagType,
+    custom: &[(&str, Option<&str>)],
+    options: WriteOptions,
+    edit: impl FnOnce(&mut Tag) -> Result<(), TunewrightError>,
+) -> Result<(), TunewrightError> {
+    let mut tag = tagged
+        .remove(primary_type)
+        .unwrap_or_else(|| Tag::new(primary_type));
+    let unsupported = |key: &str| write_error(path, format!("unsupported tag field '{key}'"));
+    let parse_options = ParseOptions::new().read_properties(false);
+    let Some(mut native) = Native::load(path, tagged.file_type(), &tag, parse_options)
+        .map_err(|e| write_error(path, e))?
+    else {
+        if let Some((key, _)) = custom.first() {
+            return Err(unsupported(key));
+        }
+        edit(&mut tag)?;
+        tagged.insert_tag(tag);
+        return Ok(());
     };
-
-    // Merge secondary tags' items into the primary tag
-    for sec_tag in &secondary_tags {
-        for item in sec_tag.items() {
-            if !tag.items().any(|i| i.key() == item.key()) {
-                tag.push(item.clone());
-            }
-        }
-        if tag.pictures().is_empty() && !sec_tag.pictures().is_empty() {
-            for pic in sec_tag.pictures() {
-                tag.push_picture(pic.clone());
-            }
+    native.edit(edit)?;
+    for &(key, value) in custom {
+        if !native.set_custom(key, value) {
+            return Err(unsupported(key));
         }
     }
+    native.save(path, options).map_err(|e| write_error(path, e))
+}
 
-    if let Some(ref v) = changes.title {
-        tag.set_title(v.clone());
+pub(crate) fn write_options(path: &Path, tagged: &TaggedFile) -> WriteOptions {
+    let id3v23 = || {
+        tagged.tag(TagType::Id3v2)?;
+        let file = &mut std::fs::File::open(path).ok()?;
+        let options = ParseOptions::new()
+            .read_properties(false)
+            .read_cover_art(false);
+        let tag = match tagged.file_type() {
+            FileType::Mpeg => MpegFile::read_from(file, options).ok()?.remove_id3v2(),
+            FileType::Aac => AacFile::read_from(file, options).ok()?.remove_id3v2(),
+            FileType::Aiff => AiffFile::read_from(file, options).ok()?.remove_id3v2(),
+            FileType::Wav => WavFile::read_from(file, options).ok()?.remove_id3v2(),
+            _ => None,
+        };
+        Some(tag?.original_version() == Id3v2Version::V3)
+    };
+    WriteOptions::default().use_id3v23(id3v23().unwrap_or(false))
+}
+
+const ITUNES_MEAN: &str = "com.apple.iTunes";
+
+enum Native {
+    Vorbis(VorbisComments),
+    Ape(ApeTag),
+    Id3v2(Id3v2Tag),
+    Ilst(Ilst),
+}
+
+impl Native {
+    fn load(
+        path: &Path,
+        file_type: FileType,
+        primary: &Tag,
+        options: ParseOptions,
+    ) -> Result<Option<Self>, Box<dyn std::error::Error>> {
+        let open = || std::fs::File::open(path);
+        Ok(Some(match file_type {
+            FileType::Flac => {
+                let mut flac = FlacFile::read_from(&mut open()?, options)?;
+                let mut comments = flac.remove_vorbis_comments().unwrap_or_default();
+                for (picture, info) in flac.remove_pictures() {
+                    comments.insert_picture(picture, Some(info))?;
+                }
+                Self::Vorbis(comments)
+            }
+            FileType::Opus => Self::Vorbis(
+                OpusFile::read_from(&mut open()?, options)?
+                    .vorbis_comments()
+                    .clone(),
+            ),
+            FileType::Vorbis => Self::Vorbis(
+                VorbisFile::read_from(&mut open()?, options)?
+                    .vorbis_comments()
+                    .clone(),
+            ),
+            FileType::Speex => Self::Vorbis(
+                SpeexFile::read_from(&mut open()?, options)?
+                    .vorbis_comments()
+                    .clone(),
+            ),
+            FileType::Ape => Self::Ape(
+                ApeFile::read_from(&mut open()?, options)?
+                    .remove_ape()
+                    .unwrap_or_default(),
+            ),
+            FileType::WavPack => Self::Ape(
+                WavPackFile::read_from(&mut open()?, options)?
+                    .remove_ape()
+                    .unwrap_or_default(),
+            ),
+            FileType::Mpc => Self::Ape(
+                MpcFile::read_from(&mut open()?, options)?
+                    .remove_ape()
+                    .unwrap_or_default(),
+            ),
+            _ => match primary.tag_type() {
+                TagType::Id3v2 => Self::Id3v2(primary.clone().into()),
+                TagType::Mp4Ilst => Self::Ilst(primary.clone().into()),
+                _ => return Ok(None),
+            },
+        }))
     }
-    if let Some(ref v) = changes.artist {
-        tag.set_artist(v.clone());
+
+    fn edit<R>(&mut self, edit: impl FnOnce(&mut Tag) -> R) -> R {
+        match self {
+            Self::Vorbis(t) => {
+                let vendor = t.vendor().to_string();
+                let mut encoders: Vec<String> = t.get_all("ENCODER").map(str::to_string).collect();
+                let result = split_edit(t, |tag| {
+                    let before: Vec<String> = tag
+                        .get_strings(ItemKey::EncoderSoftware)
+                        .map(str::to_string)
+                        .collect();
+                    let result = edit(tag);
+                    let after: Vec<String> = tag
+                        .get_strings(ItemKey::EncoderSoftware)
+                        .map(str::to_string)
+                        .collect();
+                    if before != after {
+                        encoders = after;
+                    }
+                    tag.remove_key(ItemKey::EncoderSoftware);
+                    result
+                });
+                t.set_vendor(vendor);
+                remove_vorbis(t, "ENCODER");
+                for encoder in encoders {
+                    t.push("ENCODER".to_string(), encoder);
+                }
+                result
+            }
+            Self::Ape(t) => split_edit(t, edit),
+            Self::Id3v2(t) => split_edit(t, edit),
+            Self::Ilst(t) => split_edit(t, edit),
+        }
     }
-    if let Some(ref v) = changes.album {
-        tag.set_album(v.clone());
+
+    fn custom(&self) -> Vec<(String, String)> {
+        let pair = |k: &str, v: &str| (k.to_string(), v.to_string());
+        match self {
+            Self::Vorbis(t) => t
+                .clone()
+                .split_tag()
+                .0
+                .items()
+                .map(|(k, v)| pair(k, v))
+                .collect(),
+            Self::Ape(t) => ApeTag::from(t.clone().split_tag().0)
+                .into_iter()
+                .filter_map(|i| Some(pair(i.key(), i.value().text()?)))
+                .collect(),
+            Self::Id3v2(t) => t
+                .clone()
+                .split_tag()
+                .0
+                .iter()
+                .filter_map(|f| match f {
+                    Frame::UserText(ExtendedTextFrame {
+                        description,
+                        content,
+                        ..
+                    }) => Some(pair(description, content)),
+                    _ => None,
+                })
+                .collect(),
+            Self::Ilst(t) => Ilst::from(t.clone().split_tag().0)
+                .into_iter()
+                .filter_map(|a| match (a.ident(), a.data().next()) {
+                    (AtomIdent::Freeform { mean, name }, Some(AtomData::UTF8(v)))
+                        if mean == ITUNES_MEAN =>
+                    {
+                        Some(pair(name, v))
+                    }
+                    _ => None,
+                })
+                .collect(),
+        }
     }
-    if let Some(ref v) = changes.genre {
-        tag.set_genre(v.clone());
+
+    fn set_custom(&mut self, key: &str, value: Option<&str>) -> bool {
+        let value = value.filter(|v| !v.is_empty());
+        match self {
+            Self::Vorbis(t) => {
+                match value {
+                    Some(v) => t.insert(key.to_string(), v.to_string()),
+                    None => remove_vorbis(t, key),
+                }
+                value.is_none() || t.get(key).is_some()
+            }
+            Self::Ape(t) => match value {
+                Some(v) => ApeItem::new(key.to_string(), ItemValue::Text(v.to_string()))
+                    .map(|item| t.insert(item))
+                    .is_ok(),
+                None => {
+                    t.remove(key);
+                    true
+                }
+            },
+            Self::Id3v2(t) => {
+                match value {
+                    Some(v) => t.insert_user_text(key.to_string(), v.to_string()),
+                    None => t.remove_user_text(key),
+                };
+                true
+            }
+            Self::Ilst(t) => {
+                let ident = AtomIdent::Freeform {
+                    mean: ITUNES_MEAN.into(),
+                    name: key.to_string().into(),
+                };
+                t.retain(|a| a.ident() != &ident);
+                if let Some(v) = value {
+                    t.insert(Atom::new(ident, AtomData::UTF8(v.to_string())));
+                }
+                true
+            }
+        }
     }
-    if let Some(ref v) = changes.comment {
-        tag.set_comment(v.clone());
+
+    fn save(
+        &self,
+        path: &Path,
+        options: WriteOptions,
+    ) -> Result<(), lofty::error::FileEncodingError> {
+        match self {
+            Self::Vorbis(t) => t.save_to_path(path, options),
+            Self::Ape(t) => t.save_to_path(path, options),
+            Self::Id3v2(t) => t.save_to_path(path, options),
+            Self::Ilst(t) => t.save_to_path(path, options),
+        }
     }
-    if let Some(v) = changes.year {
+}
+
+fn remove_vorbis(t: &mut VorbisComments, key: &str) {
+    let items: Vec<_> = t
+        .take_items()
+        .filter(|(k, _)| !k.eq_ignore_ascii_case(key))
+        .collect();
+    for (k, v) in items {
+        t.push(k, v);
+    }
+}
+
+fn split_edit<T, R>(native: &mut T, edit: impl FnOnce(&mut Tag) -> R) -> R
+where
+    T: SplitTag + Default,
+    T::Remainder: MergeTag<Merged = T>,
+{
+    let (remainder, mut tag) = std::mem::take(native).split_tag();
+    let result = edit(&mut tag);
+    *native = remainder.merge_tag(tag);
+    result
+}
+
+fn primary_custom(path: &Path, tagged: &TaggedFile) -> Vec<(String, String)> {
+    tagged
+        .primary_tag()
+        .and_then(|t| Native::load(path, tagged.file_type(), t, fast_parse_options()).ok()?)
+        .map(|native| native.custom())
+        .unwrap_or_default()
+}
+
+fn update_mpeg_ape(
+    path: &Path,
+    changes: &TagWriteChanges,
+    extra: &ExtraChanges,
+) -> Result<(), TunewrightError> {
+    let mut file = MpegFile::read_from(
+        &mut std::fs::File::open(path)?,
+        ParseOptions::new().read_properties(false),
+    )
+    .map_err(|e| write_error(path, e))?;
+    let Some(ape) = file.remove_ape() else {
+        return Ok(());
+    };
+    let (remainder, mut tag) = ape.split_tag();
+    if apply_changes(&mut tag, changes, extra, false)? {
+        remainder
+            .merge_tag(tag)
+            .save_to_path(path, WriteOptions::default())
+            .map_err(|e| write_error(path, e))?;
+    }
+    Ok(())
+}
+
+fn update_wav_riff_info(
+    path: &Path,
+    changes: &TagWriteChanges,
+    extra: &ExtraChanges,
+) -> Result<(), TunewrightError> {
+    let mut file = WavFile::read_from(
+        &mut std::fs::File::open(path)?,
+        ParseOptions::new().read_properties(false),
+    )
+    .map_err(|e| write_error(path, e))?;
+    let Some(info) = file.remove_riff_info() else {
+        return Ok(());
+    };
+    let mut tag = Tag::from(info.clone());
+    if !apply_changes(&mut tag, changes, extra, false)? {
+        return Ok(());
+    }
+    let mut updated = RiffInfoList::from(tag);
+    for (key, value) in &info {
+        if ItemKey::from_key(TagType::RiffInfo, key).is_none() {
+            updated.insert(key.clone(), value.clone());
+        }
+    }
+    updated
+        .save_to_path(path, WriteOptions::default())
+        .map_err(|e| write_error(path, e))
+}
+
+fn apply_changes(
+    tag: &mut Tag,
+    changes: &TagWriteChanges,
+    extra: &ExtraChanges,
+    add: bool,
+) -> Result<bool, TunewrightError> {
+    let before: Vec<TagItem> = tag.items().cloned().collect();
+    let num = |v: Option<Option<u32>>| v.map(|n| n.map(|n| n.to_string()));
+    let fields = [
+        (ItemKey::TrackTitle, changes.title.clone()),
+        (ItemKey::TrackArtist, changes.artist.clone()),
+        (ItemKey::AlbumTitle, changes.album.clone()),
+        (ItemKey::AlbumArtist, changes.album_artist.clone()),
+        (ItemKey::Genre, changes.genre.clone()),
+        (ItemKey::Comment, changes.comment.clone()),
+        (ItemKey::Composer, changes.composer.clone()),
+        (ItemKey::TrackNumber, num(changes.track_number)),
+        (ItemKey::TrackTotal, num(changes.track_total)),
+        (ItemKey::DiscNumber, num(changes.disc_number)),
+        (ItemKey::DiscTotal, num(changes.disc_total)),
+    ];
+    let mut rejected = Vec::new();
+    let extra = extra.iter().map(|(k, v)| (*k, Some(v.clone())));
+    for (key, change) in fields.into_iter().chain(extra) {
+        if !set_item(tag, key, change, add) {
+            rejected.push(key);
+        }
+    }
+
+    if let Some(year) = changes.year {
+        let existing = tag
+            .get_string(ItemKey::RecordingDate)
+            .or_else(|| tag.get_string(ItemKey::Year))
+            .map(str::to_string);
         // RecordingDate is the cross-format date key; ItemKey::Year isn't mapped for ID3v2.
         tag.remove_key(ItemKey::Year);
         tag.remove_key(ItemKey::RecordingDate);
-        tag.push(TagItem::new(
-            ItemKey::RecordingDate,
-            ItemValue::Text(v.to_string()),
-        ));
-    }
-    if let Some(v) = changes.track_number {
-        tag.set_track(v);
-    }
-    if let Some(v) = changes.track_total {
-        if primary_type != TagType::Id3v2 || changes.track_number.or_else(|| tag.track()).is_some()
-        {
-            tag.set_track_total(v);
-        }
-    }
-    if let Some(v) = changes.disc_number {
-        tag.set_disk(v);
-    }
-    if let Some(v) = changes.disc_total {
-        if primary_type != TagType::Id3v2 || changes.disc_number.or_else(|| tag.disk()).is_some() {
-            tag.set_disk_total(v);
+        if let Some(year) = year.filter(|_| add || existing.is_some()) {
+            let date = existing
+                .filter(|d| parse_year(d) == Some(year))
+                .unwrap_or_else(|| year.to_string());
+            tag.push(TagItem::new(ItemKey::RecordingDate, ItemValue::Text(date)));
         }
     }
 
-    // Write album_artist via TagItem (not available on Accessor trait)
-    if let Some(ref v) = changes.album_artist {
-        tag.remove_key(ItemKey::AlbumArtist);
-        if !v.is_empty() {
-            tag.push(TagItem::new(
-                ItemKey::AlbumArtist,
-                ItemValue::Text(v.clone()),
-            ));
+    if tag.tag_type() == TagType::Id3v2 {
+        if tag.track().is_none() {
+            tag.remove_key(ItemKey::TrackTotal);
+        }
+        if tag.disk().is_none() {
+            tag.remove_key(ItemKey::DiscTotal);
         }
     }
 
-    // Write composer via TagItem
-    if let Some(ref v) = changes.composer {
-        tag.remove_key(ItemKey::Composer);
-        if !v.is_empty() {
-            tag.push(TagItem::new(ItemKey::Composer, ItemValue::Text(v.clone())));
-        }
+    if add && !rejected.is_empty() {
+        return Err(TunewrightError::TagWriteError(format!(
+            "{:?} tags do not support {:?}",
+            tag.tag_type(),
+            rejected
+        )));
     }
+    Ok(!tag.items().eq(before.iter()))
+}
 
-    // Write extra/custom tag fields
-    if let Some(ref extra) = changes.extra {
-        for (key, value) in extra {
-            let Some(item_key) = string_to_item_key(key) else {
-                continue;
-            };
-            tag.remove_key(item_key);
-            if !value.is_empty() {
-                tag.push(TagItem::new(item_key, ItemValue::Text(value.clone())));
-            }
-        }
+fn set_item(tag: &mut Tag, key: ItemKey, change: Option<Option<String>>, add: bool) -> bool {
+    let Some(value) = change else {
+        return true;
+    };
+    let existed = tag.get(key).is_some();
+    tag.remove_key(key);
+    match value.filter(|v| !v.is_empty()) {
+        Some(v) if add || existed => tag.push(TagItem::new(key, ItemValue::Text(v))),
+        _ => true,
     }
-
-    tagged
-        .save_to_path(path, WriteOptions::default())
-        .map_err(|e| TunewrightError::TagWriteError(format!("{}: {}", path.display(), e)))?;
-
-    Ok(())
 }
 
 /// Parallel batch write tags; per-path locks serialize conflicting writes.
@@ -430,151 +798,12 @@ fn item_key_to_string(key: ItemKey) -> String {
     format!("{:?}", key)
 }
 
-/// Convert a string key back to an ItemKey for writing
+/// Convert a string key back to an ItemKey for writing (case-insensitive)
 fn string_to_item_key(key: &str) -> Option<ItemKey> {
-    Some(match key {
-        // Titles
-        "AlbumTitle" => ItemKey::AlbumTitle,
-        "SetSubtitle" => ItemKey::SetSubtitle,
-        "ShowName" => ItemKey::ShowName,
-        "ContentGroup" => ItemKey::ContentGroup,
-        "TrackTitle" => ItemKey::TrackTitle,
-        "TrackSubtitle" => ItemKey::TrackSubtitle,
-
-        // Original names
-        "OriginalAlbumTitle" => ItemKey::OriginalAlbumTitle,
-        "OriginalArtist" => ItemKey::OriginalArtist,
-        "OriginalLyricist" => ItemKey::OriginalLyricist,
-
-        // Sorting
-        "AlbumTitleSortOrder" => ItemKey::AlbumTitleSortOrder,
-        "AlbumArtistSortOrder" => ItemKey::AlbumArtistSortOrder,
-        "TrackTitleSortOrder" => ItemKey::TrackTitleSortOrder,
-        "TrackArtistSortOrder" => ItemKey::TrackArtistSortOrder,
-        "ShowNameSortOrder" => ItemKey::ShowNameSortOrder,
-        "ComposerSortOrder" => ItemKey::ComposerSortOrder,
-
-        // People & Organizations
-        "AlbumArtist" => ItemKey::AlbumArtist,
-        "AlbumArtists" => ItemKey::AlbumArtists,
-        "TrackArtist" => ItemKey::TrackArtist,
-        "TrackArtists" => ItemKey::TrackArtists,
-        "Arranger" => ItemKey::Arranger,
-        "Writer" => ItemKey::Writer,
-        "Composer" => ItemKey::Composer,
-        "Conductor" => ItemKey::Conductor,
-        "Director" => ItemKey::Director,
-        "Engineer" => ItemKey::Engineer,
-        "Lyricist" => ItemKey::Lyricist,
-        "MixDj" => ItemKey::MixDj,
-        "MixEngineer" => ItemKey::MixEngineer,
-        "Performer" => ItemKey::Performer,
-        "Producer" => ItemKey::Producer,
-        "Publisher" => ItemKey::Publisher,
-        "Label" => ItemKey::Label,
-        "InternetRadioStationName" => ItemKey::InternetRadioStationName,
-        "InternetRadioStationOwner" => ItemKey::InternetRadioStationOwner,
-        "Remixer" => ItemKey::Remixer,
-
-        // Counts & Indexes
-        "DiscNumber" => ItemKey::DiscNumber,
-        "DiscTotal" => ItemKey::DiscTotal,
-        "TrackNumber" => ItemKey::TrackNumber,
-        "TrackTotal" => ItemKey::TrackTotal,
-        "Popularimeter" => ItemKey::Popularimeter,
-        "ParentalAdvisory" => ItemKey::ParentalAdvisory,
-
-        // Dates
-        "RecordingDate" => ItemKey::RecordingDate,
-        "Year" => ItemKey::Year,
-        "ReleaseDate" => ItemKey::ReleaseDate,
-        "OriginalReleaseDate" => ItemKey::OriginalReleaseDate,
-
-        // Identifiers
-        "Isrc" => ItemKey::Isrc,
-        "Barcode" => ItemKey::Barcode,
-        "AcoustId" => ItemKey::AcoustId,
-        "AcoustIdFingerprint" => ItemKey::AcoustIdFingerprint,
-        "CatalogNumber" => ItemKey::CatalogNumber,
-        "Work" => ItemKey::Work,
-        "Movement" => ItemKey::Movement,
-        "MovementNumber" => ItemKey::MovementNumber,
-        "MovementTotal" => ItemKey::MovementTotal,
-        "ReleaseCountry" => ItemKey::ReleaseCountry,
-
-        // MusicBrainz Identifiers
-        "MusicBrainzRecordingId" => ItemKey::MusicBrainzRecordingId,
-        "MusicBrainzTrackId" => ItemKey::MusicBrainzTrackId,
-        "MusicBrainzReleaseId" => ItemKey::MusicBrainzReleaseId,
-        "MusicBrainzReleaseGroupId" => ItemKey::MusicBrainzReleaseGroupId,
-        "MusicBrainzArtistId" => ItemKey::MusicBrainzArtistId,
-        "MusicBrainzReleaseArtistId" => ItemKey::MusicBrainzReleaseArtistId,
-        "MusicBrainzWorkId" => ItemKey::MusicBrainzWorkId,
-        "MusicBrainzReleaseType" => ItemKey::MusicBrainzReleaseType,
-
-        // Flags
-        "FlagCompilation" => ItemKey::FlagCompilation,
-        "FlagPodcast" => ItemKey::FlagPodcast,
-
-        // File Information
-        "FileOwner" => ItemKey::FileOwner,
-        "TaggingTime" => ItemKey::TaggingTime,
-        "Length" => ItemKey::Length,
-        "OriginalFileName" => ItemKey::OriginalFileName,
-        "OriginalMediaType" => ItemKey::OriginalMediaType,
-
-        // Encoder information
-        "EncodedBy" => ItemKey::EncodedBy,
-        "EncoderSoftware" => ItemKey::EncoderSoftware,
-        "EncoderSettings" => ItemKey::EncoderSettings,
-        "EncodingTime" => ItemKey::EncodingTime,
-        "ReplayGainAlbumGain" => ItemKey::ReplayGainAlbumGain,
-        "ReplayGainAlbumPeak" => ItemKey::ReplayGainAlbumPeak,
-        "ReplayGainTrackGain" => ItemKey::ReplayGainTrackGain,
-        "ReplayGainTrackPeak" => ItemKey::ReplayGainTrackPeak,
-
-        // URLs
-        "AudioFileUrl" => ItemKey::AudioFileUrl,
-        "AudioSourceUrl" => ItemKey::AudioSourceUrl,
-        "CommercialInformationUrl" => ItemKey::CommercialInformationUrl,
-        "CopyrightUrl" => ItemKey::CopyrightUrl,
-        "TrackArtistUrl" => ItemKey::TrackArtistUrl,
-        "RadioStationUrl" => ItemKey::RadioStationUrl,
-        "PaymentUrl" => ItemKey::PaymentUrl,
-        "PublisherUrl" => ItemKey::PublisherUrl,
-
-        // Style
-        "Genre" => ItemKey::Genre,
-        "InitialKey" => ItemKey::InitialKey,
-        "Color" => ItemKey::Color,
-        "Mood" => ItemKey::Mood,
-        "Bpm" => ItemKey::Bpm,
-        "IntegerBpm" => ItemKey::IntegerBpm,
-
-        // Legal
-        "CopyrightMessage" => ItemKey::CopyrightMessage,
-        "License" => ItemKey::License,
-
-        // Podcast
-        "PodcastDescription" => ItemKey::PodcastDescription,
-        "PodcastSeriesCategory" => ItemKey::PodcastSeriesCategory,
-        "PodcastUrl" => ItemKey::PodcastUrl,
-        "PodcastGlobalUniqueId" => ItemKey::PodcastGlobalUniqueId,
-        "PodcastKeywords" => ItemKey::PodcastKeywords,
-
-        // Miscellaneous
-        "Comment" => ItemKey::Comment,
-        "Description" => ItemKey::Description,
-        "Language" => ItemKey::Language,
-        "Script" => ItemKey::Script,
-        "Lyrics" => ItemKey::Lyrics,
-        "UnsyncLyrics" => ItemKey::UnsyncLyrics,
-
-        // Vendor-specific
-        "AppleXid" => ItemKey::AppleXid,
-        "AppleId3v2ContentGroup" => ItemKey::AppleId3v2ContentGroup,
-        _ => return None,
-    })
+    ItemKey::VARIANTS
+        .iter()
+        .copied()
+        .find(|k| item_key_to_string(*k).eq_ignore_ascii_case(key))
 }
 
 const MAX_EXTRA_TAGS: usize = 256;
@@ -582,8 +811,19 @@ const MAX_TAG_VALUE_BYTES: usize = 64 * 1024;
 
 /// Collect all non-standard tag items into a HashMap.
 /// Lyric keys (often multiple KB per file) are only kept when `include_lyrics`
-/// is set; the fast batch path skips them.
-fn collect_extra_tags(tags: &[&Tag], include_lyrics: bool) -> HashMap<String, String> {
+/// is set; the fast batch path skips them. `capped` limits the item count and
+/// value size for display reads.
+fn collect_extra_tags(
+    tags: &[&Tag],
+    include_lyrics: bool,
+    capped: bool,
+    custom: Vec<(String, String)>,
+) -> HashMap<String, String> {
+    let (max_tags, max_value) = if capped {
+        (MAX_EXTRA_TAGS, MAX_TAG_VALUE_BYTES)
+    } else {
+        (usize::MAX, usize::MAX)
+    };
     let mut extra = HashMap::new();
     for tag in tags {
         for item in tag.items() {
@@ -593,7 +833,7 @@ fn collect_extra_tags(tags: &[&Tag], include_lyrics: bool) -> HashMap<String, St
             if !include_lyrics && matches!(item.key(), ItemKey::Lyrics | ItemKey::UnsyncLyrics) {
                 continue;
             }
-            if extra.len() >= MAX_EXTRA_TAGS {
+            if extra.len() >= max_tags {
                 return extra;
             }
             let key = item_key_to_string(item.key());
@@ -601,10 +841,18 @@ fn collect_extra_tags(tags: &[&Tag], include_lyrics: bool) -> HashMap<String, St
                 continue; // first tag wins
             }
             if let ItemValue::Text(val) = item.value() {
-                if !val.is_empty() && val.len() <= MAX_TAG_VALUE_BYTES {
+                if !val.is_empty() && val.len() <= max_value {
                     extra.insert(key, val.to_string());
                 }
             }
+        }
+    }
+    for (key, val) in custom {
+        if extra.len() >= max_tags {
+            break;
+        }
+        if !val.is_empty() && val.len() <= max_value {
+            extra.entry(key).or_insert(val);
         }
     }
     extra
@@ -645,7 +893,7 @@ mod tests {
     }
 
     #[test]
-    fn test_write_tags_removes_and_merges_secondary_tags() {
+    fn test_write_tags_keeps_and_updates_secondary_tags() {
         use crate::types::TagWriteChanges;
         use lofty::config::WriteOptions;
         use lofty::probe::Probe;
@@ -703,34 +951,51 @@ mod tests {
             .save_to_path(&file_path, WriteOptions::default())
             .unwrap();
 
-        // 2. Call write_tags to write changes and merge secondary tags
-        let mut changes = TagWriteChanges::default();
-        changes.artist = Some("New Artist".to_string());
+        assert_eq!(secondary_type, TagType::RiffInfo);
+        let open_wav = || {
+            super::WavFile::read_from(
+                &mut File::open(&file_path).unwrap(),
+                lofty::config::ParseOptions::new(),
+            )
+            .unwrap()
+        };
+        let mut wav = open_wav();
+        wav.riff_info_mut()
+            .unwrap()
+            .insert("IXYZ".to_string(), "keep me".to_string());
+        wav.save_to_path(&file_path, WriteOptions::default())
+            .unwrap();
+
+        // 2. Write changes; the secondary tag must survive and track them
+        let changes = TagWriteChanges {
+            title: Some(Some("New Title".to_string())),
+            artist: Some(Some("New Artist".to_string())),
+            composer: Some(None),
+            ..Default::default()
+        };
         super::write_tags(&file_path, &changes).unwrap();
 
         // 3. Verify the result
         let tagged_after = Probe::open(&file_path).unwrap().read().unwrap();
-
-        // Assert that the secondary tag was completely removed
-        assert!(tagged_after.tag(secondary_type).is_none());
-
-        // Assert that the primary tag exists and has the correct merged/updated fields
         let primary_after = tagged_after.tag(primary_type).unwrap();
-
         assert_eq!(
             primary_after.get_string(ItemKey::TrackTitle),
-            Some("Primary Title")
+            Some("New Title")
         );
-
         assert_eq!(
             primary_after.get_string(ItemKey::TrackArtist),
             Some("New Artist")
         );
 
+        let secondary_after = tagged_after.tag(secondary_type).unwrap();
         assert_eq!(
-            primary_after.get_string(ItemKey::Composer),
-            Some("Secondary Composer")
+            secondary_after.get_string(ItemKey::TrackTitle),
+            Some("New Title")
         );
+        assert_eq!(secondary_after.get_string(ItemKey::TrackArtist), None);
+        assert_eq!(secondary_after.get_string(ItemKey::Composer), None);
+
+        assert_eq!(open_wav().riff_info().unwrap().get("IXYZ"), Some("keep me"));
 
         let _ = std::fs::remove_dir_all(&temp_dir);
     }
@@ -769,9 +1034,11 @@ mod tests {
         }
 
         // 1. Write only track_total and disc_total (no track_number or disc_number)
-        let mut changes = TagWriteChanges::default();
-        changes.track_total = Some(12);
-        changes.disc_total = Some(2);
+        let changes = TagWriteChanges {
+            track_total: Some(Some(12)),
+            disc_total: Some(Some(2)),
+            ..Default::default()
+        };
         super::write_tags(&file_path, &changes).unwrap();
 
         // 2. Read back and verify — no "0/N" fabrication
@@ -794,11 +1061,13 @@ mod tests {
         }
 
         // 3. Now write both track number AND track total together
-        let mut changes2 = TagWriteChanges::default();
-        changes2.track_number = Some(3);
-        changes2.track_total = Some(12);
-        changes2.disc_number = Some(1);
-        changes2.disc_total = Some(2);
+        let changes2 = TagWriteChanges {
+            track_number: Some(Some(3)),
+            track_total: Some(Some(12)),
+            disc_number: Some(Some(1)),
+            disc_total: Some(Some(2)),
+            ..Default::default()
+        };
         super::write_tags(&file_path, &changes2).unwrap();
 
         // Verify it successfully writes both, no fabricated 0
@@ -937,5 +1206,426 @@ mod tests {
                 key
             );
         }
+    }
+
+    fn temp_flac(items: &[(ItemKey, &str)]) -> (std::path::PathBuf, std::path::PathBuf) {
+        use std::sync::atomic::{AtomicU64, Ordering};
+        static COUNTER: AtomicU64 = AtomicU64::new(0);
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let dir = std::env::temp_dir().join(format!(
+            "tunewright_audio_flac_{nanos}_{}",
+            COUNTER.fetch_add(1, Ordering::Relaxed)
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("test.flac");
+        std::fs::write(&path, b"fLaC\x80\x00\x00\x22\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00").unwrap();
+
+        let mut tagged = lofty::probe::Probe::open(&path).unwrap().read().unwrap();
+        let mut tag = Tag::new(TagType::VorbisComments);
+        for (key, value) in items {
+            tag.push(TagItem::new(*key, ItemValue::Text(value.to_string())));
+        }
+        tagged.insert_tag(tag);
+        tagged
+            .save_to_path(&path, lofty::config::WriteOptions::default())
+            .unwrap();
+        (dir, path)
+    }
+
+    fn vorbis(path: &std::path::Path) -> Tag {
+        lofty::probe::Probe::open(path)
+            .unwrap()
+            .read()
+            .unwrap()
+            .tag(TagType::VorbisComments)
+            .unwrap()
+            .clone()
+    }
+
+    #[test]
+    fn modify_tags_leaves_unrelated_fields_alone() {
+        let (dir, path) = temp_flac(&[
+            (ItemKey::TrackTitle, " Song "),
+            (ItemKey::TrackArtist, "A"),
+            (ItemKey::TrackArtist, "B"),
+            (ItemKey::RecordingDate, "2021-05-30"),
+        ]);
+
+        super::modify_tags(&path, |t| {
+            t.title = t.title.as_deref().map(|s| s.trim().to_string());
+        })
+        .unwrap();
+
+        let tag = vorbis(&path);
+        assert_eq!(tag.get_string(ItemKey::TrackTitle), Some("Song"));
+        assert_eq!(
+            tag.get_strings(ItemKey::TrackArtist).collect::<Vec<_>>(),
+            ["A", "B"]
+        );
+        assert_eq!(tag.get_string(ItemKey::RecordingDate), Some("2021-05-30"));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn write_tags_removes_string_numeric_and_extra_fields() {
+        let (dir, path) = temp_flac(&[
+            (ItemKey::TrackTitle, "Song"),
+            (ItemKey::AlbumTitle, "Keep"),
+            (ItemKey::TrackNumber, "3"),
+            (ItemKey::RecordingDate, "2021-05-30"),
+            (ItemKey::Bpm, "120"),
+        ]);
+
+        let changes = crate::types::TagWriteChanges {
+            title: Some(None),
+            year: Some(None),
+            track_number: Some(None),
+            extra: Some([("BPM".to_string(), None)].into()),
+            ..Default::default()
+        };
+        super::write_tags(&path, &changes).unwrap();
+
+        let tags = super::read_tags_fast(&path).unwrap();
+        assert_eq!(tags.title, None);
+        assert_eq!(tags.year, None);
+        assert_eq!(tags.track_number, None);
+        assert!(tags.extra.is_empty());
+        assert_eq!(tags.album.as_deref(), Some("Keep"));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn write_tags_year_keeps_full_date_when_year_matches() {
+        let (dir, path) = temp_flac(&[(ItemKey::RecordingDate, "2021-05-30")]);
+        let year = |y| crate::types::TagWriteChanges {
+            year: Some(Some(y)),
+            ..Default::default()
+        };
+
+        super::write_tags(&path, &year(2021)).unwrap();
+        assert_eq!(
+            vorbis(&path).get_string(ItemKey::RecordingDate),
+            Some("2021-05-30")
+        );
+
+        super::write_tags(&path, &year(2022)).unwrap();
+        assert_eq!(
+            vorbis(&path).get_string(ItemKey::RecordingDate),
+            Some("2022")
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn write_tags_extra_keys_are_case_insensitive_and_invalid_keys_fail() {
+        let (dir, path) = temp_flac(&[]);
+        let extra = |key: &str| crate::types::TagWriteChanges {
+            extra: Some([(key.to_string(), Some("128".to_string()))].into()),
+            ..Default::default()
+        };
+
+        super::write_tags(&path, &extra("bpm")).unwrap();
+        assert_eq!(vorbis(&path).get_string(ItemKey::Bpm), Some("128"));
+
+        assert!(super::write_tags(&path, &extra("NO=FIELD")).is_err());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    fn temp_file(name: &str, bytes: &[u8]) -> (std::path::PathBuf, std::path::PathBuf) {
+        let (dir, _) = temp_flac(&[]);
+        let path = dir.join(name);
+        std::fs::write(&path, bytes).unwrap();
+        (dir, path)
+    }
+
+    fn title(value: &str) -> crate::types::TagWriteChanges {
+        crate::types::TagWriteChanges {
+            title: Some(Some(value.into())),
+            ..Default::default()
+        }
+    }
+
+    fn custom(value: Option<&str>) -> crate::types::TagWriteChanges {
+        crate::types::TagWriteChanges {
+            extra: Some([("MYKEY".to_string(), value.map(str::to_string))].into()),
+            ..Default::default()
+        }
+    }
+
+    fn mykey(path: &std::path::Path) -> Option<String> {
+        super::read_tags_fast(path).unwrap().extra.remove("MYKEY")
+    }
+
+    #[test]
+    fn write_tags_keeps_unmapped_vorbis_comments() {
+        use lofty::ogg::tag::VorbisComments;
+        use lofty::tag::TagExt;
+
+        let (flac_dir, flac) = temp_flac(&[(ItemKey::TrackTitle, "Old")]);
+        let path = &flac;
+        {
+            let mut comments = VorbisComments::default();
+            comments.push("MYKEY".into(), "x".into());
+            comments.push("MYKEY".into(), "y".into());
+            comments.push("ENCODER".into(), "Lavf63".into());
+            comments
+                .save_to_path(path, lofty::config::WriteOptions::default())
+                .unwrap();
+
+            super::write_tags(path, &title("New")).unwrap();
+
+            let tags = super::read_tags_fast(path).unwrap();
+            assert_eq!(tags.title.as_deref(), Some("New"), "{}", path.display());
+            assert_eq!(tags.extra.get("MYKEY").map(String::as_str), Some("x"));
+            let tagged = lofty::probe::Probe::open(path).unwrap().read().unwrap();
+            let native = super::Native::load(
+                path,
+                tagged.file_type(),
+                &Tag::new(TagType::VorbisComments),
+                lofty::config::ParseOptions::new(),
+            );
+            let Ok(Some(super::Native::Vorbis(comments))) = native else {
+                panic!("{} has no vorbis comments", path.display());
+            };
+            assert_eq!(comments.get_all("MYKEY").collect::<Vec<_>>(), ["x", "y"]);
+            assert_eq!(comments.get_all("ENCODER").collect::<Vec<_>>(), ["Lavf63"]);
+        }
+        let _ = std::fs::remove_dir_all(flac_dir);
+    }
+
+    #[test]
+    fn write_tags_round_trips_custom_extra_keys() {
+        let mut frame = vec![0xFF, 0xFB, 0x90, 0x00];
+        frame.resize(417, 0);
+        let (flac_dir, flac) = temp_flac(&[]);
+        let (mp3_dir, mp3) = temp_file("t.mp3", &frame.repeat(4));
+        for path in [&flac, &mp3] {
+            super::write_tags(path, &custom(Some("v1"))).unwrap();
+            assert_eq!(mykey(path).as_deref(), Some("v1"), "{}", path.display());
+            super::modify_tags(path, |t| {
+                t.extra.insert("MYKEY".into(), "v2".into());
+            })
+            .unwrap();
+            assert_eq!(mykey(path).as_deref(), Some("v2"));
+            super::write_tags(path, &custom(None)).unwrap();
+            assert_eq!(mykey(path), None);
+        }
+
+        super::write_tags(&mp3, &custom(Some("txxx"))).unwrap();
+        let mpeg = super::MpegFile::read_from(
+            &mut std::fs::File::open(&mp3).unwrap(),
+            lofty::config::ParseOptions::new(),
+        )
+        .unwrap();
+        assert_eq!(mpeg.id3v2().unwrap().get_user_text("MYKEY"), Some("txxx"));
+        for dir in [flac_dir, mp3_dir] {
+            let _ = std::fs::remove_dir_all(dir);
+        }
+    }
+
+    #[test]
+    fn flac_cover_art_survives_tag_edits() {
+        let (dir, path) = temp_flac(&[(ItemKey::TrackTitle, "Old")]);
+        let png = [0x89, b'P', b'N', b'G', 0x0D, 0x0A, 0x1A, 0x0A, 0, 0];
+        crate::picture::embed_cover_art(&path, &png).unwrap();
+        super::write_tags(&path, &custom(Some("x"))).unwrap();
+        super::write_tags(&path, &title("New")).unwrap();
+
+        let cover = crate::picture::extract_cover_art(&path).unwrap().unwrap();
+        assert_eq!(cover.0, png);
+        let tags = super::read_tags_fast(&path).unwrap();
+        assert_eq!(tags.title.as_deref(), Some("New"));
+        assert_eq!(tags.extra.get("MYKEY").map(String::as_str), Some("x"));
+
+        crate::picture::embed_cover_art(&path, &png).unwrap();
+        crate::picture::remove_cover_art(&path).unwrap();
+        assert!(crate::picture::extract_cover_art(&path).unwrap().is_none());
+        assert_eq!(mykey(&path).as_deref(), Some("x"));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn write_tags_keeps_unmapped_ape_items_in_mp3() {
+        use lofty::ape::{ApeItem, ApeTag};
+        use lofty::config::{ParseOptions, WriteOptions};
+        use lofty::tag::TagExt;
+
+        let (dir, _) = temp_flac(&[]);
+        let path = dir.join("test.mp3");
+        let mut frame = vec![0xFF, 0xFB, 0x90, 0x00];
+        frame.resize(417, 0);
+        std::fs::write(&path, frame.repeat(4)).unwrap();
+
+        let mut ape = ApeTag::new();
+        ape.insert(ApeItem::new("Title".into(), ItemValue::Text("Old".into())).unwrap());
+        ape.insert(
+            ApeItem::new("MP3GAIN_UNDO".into(), ItemValue::Text("+001,+001,N".into())).unwrap(),
+        );
+        ape.save_to_path(&path, WriteOptions::default()).unwrap();
+
+        let changes = crate::types::TagWriteChanges {
+            title: Some(Some("New".into())),
+            ..Default::default()
+        };
+        super::write_tags(&path, &changes).unwrap();
+
+        let mpeg = super::MpegFile::read_from(
+            &mut std::fs::File::open(&path).unwrap(),
+            ParseOptions::new(),
+        )
+        .unwrap();
+        let ape = mpeg.ape().unwrap();
+        assert_eq!(ape.title().as_deref(), Some("New"));
+        assert_eq!(
+            ape.get("MP3GAIN_UNDO").and_then(|i| i.value().text()),
+            Some("+001,+001,N")
+        );
+        assert_eq!(mpeg.id3v2().unwrap().title().as_deref(), Some("New"));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    fn temp_mp3(
+        tag: &lofty::id3::v2::Id3v2Tag,
+        v23: bool,
+    ) -> (std::path::PathBuf, std::path::PathBuf) {
+        use lofty::tag::TagExt;
+        let mut frame = vec![0xFF, 0xFB, 0x90, 0x00];
+        frame.resize(417, 0);
+        let (dir, path) = temp_file("t.mp3", &frame.repeat(4));
+        let options = lofty::config::WriteOptions::default().use_id3v23(v23);
+        tag.save_to_path(&path, options).unwrap();
+        (dir, path)
+    }
+
+    fn id3v2(path: &std::path::Path) -> lofty::id3::v2::Id3v2Tag {
+        super::MpegFile::read_from(
+            &mut std::fs::File::open(path).unwrap(),
+            lofty::config::ParseOptions::new(),
+        )
+        .unwrap()
+        .remove_id3v2()
+        .unwrap()
+    }
+
+    #[test]
+    fn write_tags_keeps_txxx_keys_that_shadow_item_keys_custom() {
+        let mut tag = lofty::id3::v2::Id3v2Tag::new();
+        for key in ["BPM", "SCRIPT", "MOOD"] {
+            tag.insert_user_text(key.into(), "old".into());
+        }
+        let (dir, path) = temp_mp3(&tag, false);
+        let extra = super::read_tags_fast(&path).unwrap().extra;
+        for key in ["BPM", "SCRIPT", "MOOD"] {
+            assert_eq!(extra.get(key).map(String::as_str), Some("old"), "{key}");
+        }
+
+        let set = |value: Option<&str>| crate::types::TagWriteChanges {
+            extra: Some(
+                ["BPM", "SCRIPT", "mood"]
+                    .map(|k| (k.to_string(), value.map(str::to_string)))
+                    .into(),
+            ),
+            ..Default::default()
+        };
+        super::write_tags(&path, &set(Some("new"))).unwrap();
+        let tag = id3v2(&path);
+        for key in ["BPM", "SCRIPT", "MOOD"] {
+            assert_eq!(tag.get_user_text(key), Some("new"), "{key}");
+        }
+        assert!(!super::read_tags_fast(&path)
+            .unwrap()
+            .extra
+            .contains_key("Mood"));
+
+        super::write_tags(&path, &set(None)).unwrap();
+        assert!(super::read_tags_fast(&path).unwrap().extra.is_empty());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn vorbis_custom_writes_keep_multi_value_order() {
+        use lofty::ogg::tag::VorbisComments;
+        use lofty::tag::TagExt;
+
+        let (dir, path) = temp_flac(&[]);
+        let mut comments = VorbisComments::default();
+        comments.push("CUSTOM".into(), "a".into());
+        comments.push("CUSTOM".into(), "b".into());
+        comments.push("MYKEY".into(), "v".into());
+        comments.push("encoder".into(), "x".into());
+        comments
+            .save_to_path(&path, lofty::config::WriteOptions::default())
+            .unwrap();
+
+        let custom_values = || {
+            let tagged = lofty::probe::Probe::open(&path).unwrap().read().unwrap();
+            let native = super::Native::load(
+                &path,
+                tagged.file_type(),
+                &Tag::new(TagType::VorbisComments),
+                lofty::config::ParseOptions::new(),
+            );
+            let Ok(Some(super::Native::Vorbis(comments))) = native else {
+                panic!("no vorbis comments");
+            };
+            comments
+                .get_all("CUSTOM")
+                .map(str::to_string)
+                .collect::<Vec<_>>()
+        };
+        for changes in [custom(None), custom(Some("w")), title("New"), custom(None)] {
+            super::write_tags(&path, &changes).unwrap();
+            assert_eq!(custom_values(), ["a", "b"]);
+        }
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn modify_tags_removes_lyrics_and_large_values() {
+        let big = "x".repeat(super::MAX_TAG_VALUE_BYTES + 1);
+        let (dir, path) = temp_flac(&[
+            (ItemKey::TrackTitle, "Song"),
+            (ItemKey::UnsyncLyrics, "la la"),
+            (ItemKey::Description, &big),
+        ]);
+
+        super::modify_tags(&path, |t| t.title = Some("New".into())).unwrap();
+        assert_eq!(
+            vorbis(&path).get_string(ItemKey::Description),
+            Some(big.as_str())
+        );
+
+        super::modify_tags(&path, |t| t.extra.clear()).unwrap();
+        let tag = vorbis(&path);
+        assert_eq!(tag.get_string(ItemKey::UnsyncLyrics), None);
+        assert_eq!(tag.get_string(ItemKey::Description), None);
+        assert_eq!(tag.get_string(ItemKey::TrackTitle), Some("New"));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn id3v23_files_stay_id3v23() {
+        use lofty::id3::v2::Id3v2Version;
+
+        let mut tag = lofty::id3::v2::Id3v2Tag::new();
+        tag.set_title("Old".into());
+        let (dir, path) = temp_mp3(&tag, true);
+        assert_eq!(id3v2(&path).original_version(), Id3v2Version::V3);
+
+        super::write_tags(&path, &title("New")).unwrap();
+        assert_eq!(id3v2(&path).original_version(), Id3v2Version::V3);
+        super::write_tags(&path, &custom(Some("x"))).unwrap();
+        let png = [0x89, b'P', b'N', b'G', 0x0D, 0x0A, 0x1A, 0x0A, 0, 0];
+        crate::picture::embed_cover_art(&path, &png).unwrap();
+        assert_eq!(id3v2(&path).original_version(), Id3v2Version::V3);
+        crate::picture::remove_cover_art(&path).unwrap();
+        let tag = id3v2(&path);
+        assert_eq!(tag.original_version(), Id3v2Version::V3);
+        assert_eq!(tag.title().as_deref(), Some("New"));
+        assert_eq!(tag.get_user_text("MYKEY"), Some("x"));
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

@@ -1,13 +1,16 @@
 import { writable, derived, get } from 'svelte/store';
-import type { TagData } from '$lib/types/audio';
+import type { TagData, TagEdits } from '$lib/types/audio';
+import type { ApiError } from '$lib/api/client';
 import { readTags, readProperties, writeTags } from '$lib/api/tags';
 import { filesById, selectedIds } from './files';
+import { auth } from './auth';
+import { toast } from './toast';
 
 // Tags loaded from server, keyed by file ID
 export const loadedTags = writable<Map<string, TagData>>(new Map());
 
 // Pending edits not yet saved, keyed by file ID -> partial tag data
-export const pendingEdits = writable<Map<string, Partial<TagData>>>(new Map());
+export const pendingEdits = writable<Map<string, TagEdits>>(new Map());
 
 // Whether we have unsaved changes
 export const hasPendingEdits = derived(pendingEdits, ($pe) => $pe.size > 0);
@@ -15,13 +18,21 @@ export const hasPendingEdits = derived(pendingEdits, ($pe) => $pe.size > 0);
 // Number of files with unsaved edits
 export const pendingEditCount = derived(pendingEdits, ($pe) => $pe.size);
 
+let editsOwner: string | null = null;
+auth.subscribe(($auth) => {
+	const username = $auth.user?.username;
+	if (!username) return;
+	if (editsOwner !== null && editsOwner !== username) pendingEdits.set(new Map());
+	editsOwner = username;
+});
+
 // Merged view: loaded + pending overlay
 export const mergedTags = derived([loadedTags, pendingEdits], ([$loaded, $pending]) => {
 	if ($pending.size === 0) return $loaded;
 	const result = new Map($loaded);
 	for (const [id, edits] of $pending) {
 		const tags = result.get(id);
-		if (tags) result.set(id, { ...tags, ...edits });
+		if (tags) result.set(id, { ...tags, ...edits } as TagData);
 	}
 	return result;
 });
@@ -63,9 +74,9 @@ function intersectTags(tagsList: TagData[]): TagData {
 	}
 
 	for (const field of TAG_NUMBER_FIELDS) {
-		const values = tagsList.map((t) => t[field]);
+		const values = tagsList.map((t) => t[field] ?? undefined);
 		const allSame = values.every((v) => v === values[0]);
-		(result as any)[field] = allSame ? values[0] : undefined;
+		(result as any)[field] = allSame ? values[0] : KEEP_VALUE;
 	}
 
 	return result;
@@ -110,6 +121,7 @@ export async function fetchTagsForFiles(ids: string[], force = false) {
 		});
 	} catch (err) {
 		console.error('Failed to fetch tags:', err);
+		if ((err as ApiError).status !== 401) toast.error('Failed to load tags.');
 	} finally {
 		for (const id of needed) tagsInFlight.delete(id);
 	}
@@ -182,7 +194,8 @@ async function fetchPropertiesForFiles(ids: string[]) {
 			for (const [id, data] of Object.entries(tags)) {
 				const existing = next.get(id);
 				// Merge: keep existing tag fields, add audio properties
-				next.set(id, { ...existing, ...data });
+				const { bitrate, sample_rate, channels, duration_secs } = data;
+				next.set(id, existing ? { ...existing, bitrate, sample_rate, channels, duration_secs } : data);
 				propertiesLoaded.add(id);
 			}
 			return next;
@@ -193,7 +206,7 @@ async function fetchPropertiesForFiles(ids: string[]) {
 }
 
 // Set a pending edit for a field on all currently selected files
-export function setPendingEdit(field: string, value: string | number | undefined) {
+export function setPendingEdit(field: string, value: string | number | null | undefined) {
 	const $selected = get(selectedIds);
 	if ($selected.size === 0) return;
 
@@ -207,10 +220,60 @@ export function setPendingEdit(field: string, value: string | number | undefined
 	});
 }
 
+export function clearPendingEdit(field: string) {
+	const $selected = get(selectedIds);
+	const $loaded = get(loadedTags);
+	const values = Array.from($selected, (id) => ($loaded.get(id) as any)?.[field] ?? '');
+	if (values[0] !== '' && values.every((v) => v === values[0])) {
+		setPendingEdit(field, null);
+		return;
+	}
+	pendingEdits.update((map) => {
+		const next = new Map(map);
+		for (const id of $selected) {
+			const existing = next.get(id);
+			if (!existing || !(field in existing)) continue;
+			const rest = { ...existing };
+			delete rest[field as keyof TagEdits];
+			if (Object.keys(rest).length === 0) next.delete(id);
+			else next.set(id, rest);
+		}
+		return next;
+	});
+}
+
+type SaveResult = { success: number; failed: number; failedIds: string[] };
+
+let saveInFlight: Promise<SaveResult> | null = null;
+let saveSnapshot: Map<string, TagEdits> | null = null;
+
 // Save all pending edits to the server
-export async function saveAllEdits(): Promise<{ success: number; failed: number; failedIds: string[] }> {
+export function saveAllEdits(): Promise<SaveResult> {
 	const $pending = get(pendingEdits);
+	if (saveInFlight && $pending === saveSnapshot) return saveInFlight;
+	saveSnapshot = $pending;
+	const run: Promise<SaveResult> = (saveInFlight ? saveInFlight.then(writeAllEdits) : writeAllEdits())
+		.finally(() => {
+			if (saveInFlight === run) saveInFlight = null;
+		});
+	saveInFlight = run;
+	return run;
+}
+
+async function writeAllEdits(): Promise<SaveResult> {
 	const $filesById = get(filesById);
+	const orphaned = $filesById.size === 0
+		? []
+		: Array.from(get(pendingEdits).keys()).filter((id) => !$filesById.has(id));
+	if (orphaned.length > 0) {
+		pendingEdits.update((map) => {
+			const next = new Map(map);
+			for (const id of orphaned) next.delete(id);
+			return next;
+		});
+		toast.warning(`Dropped unsaved edits for ${orphaned.length} file(s) no longer in this folder.`);
+	}
+	const $pending = get(pendingEdits);
 
 	if ($pending.size === 0) return { success: 0, failed: 0, failedIds: [] };
 
@@ -222,6 +285,8 @@ export async function saveAllEdits(): Promise<{ success: number; failed: number;
 			tags: edits
 		};
 	}).filter((c) => c.path !== '');
+
+	if (changes.length === 0) return { success: 0, failed: $pending.size, failedIds: Array.from($pending.keys()) };
 
 	try {
 		const results = await writeTags(changes);
@@ -292,10 +357,10 @@ export function discardEdits() {
 }
 
 // Clear all loaded tags (e.g., when changing directory)
-export function clearTags() {
+export function clearTags(keepEdits = false) {
 	fetchGeneration++; // invalidate any in-flight fetches
 	loadedTags.set(new Map());
-	pendingEdits.set(new Map());
+	if (!keepEdits) pendingEdits.set(new Map());
 	tagsInFlight.clear();
 	propertiesLoaded.clear();
 	pendingPropertyIds = [];

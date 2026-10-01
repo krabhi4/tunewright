@@ -32,6 +32,8 @@ pub fn sanitize_filename(name: &str) -> String {
             _ => c,
         })
         .collect::<String>();
+    let dots = cleaned.len() - cleaned.trim_start_matches('.').len();
+    let cleaned = format!("{}{}", "_".repeat(dots), &cleaned[dots..]);
 
     let trimmed = cleaned.trim();
     if trimmed.len() <= MAX_FILENAME_BYTES {
@@ -93,6 +95,14 @@ mod tests {
             ..Default::default()
         };
         assert_eq!(evaluate("%title%", &tags), "Song_ The Remix");
+    }
+
+    #[test]
+    fn test_sanitize_leading_dots() {
+        assert_eq!(sanitize_filename(".hidden"), "_hidden");
+        assert_eq!(sanitize_filename("..x.y"), "__x.y");
+        assert_eq!(sanitize_filename(" .x"), "_x");
+        assert_eq!(sanitize_filename("a.b"), "a.b");
     }
 
     #[test]

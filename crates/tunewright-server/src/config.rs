@@ -3,10 +3,12 @@ use std::path::PathBuf;
 #[derive(Debug, Clone)]
 pub struct Config {
     pub data_dir: PathBuf,
+    pub state_dir: Option<PathBuf>,
     pub static_dir: PathBuf,
     pub port: u16,
     pub host: String,
     pub cookie_secure: bool,
+    pub trust_proxy: bool,
     /// Optional token required by /auth/setup to claim the first admin
     /// account. Protects the setup window on network-exposed deployments.
     pub setup_token: Option<String>,
@@ -18,6 +20,10 @@ impl Config {
             data_dir: PathBuf::from(
                 std::env::var("TUNEWRIGHT_DATA_DIR").unwrap_or_else(|_| "./data".to_string()),
             ),
+            state_dir: std::env::var("TUNEWRIGHT_STATE_DIR")
+                .ok()
+                .filter(|s| !s.trim().is_empty())
+                .map(PathBuf::from),
             static_dir: PathBuf::from(
                 std::env::var("TUNEWRIGHT_STATIC_DIR")
                     .unwrap_or_else(|_| "./frontend/build".to_string()),
@@ -43,6 +49,9 @@ impl Config {
             cookie_secure: std::env::var("TUNEWRIGHT_COOKIE_SECURE")
                 .map(|v| v == "true" || v == "1")
                 .unwrap_or(false),
+            trust_proxy: std::env::var("TUNEWRIGHT_TRUST_PROXY")
+                .map(|v| v == "true" || v == "1")
+                .unwrap_or(false),
             setup_token: std::env::var("TUNEWRIGHT_SETUP_TOKEN")
                 .ok()
                 .map(|s| s.trim().to_string())
@@ -60,21 +69,26 @@ mod tests {
         // Clear env vars to test defaults
         std::env::remove_var("TUNEWRIGHT_HOST");
         std::env::remove_var("TUNEWRIGHT_COOKIE_SECURE");
+        std::env::remove_var("TUNEWRIGHT_TRUST_PROXY");
 
         let config = Config::from_env();
         assert_eq!(config.host, "127.0.0.1");
         assert!(!config.cookie_secure);
+        assert!(!config.trust_proxy);
 
         // Test custom values from env
         std::env::set_var("TUNEWRIGHT_HOST", "192.168.1.50");
         std::env::set_var("TUNEWRIGHT_COOKIE_SECURE", "true");
+        std::env::set_var("TUNEWRIGHT_TRUST_PROXY", "1");
         let config2 = Config::from_env();
         assert_eq!(config2.host, "192.168.1.50");
         assert!(config2.cookie_secure);
+        assert!(config2.trust_proxy);
 
         // Cleanup env
         std::env::remove_var("TUNEWRIGHT_HOST");
         std::env::remove_var("TUNEWRIGHT_COOKIE_SECURE");
+        std::env::remove_var("TUNEWRIGHT_TRUST_PROXY");
     }
 
     #[test]

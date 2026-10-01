@@ -281,8 +281,11 @@ fn get_field(tags: &TagData, field: &str) -> String {
         "composer" => return tags.composer.clone().unwrap_or_default(),
         _ => {}
     }
-    // Extra field — use original case for lookup
-    tags.extra.get(field).cloned().unwrap_or_default()
+    // Extra field — case-insensitive lookup
+    tags.extra
+        .get(&extra_key(tags, field))
+        .cloned()
+        .unwrap_or_default()
 }
 
 fn set_field(tags: &mut TagData, field: &str, value: &str) {
@@ -310,23 +313,23 @@ fn set_field(tags: &mut TagData, field: &str, value: &str) {
             return;
         }
         "year" => {
-            tags.year = value.parse().ok();
+            set_number(&mut tags.year, value);
             return;
         }
         "track_number" | "track" => {
-            tags.track_number = value.parse().ok();
+            set_number(&mut tags.track_number, value);
             return;
         }
         "track_total" => {
-            tags.track_total = value.parse().ok();
+            set_number(&mut tags.track_total, value);
             return;
         }
         "disc_number" | "disc" => {
-            tags.disc_number = value.parse().ok();
+            set_number(&mut tags.disc_number, value);
             return;
         }
         "disc_total" => {
-            tags.disc_total = value.parse().ok();
+            set_number(&mut tags.disc_total, value);
             return;
         }
         "genre" => {
@@ -343,12 +346,33 @@ fn set_field(tags: &mut TagData, field: &str, value: &str) {
         }
         _ => {}
     }
-    // Extra field — use original case for key
+    // Extra field — reuse an existing key of any case, else the given case
+    let key = extra_key(tags, field);
     if value.is_empty() {
-        tags.extra.remove(field);
+        tags.extra.remove(&key);
     } else {
-        tags.extra.insert(field.to_string(), value.to_string());
+        tags.extra.insert(key, value.to_string());
     }
+}
+
+fn set_number(slot: &mut Option<u32>, value: &str) {
+    if value.trim().is_empty() {
+        *slot = None;
+    } else if let Ok(n) = value.trim().parse() {
+        *slot = Some(n);
+    }
+}
+
+fn extra_key(tags: &TagData, field: &str) -> String {
+    if tags.extra.contains_key(field) {
+        return field.to_string();
+    }
+    tags.extra
+        .keys()
+        .filter(|k| k.eq_ignore_ascii_case(field))
+        .min()
+        .cloned()
+        .unwrap_or_else(|| field.to_string())
 }
 
 fn apply_case(s: &str, mode: CaseMode) -> String {
@@ -593,6 +617,34 @@ mod tests {
         };
         action.apply(&mut tags, &ctx(0), &regexes_for(&action));
         assert!(!tags.extra.contains_key("BPM"));
+    }
+
+    #[test]
+    fn test_numeric_fields_clear_on_empty_and_ignore_garbage() {
+        let mut tags = sample_tags();
+        set_field(&mut tags, "year", "abc");
+        assert_eq!(tags.year, Some(2023));
+        set_field(&mut tags, "year", "");
+        assert_eq!(tags.year, None);
+    }
+
+    #[test]
+    fn test_extra_field_case_insensitive() {
+        let mut tags = TagData::default();
+        tags.extra.insert("Bpm".to_string(), "120".to_string());
+        assert_eq!(get_field(&tags, "BPM"), "120");
+        set_field(&mut tags, "bpm", "");
+        assert!(tags.extra.is_empty());
+    }
+
+    #[test]
+    fn test_extra_field_prefers_exact_case() {
+        let mut tags = TagData::default();
+        tags.extra.insert("Mood".to_string(), "tmoo".to_string());
+        tags.extra.insert("MOOD".to_string(), "txxx".to_string());
+        assert_eq!(get_field(&tags, "Mood"), "tmoo");
+        assert_eq!(get_field(&tags, "MOOD"), "txxx");
+        assert_eq!(get_field(&tags, "mood"), "txxx");
     }
 
     #[test]

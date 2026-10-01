@@ -1,9 +1,10 @@
 use crate::types::TunewrightError;
 use image::imageops::FilterType;
-use lofty::config::{ParseOptions, WriteOptions};
-use lofty::file::{AudioFile, TaggedFileExt};
+use lofty::config::ParseOptions;
+use lofty::file::{AudioFile, TaggedFile, TaggedFileExt};
 use lofty::picture::{MimeType, Picture, PictureType};
 use lofty::probe::Probe;
+use lofty::tag::{Tag, TagType};
 use std::io::Cursor;
 use std::path::Path;
 
@@ -173,24 +174,30 @@ fn embed_cover_art_inner(path: &Path, image_data: &[u8]) -> Result<(), Tunewrigh
         .primary_tag()
         .map(|t| t.tag_type())
         .unwrap_or_else(|| tagged.primary_tag_type());
+    let options = crate::audio::write_options(path, &tagged);
 
-    let tag = match tagged.tag_mut(primary_type) {
-        Some(t) => t,
-        None => {
-            tagged.insert_tag(lofty::tag::Tag::new(primary_type));
-            tagged.tag_mut(primary_type).unwrap()
+    for tag_type in tag_types(&tagged) {
+        if tag_type != primary_type {
+            tagged.remove(tag_type);
         }
-    };
+    }
 
     // Remove existing cover art and add new
-    tag.remove_picture_type(PictureType::CoverFront);
-    tag.push_picture(picture);
+    crate::audio::update_primary(path, &mut tagged, primary_type, &[], options, |tag| {
+        tag.remove_picture_type(PictureType::CoverFront);
+        tag.push_picture(picture);
+        Ok(())
+    })?;
 
     tagged
-        .save_to_path(path, WriteOptions::default())
+        .save_to_path(path, options)
         .map_err(|e| TunewrightError::TagWriteError(format!("{}: {}", path.display(), e)))?;
 
     Ok(())
+}
+
+fn tag_types(tagged: &TaggedFile) -> Vec<TagType> {
+    tagged.tags().iter().map(|t| t.tag_type()).collect()
 }
 
 /// Remove all cover art from an audio file.
@@ -208,23 +215,45 @@ fn remove_cover_art_inner(path: &Path) -> Result<(), TunewrightError> {
         .read()
         .map_err(|e| TunewrightError::TagWriteError(format!("{}: {}", path.display(), e)))?;
 
-    let primary_type = tagged
-        .primary_tag()
-        .map(|t| t.tag_type())
-        .unwrap_or(lofty::tag::TagType::Id3v2);
-
-    if let Some(tag) = tagged.tag_mut(primary_type) {
-        // Remove all pictures
-        while !tag.pictures().is_empty() {
-            tag.remove_picture(0);
+    // Remove all pictures from every tag; tags without any are left untouched
+    let primary_type = tagged.primary_tag_type();
+    let options = crate::audio::write_options(path, &tagged);
+    for tag_type in tag_types(&tagged) {
+        match tagged.tag_mut(tag_type) {
+            Some(tag) if !tag.pictures().is_empty() => {
+                if tag_type == primary_type {
+                    crate::audio::update_primary(
+                        path,
+                        &mut tagged,
+                        primary_type,
+                        &[],
+                        options,
+                        |tag| {
+                            remove_pictures(tag);
+                            Ok(())
+                        },
+                    )?;
+                } else {
+                    remove_pictures(tag);
+                }
+            }
+            _ => {
+                tagged.remove(tag_type);
+            }
         }
     }
 
     tagged
-        .save_to_path(path, WriteOptions::default())
+        .save_to_path(path, options)
         .map_err(|e| TunewrightError::TagWriteError(format!("{}: {}", path.display(), e)))?;
 
     Ok(())
+}
+
+fn remove_pictures(tag: &mut Tag) {
+    while !tag.pictures().is_empty() {
+        tag.remove_picture(0);
+    }
 }
 
 #[cfg(test)]
@@ -284,6 +313,9 @@ mod tests {
 
         let art = extract_cover_art(&audio_path).unwrap().unwrap();
         assert_eq!(art.1, "image/png");
+
+        remove_cover_art(&audio_path).unwrap();
+        assert!(extract_cover_art(&audio_path).unwrap().is_none());
 
         let _ = std::fs::remove_dir_all(&temp_dir);
     }

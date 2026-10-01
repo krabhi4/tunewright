@@ -23,7 +23,7 @@
 	function trapFocus(e: KeyboardEvent) {
 		if (!backdropEl) return;
 		const focusable = backdropEl.querySelectorAll<HTMLElement>(
-			'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])'
+			'button:not(:disabled):not([tabindex="-1"]), [href]:not([tabindex="-1"]), input:not(:disabled):not([type="hidden"]):not([tabindex="-1"]), select:not(:disabled):not([tabindex="-1"]), textarea:not(:disabled):not([tabindex="-1"]), [tabindex]:not([tabindex="-1"]):not(:disabled)'
 		);
 		if (focusable.length === 0) return;
 		const first = focusable[0];
@@ -48,14 +48,22 @@
 
 	$effect(() => {
 		if (open && backdropEl) {
+			const dialog = backdropEl;
+			const previouslyFocused = document.activeElement as HTMLElement | null;
 			const focusable = backdropEl.querySelector<HTMLElement>(
-				'input:not([type="hidden"]), button:not(:disabled), select, textarea, [tabindex]:not([tabindex="-1"])'
+				'input:not(:disabled):not([type="hidden"]), button:not(:disabled), select:not(:disabled), textarea:not(:disabled), [tabindex]:not([tabindex="-1"]):not(:disabled)'
 			);
 			if (focusable) {
 				focusable.focus();
 			} else {
 				backdropEl.focus();
 			}
+			return () => {
+				const active = document.activeElement;
+				if (!active || active === document.body || dialog.contains(active)) {
+					previouslyFocused?.focus();
+				}
+			};
 		}
 	});
 </script>

@@ -36,6 +36,10 @@ export interface TagData {
 	extra?: Record<string, string>;
 }
 
+export type TagEdits = { [K in Exclude<keyof TagData, 'extra'>]?: TagData[K] | null } & {
+	extra?: Record<string, string | null>;
+};
+
 export interface FileListResult {
 	path: string;
 	files: FileEntry[];

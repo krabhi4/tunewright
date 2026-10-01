@@ -1,6 +1,6 @@
 use crate::audio;
 use crate::format_string;
-use crate::types::TunewrightError;
+use crate::types::{AudioFormat, TunewrightError};
 use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
@@ -12,17 +12,19 @@ pub struct RenamePreview {
     pub old_name: String,
     pub new_name: String,
     pub conflict: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
 }
 
 /// Preview renames without executing
 pub fn preview_renames(
-    _data_root: &Path,
+    data_root: &Path,
     files: &[(String, String, PathBuf)], // (id, relative_path, canonical_path)
     format: &str,
 ) -> Result<Vec<RenamePreview>, TunewrightError> {
     // Reads are independent, so compute (id, old_name, new_name) in parallel.
     // Conflict detection is order-dependent, so it runs as a sequential pass below.
-    let computed: Vec<(String, String, String, PathBuf)> = files
+    let computed: Vec<(String, String, String, PathBuf, Option<String>)> = files
         .par_iter()
         .map(|(id, _rel_path, canonical_path)| {
             let old_name = canonical_path
@@ -37,7 +39,33 @@ pub fn preview_renames(
                 .to_string_lossy()
                 .to_string();
 
-            let tags = audio::read_tags_fast(canonical_path).unwrap_or_default();
+            if canonical_path == data_root
+                || !canonical_path.is_file()
+                || AudioFormat::from_extension(&extension).is_none()
+            {
+                let err = Some("Not a supported audio file".to_string());
+                return (
+                    id.clone(),
+                    old_name.clone(),
+                    old_name,
+                    canonical_path.clone(),
+                    err,
+                );
+            }
+
+            let tags = match audio::read_tags_fast(canonical_path) {
+                Ok(tags) => tags,
+                Err(_) => {
+                    let err = Some("Could not read tags".to_string());
+                    return (
+                        id.clone(),
+                        old_name.clone(),
+                        old_name,
+                        canonical_path.clone(),
+                        err,
+                    );
+                }
+            };
             let new_stem = format_string::evaluate(format, &tags);
 
             let new_name = if new_stem.is_empty() {
@@ -49,7 +77,7 @@ pub fn preview_renames(
                 format!("{}.{}", new_stem, sanitized_ext)
             };
 
-            (id.clone(), old_name, new_name, canonical_path.clone())
+            (id.clone(), old_name, new_name, canonical_path.clone(), None)
         })
         .collect();
 
@@ -58,9 +86,20 @@ pub fn preview_renames(
     // Old paths freed by earlier batch items (execute_renames runs in the
     // same order), so a later item may legally target them.
     let mut vacated: HashSet<PathBuf> = HashSet::new();
-    let case_sensitive = is_case_sensitive(_data_root);
+    let case_sensitive = is_case_sensitive(data_root);
 
-    for (id, old_name, new_name, canonical_path) in computed {
+    for (id, old_name, new_name, canonical_path, error) in computed {
+        if error.is_some() {
+            previews.push(RenamePreview {
+                id,
+                old_name,
+                new_name,
+                conflict: true,
+                error,
+            });
+            continue;
+        }
+
         let key = if case_sensitive {
             new_name.clone()
         } else {
@@ -97,6 +136,7 @@ pub fn preview_renames(
             old_name,
             new_name,
             conflict,
+            error: None,
         });
     }
 
@@ -133,6 +173,17 @@ pub fn execute_renames(
             // Where the file ends up on success vs. where it stays otherwise.
             let target_rel = rel_path_with_name(rel_path, &preview.new_name);
             let unchanged_rel = rel_path.clone();
+
+            if let Some(error) = preview.error {
+                return RenameResult {
+                    id: preview.id,
+                    status: "error".to_string(),
+                    old_name: preview.old_name,
+                    new_name: preview.new_name,
+                    new_relative_path: unchanged_rel,
+                    error: Some(error),
+                };
+            }
 
             if preview.conflict {
                 // Distinguish an on-disk collision from an in-batch duplicate.
@@ -409,12 +460,16 @@ mod tests {
 
         // Format is "%title%"
         // Let's set the titles of the files first.
-        let mut changes1 = crate::types::TagWriteChanges::default();
-        changes1.title = Some("Target".to_string());
+        let changes1 = crate::types::TagWriteChanges {
+            title: Some(Some("Target".to_string())),
+            ..Default::default()
+        };
         crate::audio::write_tags(&path1, &changes1).unwrap();
 
-        let mut changes2 = crate::types::TagWriteChanges::default();
-        changes2.title = Some("target".to_string());
+        let changes2 = crate::types::TagWriteChanges {
+            title: Some(Some("target".to_string())),
+            ..Default::default()
+        };
         crate::audio::write_tags(&path2, &changes2).unwrap();
 
         let previews = preview_renames(&temp_dir, &files, "%title%").unwrap();
@@ -448,8 +503,10 @@ mod tests {
             .unwrap()
             .write_all(flac_bytes)
             .unwrap();
-        let mut changes = crate::types::TagWriteChanges::default();
-        changes.title = Some("Target".to_string());
+        let changes = crate::types::TagWriteChanges {
+            title: Some(Some("Target".to_string())),
+            ..Default::default()
+        };
         crate::audio::write_tags(&path_a, &changes).unwrap();
 
         let existing = temp_dir.join("Target.flac");
@@ -485,8 +542,10 @@ mod tests {
             .unwrap()
             .write_all(flac_bytes)
             .unwrap();
-        let mut changes_b = crate::types::TagWriteChanges::default();
-        changes_b.title = Some("c".to_string());
+        let changes_b = crate::types::TagWriteChanges {
+            title: Some(Some("c".to_string())),
+            ..Default::default()
+        };
         crate::audio::write_tags(&path_b, &changes_b).unwrap();
 
         let path_a = temp_dir.join("a.flac");
@@ -494,8 +553,10 @@ mod tests {
             .unwrap()
             .write_all(flac_bytes)
             .unwrap();
-        let mut changes_a = crate::types::TagWriteChanges::default();
-        changes_a.title = Some("b".to_string());
+        let changes_a = crate::types::TagWriteChanges {
+            title: Some(Some("b".to_string())),
+            ..Default::default()
+        };
         crate::audio::write_tags(&path_a, &changes_a).unwrap();
 
         let files = vec![
@@ -529,16 +590,20 @@ mod tests {
         let temp_dir = std::env::temp_dir().join(format!("tunewright_test_{}", rand_num()));
         std::fs::create_dir_all(&temp_dir).unwrap();
 
-        let old_rel = "old.mp3";
-        let target_rel = "target.mp3";
+        let old_rel = "old.flac";
+        let target_rel = "target.flac";
 
         let old_path = temp_dir.join(old_rel);
         let target_path = temp_dir.join(target_rel);
 
-        File::create(&old_path).unwrap();
+        use std::io::Write;
+        File::create(&old_path)
+            .unwrap()
+            .write_all(FLAC_BYTES)
+            .unwrap();
         File::create(&target_path).unwrap();
 
-        // Try renaming old.mp3 -> target.mp3
+        // Try renaming old.flac -> target.flac
         let files = vec![("1".to_string(), old_rel.to_string(), old_path.clone())];
         let results = execute_renames(&temp_dir, &files, "target");
 
@@ -568,8 +633,10 @@ mod tests {
         f.write_all(flac_bytes).unwrap();
 
         // Write title so that it renames to "song" (different casing)
-        let mut changes = crate::types::TagWriteChanges::default();
-        changes.title = Some("song".to_string());
+        let changes = crate::types::TagWriteChanges {
+            title: Some(Some("song".to_string())),
+            ..Default::default()
+        };
         crate::audio::write_tags(&old_path, &changes).unwrap();
 
         // Executing case-only rename Song.flac -> song.flac should succeed on case-insensitive OS
@@ -611,16 +678,22 @@ mod tests {
         File::create(temp_dir.join("collision.flac")).unwrap();
 
         // Write tags so we can use a format string that resolves differently for each file
-        let mut changes1 = crate::types::TagWriteChanges::default();
-        changes1.title = Some("new_song1".to_string());
+        let changes1 = crate::types::TagWriteChanges {
+            title: Some(Some("new_song1".to_string())),
+            ..Default::default()
+        };
         crate::audio::write_tags(&temp_dir.join(file1), &changes1).unwrap();
 
-        let mut changes2 = crate::types::TagWriteChanges::default();
-        changes2.title = Some("collision".to_string());
+        let changes2 = crate::types::TagWriteChanges {
+            title: Some(Some("collision".to_string())),
+            ..Default::default()
+        };
         crate::audio::write_tags(&temp_dir.join(file2), &changes2).unwrap();
 
-        let mut changes3 = crate::types::TagWriteChanges::default();
-        changes3.title = Some("song3".to_string());
+        let changes3 = crate::types::TagWriteChanges {
+            title: Some(Some("song3".to_string())),
+            ..Default::default()
+        };
         crate::audio::write_tags(&temp_dir.join(file3), &changes3).unwrap();
 
         let files = vec![
@@ -655,32 +728,26 @@ mod tests {
     }
 
     #[test]
-    fn test_execute_renames_path_safety_traversal_prevention() {
+    fn test_execute_renames_dot_format_not_hidden() {
         let temp_dir = std::env::temp_dir().join(format!("tunewright_test_{}", rand_num()));
         std::fs::create_dir_all(&temp_dir).unwrap();
 
-        let old_rel = "song";
+        let old_rel = "song.flac";
         let old_path = temp_dir.join(old_rel);
 
         use std::io::Write;
-        let flac_bytes = b"fLaC\x80\x00\x00\x22\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00";
-        let mut f = File::create(&old_path).unwrap();
-        f.write_all(flac_bytes).unwrap();
+        File::create(&old_path)
+            .unwrap()
+            .write_all(FLAC_BYTES)
+            .unwrap();
 
         let files = vec![("1".to_string(), old_rel.to_string(), old_path.clone())];
-        // Rename using the format string "." (which evaluates to "." and has no extension, resulting in target filename "..")
         let results = execute_renames(&temp_dir, &files, ".");
 
         assert_eq!(results.len(), 1);
-        assert_eq!(results[0].status, "error");
-        assert!(results[0]
-            .error
-            .as_ref()
-            .unwrap()
-            .contains("Invalid target filename"));
-
-        // Verify old file still exists
-        assert!(old_path.exists());
+        assert_eq!(results[0].status, "ok");
+        assert_eq!(results[0].new_name, "_.flac");
+        assert!(temp_dir.join("_.flac").exists());
 
         let _ = std::fs::remove_dir_all(&temp_dir);
     }
@@ -718,12 +785,16 @@ mod tests {
         f2.write_all(flac_bytes).unwrap();
 
         // Write tags so that both rename formats map to the same name: "target"
-        let mut changes1 = crate::types::TagWriteChanges::default();
-        changes1.title = Some("target".to_string());
+        let changes1 = crate::types::TagWriteChanges {
+            title: Some(Some("target".to_string())),
+            ..Default::default()
+        };
         crate::audio::write_tags(&temp_dir.join(file1), &changes1).unwrap();
 
-        let mut changes2 = crate::types::TagWriteChanges::default();
-        changes2.title = Some("target".to_string());
+        let changes2 = crate::types::TagWriteChanges {
+            title: Some(Some("target".to_string())),
+            ..Default::default()
+        };
         crate::audio::write_tags(&temp_dir.join(file2), &changes2).unwrap();
 
         // We run two renames concurrently using threads.
@@ -778,61 +849,71 @@ mod tests {
     }
 
     #[test]
-    fn test_execute_renames_dot_only_rejected() {
+    fn test_rename_rejects_data_root_and_directories() {
+        let temp_dir = std::env::temp_dir().join(format!("tunewright_test_{}", rand_num()));
+        let sub = temp_dir.join("album.flac");
+        std::fs::create_dir_all(&sub).unwrap();
+        let root = temp_dir.canonicalize().unwrap();
+
+        let files = vec![
+            ("1".to_string(), "".to_string(), root.clone()),
+            (
+                "2".to_string(),
+                "album.flac".to_string(),
+                sub.canonicalize().unwrap(),
+            ),
+        ];
+        let previews = preview_renames(&root, &files, "x").unwrap();
+        assert!(previews.iter().all(|p| p.conflict && p.error.is_some()));
+
+        let results = execute_renames(&root, &files, "x");
+        for r in &results {
+            assert_eq!(r.status, "error");
+            assert_eq!(r.error.as_deref(), Some("Not a supported audio file"));
+        }
+        assert!(root.is_dir());
+        assert!(sub.is_dir());
+
+        let _ = std::fs::remove_dir_all(&temp_dir);
+    }
+
+    #[test]
+    fn test_rename_rejects_unsupported_extension() {
         let temp_dir = std::env::temp_dir().join(format!("tunewright_test_{}", rand_num()));
         std::fs::create_dir_all(&temp_dir).unwrap();
 
-        let old_rel = "song";
-        let old_path = temp_dir.join(old_rel);
-        std::fs::File::create(&old_path).unwrap();
+        for name in ["users.json", "README"] {
+            let path = temp_dir.join(name);
+            File::create(&path).unwrap();
+            let files = vec![("1".to_string(), name.to_string(), path.clone())];
+            let results = execute_renames(&temp_dir, &files, "x");
+            assert_eq!(results[0].status, "error");
+            assert_eq!(
+                results[0].error.as_deref(),
+                Some("Not a supported audio file")
+            );
+            assert!(path.exists());
+        }
 
-        let files = vec![("1".to_string(), old_rel.to_string(), old_path.clone())];
-        let results = execute_renames(&temp_dir, &files, ".");
+        let _ = std::fs::remove_dir_all(&temp_dir);
+    }
 
-        assert_eq!(results.len(), 1);
+    #[test]
+    fn test_rename_unreadable_file_reports_error() {
+        let temp_dir = std::env::temp_dir().join(format!("tunewright_test_{}", rand_num()));
+        std::fs::create_dir_all(&temp_dir).unwrap();
+
+        let path = temp_dir.join("corrupt.mp3");
+        File::create(&path).unwrap();
+        let files = vec![("1".to_string(), "corrupt.mp3".to_string(), path.clone())];
+        let results = execute_renames(&temp_dir, &files, "%artist% - %title%");
+
         assert_eq!(results[0].status, "error");
-        assert_eq!(results[0].error.as_deref(), Some("Invalid target filename"));
+        assert_eq!(results[0].error.as_deref(), Some("Could not read tags"));
+        assert!(path.exists());
 
         let _ = std::fs::remove_dir_all(&temp_dir);
     }
 
-    #[test]
-    fn test_execute_renames_unsanitized_extension() {
-        let temp_dir = std::env::temp_dir().join(format!("tunewright_test_{}", rand_num()));
-        std::fs::create_dir_all(&temp_dir).unwrap();
-
-        // Src file has an extension with invalid characters: "song.mp?3"
-        let old_rel = "song.mp?3";
-        let old_path = temp_dir.join(old_rel);
-        std::fs::File::create(&old_path).unwrap();
-
-        let files = vec![("1".to_string(), old_rel.to_string(), old_path.clone())];
-        let results = execute_renames(&temp_dir, &files, "New Name");
-
-        assert_eq!(results.len(), 1);
-        // The extension "mp?3" should be sanitized to "mp_3"
-        assert_eq!(results[0].new_name, "New Name.mp_3");
-
-        let _ = std::fs::remove_dir_all(&temp_dir);
-    }
-
-    #[test]
-    fn test_execute_renames_no_extension_no_trailing_dot() {
-        let temp_dir = std::env::temp_dir().join(format!("tunewright_test_{}", rand_num()));
-        std::fs::create_dir_all(&temp_dir).unwrap();
-
-        // Src file has no extension: "README"
-        let old_rel = "README";
-        let old_path = temp_dir.join(old_rel);
-        std::fs::File::create(&old_path).unwrap();
-
-        let files = vec![("1".to_string(), old_rel.to_string(), old_path.clone())];
-        let results = execute_renames(&temp_dir, &files, "My Song");
-
-        assert_eq!(results.len(), 1);
-        // Should not have a trailing dot!
-        assert_eq!(results[0].new_name, "My Song");
-
-        let _ = std::fs::remove_dir_all(&temp_dir);
-    }
+    const FLAC_BYTES: &[u8] = b"fLaC\x80\x00\x00\x22\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00";
 }

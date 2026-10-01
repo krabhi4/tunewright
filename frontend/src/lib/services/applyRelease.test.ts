@@ -48,8 +48,8 @@ describe('applyReleaseToFiles', () => {
 		source: 'musicbrainz',
 		cover_art_url: null,
 		tracks: [
-			{ title: 'Track 1', position: 1, duration_secs: 180, artist: 'Artist A' },
-			{ title: 'Track 2', position: 2, duration_secs: 200, artist: null }
+			{ title: 'Track 1', disc_number: 1, position: 1, duration_secs: 180, artist: 'Artist A' },
+			{ title: 'Track 2', disc_number: 1, position: 2, duration_secs: 200, artist: null }
 		]
 	};
 
@@ -113,6 +113,38 @@ describe('applyReleaseToFiles', () => {
 		// Ensure saveAllEdits & executeRenames were NOT called
 		expect(saveAllEdits).not.toHaveBeenCalled();
 		expect(executeRenames).not.toHaveBeenCalled();
+	});
+
+	it('writes per-disc track numbers and the release disc total', async () => {
+		const multiDisc: ReleaseDetail = {
+			...mockRelease,
+			tracks: [
+				{ title: 'Track 1', disc_number: 1, position: 1, duration_secs: 180, artist: null },
+				{ title: 'Track 2', disc_number: 2, position: 1, duration_secs: 200, artist: null }
+			]
+		};
+
+		await applyReleaseToFiles(multiDisc, [mockFile1, mockFile2], { rename: false });
+
+		const pe = get(pendingEdits);
+		expect(pe.get('file-1')).toMatchObject({ track_number: 1, disc_number: 1, disc_total: 2 });
+		expect(pe.get('file-2')).toMatchObject({ track_number: 1, disc_number: 2, disc_total: 2 });
+	});
+
+	it('renames multi-disc releases with the disc number in the filename', async () => {
+		const multiDisc: ReleaseDetail = {
+			...mockRelease,
+			tracks: [
+				{ title: 'Track 1', disc_number: 1, position: 1, duration_secs: 180, artist: null },
+				{ title: 'Track 2', disc_number: 2, position: 1, duration_secs: 200, artist: null }
+			]
+		};
+		vi.mocked(saveAllEdits).mockResolvedValue({ success: 2, failed: 0, failedIds: [] });
+		vi.mocked(executeRenames).mockResolvedValue([]);
+
+		await applyReleaseToFiles(multiDisc, [mockFile1, mockFile2], { rename: true });
+
+		expect(executeRenames).toHaveBeenCalledWith(expect.any(Array), '%disc%-%track% - %title%');
 	});
 
 	it('handles null entries in matchedFiles gracefully', async () => {

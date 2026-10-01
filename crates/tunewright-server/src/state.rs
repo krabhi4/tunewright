@@ -184,10 +184,12 @@ mod tests {
         // Initialize state
         let config = Config {
             data_dir: std::env::temp_dir(),
+            state_dir: None,
             static_dir: std::env::temp_dir(),
             port: 8080,
             host: "127.0.0.1".to_string(),
             cookie_secure: false,
+            trust_proxy: false,
             setup_token: None,
         };
         let users =

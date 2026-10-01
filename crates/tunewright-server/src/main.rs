@@ -23,6 +23,9 @@ async fn main() {
     tracing::info!("Tunewright v{}", env!("CARGO_PKG_VERSION"));
     tracing::info!("Data directory: {:?}", config.data_dir);
     tracing::info!("Static directory: {:?}", config.static_dir);
+    if let Some(state_dir) = &config.state_dir {
+        tracing::info!("State directory: {:?}", state_dir);
+    }
 
     // Ensure data directory exists
     if !config.data_dir.exists() {
@@ -37,7 +40,28 @@ async fn main() {
         .canonicalize()
         .expect("Failed to canonicalize data directory");
 
-    let users_path = config.data_dir.join("users.json");
+    let state_dir = config
+        .state_dir
+        .clone()
+        .unwrap_or_else(|| config.data_dir.clone());
+    let legacy_users_path = config.data_dir.join("users.json");
+    if config.state_dir.is_some()
+        && !state_dir.join("users.json").exists()
+        && legacy_users_path.exists()
+    {
+        tracing::error!(
+            "TUNEWRIGHT_STATE_DIR is set to {:?} but it has no users.json, while {:?} exists. \
+             Move {:?} into {:?} (or unset TUNEWRIGHT_STATE_DIR) and restart; refusing to start \
+             because the existing accounts would be ignored and setup reopened.",
+            state_dir,
+            legacy_users_path,
+            legacy_users_path,
+            state_dir
+        );
+        std::process::exit(1);
+    }
+    std::fs::create_dir_all(&state_dir).expect("Failed to create state directory");
+    let users_path = state_dir.join("users.json");
     let users = UserManager::load(users_path);
     tracing::info!("Setup required: {}", !users.has_users());
 
@@ -90,8 +114,51 @@ async fn main() {
 
     tracing::info!("Listening on http://{}", bind_addr);
 
-    if let Err(e) = axum::serve(listener, app).await {
+    if let Err(e) = axum::serve(
+        listener,
+        app.into_make_service_with_connect_info::<std::net::SocketAddr>(),
+    )
+    .with_graceful_shutdown(shutdown_signal())
+    .await
+    {
         tracing::error!("Server error: {}", e);
         std::process::exit(1);
+    }
+}
+
+const SHUTDOWN_DRAIN_SECS: u64 = 25;
+
+async fn shutdown_signal() {
+    wait_for_signal().await;
+    tracing::info!("Shutdown signal received, draining connections");
+    tokio::spawn(async {
+        tokio::select! {
+            _ = wait_for_signal() => tracing::warn!("Second shutdown signal received, exiting now"),
+            _ = tokio::time::sleep(std::time::Duration::from_secs(SHUTDOWN_DRAIN_SECS)) => {
+                tracing::warn!("Connections did not drain within {SHUTDOWN_DRAIN_SECS}s, exiting");
+            }
+        }
+        std::process::exit(1);
+    });
+}
+
+async fn wait_for_signal() {
+    let ctrl_c = async {
+        let _ = tokio::signal::ctrl_c().await;
+    };
+    #[cfg(unix)]
+    let terminate = async {
+        match tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate()) {
+            Ok(mut sig) => {
+                sig.recv().await;
+            }
+            Err(_) => std::future::pending::<()>().await,
+        }
+    };
+    #[cfg(not(unix))]
+    let terminate = std::future::pending::<()>();
+    tokio::select! {
+        _ = ctrl_c => {},
+        _ = terminate => {},
     }
 }

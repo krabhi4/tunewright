@@ -11,6 +11,8 @@
 		type InviteInfo
 	} from '$lib/api/auth';
 	import { auth } from '$lib/stores/auth';
+	import { toast } from '$lib/stores/toast';
+	import { copyText } from '$lib/utils/clipboard';
 
 	interface Props {
 		open: boolean;
@@ -98,17 +100,8 @@
 	let copied = $state(false);
 
 	async function handleCopyLink() {
-		try {
-			await navigator.clipboard.writeText(newInviteLink);
-		} catch {
-			// Clipboard API unavailable (non-HTTPS) — fall back to execCommand
-			const input = document.querySelector<HTMLInputElement>('.um-link-input');
-			if (input) {
-				input.select();
-				document.execCommand('copy');
-			}
-		}
-		copied = true;
+		copied = await copyText(newInviteLink);
+		if (!copied) toast.error('Could not copy the invite link.');
 		setTimeout(() => (copied = false), 2000);
 	}
 

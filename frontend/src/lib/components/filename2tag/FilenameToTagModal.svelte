@@ -6,6 +6,7 @@
 	import { writeTags } from '$lib/api/tags';
 	import { fetchTagsForFiles } from '$lib/stores/tags';
 	import { toast } from '$lib/stores/toast';
+	import { untrack } from 'svelte';
 
 	interface Props {
 		open: boolean;
@@ -20,20 +21,22 @@
 	let previews = $state<FilenameTagPreview[]>([]);
 	let loading = $state(false);
 	let applying = $state(false);
+	let previewPending = $state(false);
 	let previewTaskId = 0;
 
 	$effect(() => {
 		if (open && files.length > 0) {
-			loadPreview();
+			untrack(loadPreview);
 		}
 	});
 
 	async function loadPreview() {
+		const taskId = ++previewTaskId;
 		if (!pattern.trim()) {
 			previews = [];
+			loading = false;
 			return;
 		}
-		const taskId = ++previewTaskId;
 		loading = true;
 		try {
 			const fileEntries = files.map((f) => ({ id: f.id, path: f.relative_path }));
@@ -99,7 +102,11 @@
 
 	function handlePatternInput() {
 		clearTimeout(previewTimer);
-		previewTimer = setTimeout(() => loadPreview(), 300);
+		previewPending = true;
+		previewTimer = setTimeout(() => {
+			previewPending = false;
+			loadPreview();
+		}, 300);
 	}
 
 	function formatFieldValue(tags: Partial<TagData> | undefined, field: string): string {
@@ -170,7 +177,7 @@
 		<button class="btn btn-secondary" onclick={onClose}>Cancel</button>
 		<button
 			class="btn btn-primary"
-			disabled={matchCount === 0 || applying}
+			disabled={matchCount === 0 || applying || loading || previewPending}
 			onclick={handleApply}
 		>
 			{applying ? 'Applying...' : `Apply to ${matchCount} file${matchCount !== 1 ? 's' : ''}`}

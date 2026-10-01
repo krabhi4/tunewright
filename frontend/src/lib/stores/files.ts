@@ -1,6 +1,8 @@
 import { writable, derived, get } from 'svelte/store';
 import type { FileEntry } from '$lib/types/audio';
+import type { ApiError } from '$lib/api/client';
 import { listFiles } from '$lib/api/files';
+import { toast } from './toast';
 
 export const currentPath = writable('/');
 export const files = writable<FileEntry[]>([]);
@@ -61,6 +63,7 @@ export async function loadDirectory(path: string) {
 	} catch (err) {
 		if (gen !== loadGeneration) return;
 		console.error('Failed to load directory:', err);
+		if ((err as ApiError).status !== 401) toast.error('Failed to load directory.');
 		files.set([]);
 		totalCount.set(0);
 		directories.set([]);

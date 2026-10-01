@@ -35,6 +35,9 @@ services:
       - "8080:8080"
     volumes:
       - /path/to/your/music:/data:rw
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
     restart: unless-stopped
 ```
 
@@ -79,7 +82,7 @@ Authentication is built in and always active once an account exists.
 | **Super Admin** | Full access + manage users (create invites, remove users) |
 | **Admin** | Full access to all tag editing, renaming, and lookup features |
 
-User accounts are stored in `users.json` inside your data directory and persist across container restarts. Passwords are hashed with Argon2id.
+User accounts are stored in `users.json` (mode `0600`) inside your data directory, or in `TUNEWRIGHT_STATE_DIR` if set, and persist across container restarts. Passwords are hashed with Argon2id.
 
 ## Configuration
 
@@ -90,9 +93,11 @@ All configuration is via environment variables.
 | `TUNEWRIGHT_DATA_DIR` | `/data` | Music directory inside the container |
 | `TUNEWRIGHT_PORT` | `8080` | HTTP port |
 | `TUNEWRIGHT_HOST` | `127.0.0.1` (`0.0.0.0` in the Docker image) | Bind address |
+| `TUNEWRIGHT_STATE_DIR` | data directory | Directory for `users.json`; set it to keep account data out of the music library (mount a writable volume there). An existing `users.json` is not moved automatically: if the data directory has one and the state directory does not, the server refuses to start until you move it |
 | `TUNEWRIGHT_STATIC_DIR` | `/srv/static` | Frontend build directory (set by Docker) |
 | `TUNEWRIGHT_SETUP_TOKEN` | unset | Token required to claim the first admin account |
 | `TUNEWRIGHT_COOKIE_SECURE` | `false` | Set to `true` when serving over HTTPS so the session cookie gets the `Secure` flag |
+| `TUNEWRIGHT_TRUST_PROXY` | `false` | Set to `true` behind a reverse proxy that sets `X-Forwarded-For`, so login throttling sees the real client address (the rightmost entry) instead of the proxy's. Leave it off otherwise: clients can spoof the header. While it is off, the server logs a one-time warning if a login request arrives with `X-Forwarded-For`. IPv6 clients are throttled per /64 prefix |
 
 Authentication is managed through the web UI.
 

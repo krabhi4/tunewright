@@ -28,6 +28,7 @@ pub struct ReleaseDetail {
 /// A single track from a release
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TrackInfo {
+    pub disc_number: u32,
     pub position: u32,
     pub title: String,
     pub artist: Option<String>,
