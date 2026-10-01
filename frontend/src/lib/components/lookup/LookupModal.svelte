@@ -2,7 +2,7 @@
 	import Modal from '$lib/components/common/Modal.svelte';
 	import type { FileEntry } from '$lib/types/audio';
 	import { searchMusicBrainz, getMusicBrainzRelease, searchAppleMusic, getAppleMusicRelease } from '$lib/api/lookup';
-	import type { ReleaseSearchResult, ReleaseDetail } from '$lib/api/lookup';
+	import type { ReleaseSearchResult, ReleaseDetail, TrackInfo } from '$lib/api/lookup';
 	import { mergedTags, KEEP_VALUE } from '$lib/stores/tags';
 	import { applyReleaseToFiles } from '$lib/services/applyRelease';
 	import { embedCoverArtFromUrl } from '$lib/api/coverart';
@@ -265,8 +265,11 @@
 		for (const file of allFiles) {
 			const tags = currentTags.get(file.id);
 			const trackNum = tags?.track_number;
+			const discNum = tags?.disc_number ?? 1;
 			if (trackNum != null) {
-				const idx = selectedRelease.tracks.findIndex((t) => t.position === trackNum);
+				const idx = selectedRelease.tracks.findIndex(
+					(t) => t.disc_number === discNum && t.position === trackNum
+				);
 				if (idx !== -1 && newMatched[idx] === null) {
 					newMatched[idx] = file;
 					used.add(file.id);
@@ -337,6 +340,12 @@
 	}
 
 	let matchedCount = $derived(matchedFiles.filter((f) => f !== null).length);
+
+	let multiDisc = $derived(selectedRelease?.tracks.some((t) => t.disc_number > 1) ?? false);
+
+	function trackLabel(track: TrackInfo): string {
+		return multiDisc ? `${track.disc_number}-${String(track.position).padStart(2, '0')}` : String(track.position);
+	}
 </script>
 
 <Modal title="Metadata Lookup" {open} {onClose} wide={true}>
@@ -390,7 +399,7 @@
 				<div class="track-list">
 					{#each selectedRelease.tracks as track}
 						<div class="track-row">
-							<span class="track-num mono">{track.position}</span>
+							<span class="track-num mono">{trackLabel(track)}</span>
 							<span class="track-title">{track.title}</span>
 							{#if track.duration_secs}
 								<span class="track-dur mono">{formatDuration(track.duration_secs)}</span>
@@ -468,7 +477,7 @@
 			{#each selectedRelease.tracks as track, i}
 				<div class="match-row">
 					<div class="match-track">
-						<span class="track-num mono">{track.position}</span>
+						<span class="track-num mono">{trackLabel(track)}</span>
 						<span class="track-title">{track.title}</span>
 						{#if track.duration_secs}
 							<span class="track-dur mono">{formatDuration(track.duration_secs)}</span>
@@ -482,7 +491,7 @@
 						ondragover={(e) => e.preventDefault()}
 						ondrop={(e) => onMatchedDrop(i, e)}
 						onclick={() => handleSlotClick(i)}
-						aria-label={matchedFiles[i] ? `Track ${track.position} matched to ${matchedFiles[i]?.filename}` : `Assign file to track ${track.position}`}
+						aria-label={matchedFiles[i] ? `Track ${trackLabel(track)} matched to ${matchedFiles[i]?.filename}` : `Assign file to track ${trackLabel(track)}`}
 					>
 						{#if matchedFiles[i]}
 							{@const file = matchedFiles[i]}
@@ -749,7 +758,7 @@
 	}
 
 	.track-num {
-		width: 24px;
+		min-width: 24px;
 		color: var(--text-muted);
 		text-align: right;
 		flex-shrink: 0;

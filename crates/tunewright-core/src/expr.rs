@@ -15,6 +15,7 @@ const MAX_REGEX_PATTERN_BYTES: usize = 1024;
 /// `(?i)[a-z]{200}` and `[a-z]{1000}`, while 1 MiB accepts them and still
 /// rejects the automaton-blowup patterns used to pin memory.
 pub(crate) const REGEX_SIZE_LIMIT: usize = 1024 * 1024;
+pub const MAX_OUTPUT_BYTES: usize = 64 * 1024;
 
 /// AST node
 #[derive(Debug, Clone, PartialEq)]
@@ -212,16 +213,33 @@ pub fn parse(input: &str) -> Vec<Node> {
 pub fn run(nodes: &[Node], ctx: &ExprContext) -> String {
     let mut result = String::new();
     for node in nodes {
-        match node {
-            Node::Literal(s) => result.push_str(s),
-            Node::Variable(var) => result.push_str(&resolve_variable(var, ctx)),
+        let fits = match node {
+            Node::Literal(s) => push_capped(&mut result, s),
+            Node::Variable(var) => push_capped(&mut result, &resolve_variable(var, ctx)),
             Node::FuncCall { name, args } => {
                 let evaluated_args: Vec<String> = args.iter().map(|a| run(a, ctx)).collect();
-                result.push_str(&call_function(name, &evaluated_args, ctx));
+                push_capped(&mut result, &call_function(name, &evaluated_args, ctx))
             }
+        };
+        if !fits {
+            break;
         }
     }
     result
+}
+
+fn push_capped(out: &mut String, s: &str) -> bool {
+    let room = MAX_OUTPUT_BYTES.saturating_sub(out.len());
+    if s.len() <= room {
+        out.push_str(s);
+        return true;
+    }
+    let mut end = room;
+    while !s.is_char_boundary(end) {
+        end -= 1;
+    }
+    out.push_str(&s[..end]);
+    false
 }
 
 /// Parse and run in one step.
@@ -427,7 +445,16 @@ fn fn_replace(args: &[String]) -> String {
     if args[1].is_empty() {
         return args[0].clone();
     }
-    args[0].replace(args[1].as_str(), args[2].as_str())
+    let mut out = String::new();
+    let mut last = 0;
+    for (i, m) in args[0].match_indices(args[1].as_str()) {
+        if !push_capped(&mut out, &args[0][last..i]) || !push_capped(&mut out, &args[2]) {
+            return out;
+        }
+        last = i + m.len();
+    }
+    push_capped(&mut out, &args[0][last..]);
+    out
 }
 
 fn fn_regex(args: &[String]) -> String {
@@ -438,7 +465,28 @@ fn fn_regex(args: &[String]) -> String {
         return args[0].clone();
     }
     match cached_regex(&args[1]) {
-        Some(re) => re.replace_all(&args[0], args[2].as_str()).to_string(),
+        Some(re) => {
+            let (text, rep) = (&args[0], &args[2]);
+            let refs = rep.matches('$').count();
+            let mut out = String::new();
+            let mut last = 0;
+            for caps in re.captures_iter(text) {
+                let m = caps.get(0).unwrap();
+                if !push_capped(&mut out, &text[last..m.start()])
+                    || refs.saturating_mul(m.len()) > MAX_OUTPUT_BYTES * 16
+                {
+                    return out;
+                }
+                let mut expanded = String::new();
+                caps.expand(rep, &mut expanded);
+                if !push_capped(&mut out, &expanded) {
+                    return out;
+                }
+                last = m.end();
+            }
+            push_capped(&mut out, &text[last..]);
+            out
+        }
         None => {
             // The expression engine has no error channel, so surface this in
             // the log; the caller sees the value pass through unmodified.
@@ -494,13 +542,13 @@ pub fn build_regex(pattern: &str) -> Result<regex::Regex, regex::Error> {
 
 fn fn_left(args: &[String]) -> String {
     let s = get_arg(args, 0);
-    let n = parse_int(&get_arg(args, 1)) as usize;
+    let n = parse_count(&get_arg(args, 1));
     s.chars().take(n).collect()
 }
 
 fn fn_right(args: &[String]) -> String {
     let s = get_arg(args, 0);
-    let n = parse_int(&get_arg(args, 1)) as usize;
+    let n = parse_count(&get_arg(args, 1));
     let chars: Vec<char> = s.chars().collect();
     if n >= chars.len() {
         return s;
@@ -510,8 +558,8 @@ fn fn_right(args: &[String]) -> String {
 
 fn fn_mid(args: &[String]) -> String {
     let s = get_arg(args, 0);
-    let start = parse_int(&get_arg(args, 1)) as usize;
-    let len = parse_int(&get_arg(args, 2)) as usize;
+    let start = parse_count(&get_arg(args, 1));
+    let len = parse_count(&get_arg(args, 2));
     s.chars().skip(start).take(len).collect()
 }
 
@@ -526,15 +574,18 @@ fn fn_trim(args: &[String]) -> String {
 fn fn_validate(args: &[String]) -> String {
     let s = get_arg(args, 0);
     let replacement = if args.len() > 1 { &args[1] } else { "_" };
-    s.chars()
-        .map(|c| {
-            if "\\/:*?\"<>|".contains(c) {
-                replacement.to_string()
-            } else {
-                c.to_string()
-            }
-        })
-        .collect()
+    let mut out = String::new();
+    for c in s.chars() {
+        let fits = if "\\/:*?\"<>|".contains(c) {
+            push_capped(&mut out, replacement)
+        } else {
+            push_capped(&mut out, c.encode_utf8(&mut [0; 4]))
+        };
+        if !fits {
+            break;
+        }
+    }
+    out
 }
 
 fn fn_char(args: &[String]) -> String {
@@ -607,8 +658,8 @@ fn fn_compare(args: &[String], op: fn(i64, i64) -> bool) -> String {
 /// $iflonger(text, n, then, else)
 fn fn_iflonger(args: &[String]) -> String {
     let text = get_arg(args, 0);
-    let n = parse_int(&get_arg(args, 1)) as usize;
-    if text.chars().count() > n {
+    let n = parse_int(&get_arg(args, 1));
+    if i64::try_from(text.chars().count()).unwrap_or(i64::MAX) > n {
         get_arg(args, 2)
     } else {
         get_arg(args, 3)
@@ -635,6 +686,10 @@ fn get_arg(args: &[String], index: usize) -> String {
 
 fn parse_int(s: &str) -> i64 {
     s.trim().parse::<i64>().unwrap_or(0)
+}
+
+fn parse_count(s: &str) -> usize {
+    usize::try_from(parse_int(s).max(0)).unwrap_or(usize::MAX)
 }
 
 fn is_truthy(s: &str) -> bool {
@@ -739,7 +794,7 @@ mod tests {
         for _ in 0..300 {
             input.push_str("$a(");
         }
-        input.push_str("x");
+        input.push('x');
         for _ in 0..300 {
             input.push(')');
         }
@@ -949,7 +1004,7 @@ mod tests {
             for _ in 0..depth {
                 s.push_str("$upper(");
             }
-            s.push_str("a");
+            s.push('a');
             for _ in 0..depth {
                 s.push(')');
             }
@@ -1159,6 +1214,36 @@ mod tests {
         ] {
             assert!(build_regex(p).is_ok(), "ordinary pattern rejected: {p}");
         }
+    }
+
+    #[test]
+    fn output_is_capped_for_exponential_replace_and_regex() {
+        let t = TagData::default();
+        let mut replace = "a".to_string();
+        for _ in 0..30 {
+            replace = format!("$replace({replace},a,aa)");
+        }
+        let out = evaluate(&replace, &make_ctx(&t));
+        assert_eq!(out.len(), MAX_OUTPUT_BYTES);
+
+        let mut regex = "ab".to_string();
+        for _ in 0..30 {
+            regex = format!("$regex({regex},.+,$0$0)");
+        }
+        assert!(evaluate(&regex, &make_ctx(&t)).len() <= MAX_OUTPUT_BYTES);
+
+        let big = "/".repeat(1000);
+        let validated = fn_validate(&[big.clone(), big]);
+        assert_eq!(validated.len(), MAX_OUTPUT_BYTES);
+    }
+
+    #[test]
+    fn negative_counts_are_clamped() {
+        let t = tags();
+        assert_eq!(evaluate("$left(%artist%,-1)", &make_ctx(&t)), "");
+        assert_eq!(evaluate("$right(%artist%,-1)", &make_ctx(&t)), "");
+        assert_eq!(evaluate("$mid(%artist%,-5,3)", &make_ctx(&t)), "The");
+        assert_eq!(evaluate("$iflonger(,-1,yes,no)", &make_ctx(&t)), "yes");
     }
 
     #[test]

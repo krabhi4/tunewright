@@ -44,13 +44,19 @@ pub async fn get_cover_art(
     Query(params): Query<CoverArtQuery>,
     headers: HeaderMap,
 ) -> Result<Response, AppError> {
-    let safe_path = scanner::resolve_safe_path(&state.data_root, &params.path)?;
+    let data_root = state.data_root.clone();
+    let (safe_path, metadata) = tokio::task::spawn_blocking(move || {
+        let safe_path = scanner::resolve_safe_path(&data_root, &params.path)?;
+        let metadata = std::fs::metadata(&safe_path).map_err(TunewrightError::Io)?;
+        Ok::<_, TunewrightError>((safe_path, metadata))
+    })
+    .await
+    .map_err(|e| AppError(TunewrightError::Io(std::io::Error::other(e.to_string()))))??;
 
     let max_size = if params.size == 0 { 0 } else { params.size };
 
     // ETag from the file's mtime + size plus the requested thumbnail size;
     // the frontend cache-busts with a version param on writes.
-    let metadata = std::fs::metadata(&safe_path).map_err(TunewrightError::Io)?;
     let mtime = metadata
         .modified()
         .ok()
@@ -105,12 +111,13 @@ pub async fn delete_cover_art(
     State(state): State<AppState>,
     Query(params): Query<CoverArtQuery>,
 ) -> Result<Json<serde_json::Value>, AppError> {
-    let safe_path = scanner::resolve_safe_path(&state.data_root, &params.path)?;
-
-    tokio::task::spawn_blocking(move || picture::remove_cover_art(&safe_path))
-        .await
-        .map_err(|e| AppError(TunewrightError::Io(std::io::Error::other(e.to_string()))))?
-        .map_err(AppError)?;
+    let data_root = state.data_root.clone();
+    tokio::task::spawn_blocking(move || {
+        picture::remove_cover_art(&scanner::resolve_safe_path(&data_root, &params.path)?)
+    })
+    .await
+    .map_err(|e| AppError(TunewrightError::Io(std::io::Error::other(e.to_string()))))?
+    .map_err(AppError)?;
 
     Ok(Json(serde_json::json!({ "status": "ok" })))
 }
@@ -278,12 +285,13 @@ pub async fn upload_cover_art(
     let path_str = audio_path.ok_or_else(|| multipart_err("missing 'path' field"))?;
     let data = image_data.ok_or_else(|| multipart_err("missing 'image' field"))?;
 
-    let safe_path = scanner::resolve_safe_path(&state.data_root, &path_str)?;
-
-    tokio::task::spawn_blocking(move || picture::embed_cover_art(&safe_path, &data))
-        .await
-        .map_err(|e| multipart_err(&e.to_string()))?
-        .map_err(AppError)?;
+    let data_root = state.data_root.clone();
+    tokio::task::spawn_blocking(move || {
+        picture::embed_cover_art(&scanner::resolve_safe_path(&data_root, &path_str)?, &data)
+    })
+    .await
+    .map_err(|e| multipart_err(&e.to_string()))?
+    .map_err(AppError)?;
 
     Ok(Json(serde_json::json!({ "status": "ok" })))
 }

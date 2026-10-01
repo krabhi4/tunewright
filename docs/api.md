@@ -149,7 +149,7 @@ All Tunewright endpoints are prefixed with `/api/v1/` unless specified otherwise
     ]
   }
   ```
-* **Description:** Writes new tag values to the specified files in place. Writable fields: `title`, `artist`, `album`, `album_artist`, `year`, `track_number`, `track_total`, `disc_number`, `disc_total`, `genre`, `comment`, `composer` and `extra` (a string map of custom fields). Fields omitted from `tags` are left unchanged. Entries with unsafe paths are dropped and produce no result.
+* **Description:** Writes new tag values to the specified files in place. Writable fields: `title`, `artist`, `album`, `album_artist`, `year`, `track_number`, `track_total`, `disc_number`, `disc_total`, `genre`, `comment`, `composer` and `extra` (a map of custom fields). Fields omitted from `tags` are left unchanged; a field (or `extra` key) set to `null` or `""` is removed from the file. A custom key the file's tag format can't store returns `status: "error"`. Entries with unsafe paths are dropped and produce no result.
 * **Response:** `200 OK` (application/json). `status` is `ok` or `error` (with an `error` message).
   ```json
   {
@@ -246,7 +246,7 @@ All Tunewright endpoints are prefixed with `/api/v1/` unless specified otherwise
     "format": "%track% - %artist% - %title%"
   }
   ```
-* **Description:** Previews how files will be renamed using the given format string. Resolves placeholders using the file's current tags; `conflict` flags names that would collide with an existing file or another rename in the batch.
+* **Description:** Previews how files will be renamed using the given format string. Resolves placeholders using the file's current tags; `conflict` flags names that would collide with an existing file or another rename in the batch. Entries that can't be renamed (not a supported audio file, or unreadable tags) have `conflict: true` and an `error` message.
 * **Response:** `200 OK` (application/json)
   ```json
   {
@@ -449,6 +449,7 @@ All Tunewright endpoints are prefixed with `/api/v1/` unless specified otherwise
     "genre": "Electronic",
     "tracks": [
       {
+        "disc_number": 1,
         "position": 1,
         "title": "Track One Title",
         "artist": "Artist Name",
@@ -517,7 +518,7 @@ All Tunewright endpoints are prefixed with `/api/v1/` unless specified otherwise
     "password": "super-secure-password"
   }
   ```
-* **Description:** Verifies credentials and creates a session. Repeated failures for a username are throttled; invalid credentials return `401 Unauthorized`.
+* **Description:** Verifies credentials and creates a session. Repeated failures are throttled per username and client address, so failures from one client never block another; invalid credentials return `401 Unauthorized`. A username inside its throttle window for that client, or a client that already has a login in flight, gets `429 Too Many Requests` with `Retry-After`, and `503 Service Unavailable` is returned when the server is busy verifying other logins.
 * **Response:** `200 OK` (application/json) - sets the `tunewright_session` cookie.
   ```json
   {

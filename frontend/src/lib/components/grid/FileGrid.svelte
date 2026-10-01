@@ -12,6 +12,8 @@
 	import { mergedTags, queueVisibleTagsFetch, pendingEdits } from '$lib/stores/tags';
 	import { filterText, sortColumn, sortAsc } from '$lib/stores/ui';
 	import ContextMenu from '$lib/components/common/ContextMenu.svelte';
+	import { toast } from '$lib/stores/toast';
+	import { copyText } from '$lib/utils/clipboard';
 
 	interface Props {
 		files: FileEntry[];
@@ -23,6 +25,7 @@
 
 	// Virtual scrolling state
 	let containerEl: HTMLDivElement;
+	let gridEl: HTMLDivElement;
 	let scrollTop = $state(0);
 	const ROW_HEIGHT = 28;
 	const HEADER_HEIGHT = 30;
@@ -47,17 +50,22 @@
 		contextMenu = { x: e.clientX, y: e.clientY, file };
 	}
 
+	async function copyToClipboard(text: string, what: string) {
+		if (await copyText(text)) toast.success(`${what} copied.`);
+		else toast.error(`Could not copy ${what.toLowerCase()}.`);
+	}
+
 	function getContextMenuItems() {
 		if (!contextMenu) return [];
 		const file = contextMenu.file;
 		return [
 			{
 				label: 'Copy Filename',
-				action: () => navigator.clipboard.writeText(file.filename)
+				action: () => copyToClipboard(file.filename, 'Filename')
 			},
 			{
 				label: 'Copy Path',
-				action: () => navigator.clipboard.writeText(file.relative_path)
+				action: () => copyToClipboard(file.relative_path, 'Path')
 			},
 			{ separator: true as const },
 			{
@@ -113,6 +121,21 @@
 		}
 	}
 
+	function getSortValue(file: FileEntry, tags: TagData | undefined, key: string): string | number {
+		switch (key) {
+			case 'year':
+				return tags?.year ?? -1;
+			case 'track_number':
+				return tags?.track_number ?? -1;
+			case 'duration':
+				return tags?.duration_secs ?? file.duration_secs ?? -1;
+			case 'size':
+				return file.size;
+			default:
+				return getCellValue(file, tags, key).toLowerCase();
+		}
+	}
+
 	// Directories to show at the top of the grid
 	let dirEntries = $derived($directories);
 
@@ -140,9 +163,9 @@
 			const usesTags = tagSortKeys.has(col);
 			// Precompute one sort key per file so the comparator doesn't redo the
 			// map lookup + lowercasing O(n log n) times.
-			const keyOf = new Map<string, string>();
+			const keyOf = new Map<string, string | number>();
 			for (const f of result) {
-				keyOf.set(f.id, getCellValue(f, usesTags ? $mergedTags.get(f.id) : undefined, col).toLowerCase());
+				keyOf.set(f.id, getSortValue(f, usesTags ? $mergedTags.get(f.id) : undefined, col));
 			}
 			result = [...result].sort((a, b) => {
 				const av = keyOf.get(a.id) ?? '';
@@ -188,6 +211,15 @@
 		return rows;
 	});
 
+	let tabStopId = $derived.by(() => {
+		const ids = visibleRows.flatMap((r) => (r.type === 'file' ? [r.file.id] : []));
+		return $focusedId && ids.includes($focusedId) ? $focusedId : ids[0];
+	});
+
+	function handleFocus() {
+		if (tabStopId && tabStopId !== $focusedId) focusedId.set(tabStopId);
+	}
+
 	// Fetch fast tags for visible file rows, then queue properties backfill
 	$effect(() => {
 		const fileIds = visibleRows
@@ -216,7 +248,7 @@
 		}
 	}
 
-	function handleRowClick(file: FileEntry, e: MouseEvent) {
+	function handleRowClick(file: FileEntry, e: MouseEvent | KeyboardEvent) {
 		if (e.shiftKey && lastClickedId) {
 			selectRange(lastClickedId, file.id, processedFiles);
 		} else {
@@ -224,6 +256,7 @@
 		}
 		lastClickedId = file.id;
 		focusedId.set(file.id);
+		gridEl.focus();
 	}
 
 	function navigateToDir(dirName: string) {
@@ -248,13 +281,14 @@
 	});
 
 	function handleKeydown(e: KeyboardEvent) {
-		if (processedFiles.length === 0) return;
+		if (processedFiles.length === 0 || headerEl.contains(e.target as Node)) return;
 
 		const focIdx = $focusedId
 			? processedFiles.findIndex((f) => f.id === $focusedId)
 			: -1;
 
 		let nextIdx: number | null = null;
+		const pageRows = Math.max(1, Math.floor(containerHeight / ROW_HEIGHT));
 
 		switch (e.key) {
 			case 'ArrowDown':
@@ -273,9 +307,20 @@
 				e.preventDefault();
 				nextIdx = processedFiles.length - 1;
 				break;
+			case 'PageUp':
+				e.preventDefault();
+				nextIdx = Math.max(0, focIdx - pageRows);
+				break;
+			case 'PageDown':
+				e.preventDefault();
+				nextIdx = Math.min(processedFiles.length - 1, focIdx + pageRows);
+				break;
 			case ' ':
 				e.preventDefault();
 				if ($focusedId) toggleSelection($focusedId, true);
+				return;
+			case 'Enter':
+				if (e.target === gridEl && focIdx >= 0) handleRowClick(processedFiles[focIdx], e);
 				return;
 			default:
 				return;
@@ -302,14 +347,27 @@
 				} else if (rowBottom > containerEl.scrollTop + containerHeight) {
 					containerEl.scrollTop = rowBottom - containerHeight;
 				}
+				handleScroll();
 			}
+			gridEl.focus();
 		}
 	}
 </script>
 
-<div class="grid-wrapper" role="grid" aria-label="Audio files">
-	<div class="grid-header" style="height: {HEADER_HEIGHT}px" bind:this={headerEl}>
-		<div class="header-cell check-col">
+<div
+	class="grid-wrapper"
+	role="grid"
+	aria-label="Audio files"
+	aria-multiselectable="true"
+	aria-rowcount={totalRows + 1}
+	aria-activedescendant={tabStopId && tabStopId === $focusedId ? `row-${tabStopId}` : undefined}
+	tabindex="0"
+	bind:this={gridEl}
+	onkeydown={handleKeydown}
+	onfocus={handleFocus}
+>
+	<div class="grid-header" role="row" aria-rowindex={1} style="height: {HEADER_HEIGHT}px" bind:this={headerEl}>
+		<div class="header-cell check-col" role="columnheader">
 			<input
 				type="checkbox"
 				class="row-check"
@@ -326,23 +384,30 @@
 			/>
 		</div>
 		{#each columns as col}
-			<button
-				class="header-cell"
-				class:sorted={$sortColumn === col.key}
-				style="width: {col.width}px; {col.align === 'right' ? 'text-align: right; justify-content: flex-end;' : ''}"
-				onclick={() => handleSort(col.key)}
+			<div
+				class="header-col"
+				role="columnheader"
+				aria-sort={$sortColumn === col.key ? ($sortAsc ? 'ascending' : 'descending') : 'none'}
+				style="width: {col.width}px"
 			>
-				<span>{col.label}</span>
-				{#if $sortColumn === col.key}
-					<span class="sort-arrow">{$sortAsc ? '▲' : '▼'}</span>
-				{/if}
-			</button>
+				<button
+					class="header-cell"
+					class:sorted={$sortColumn === col.key}
+					style={col.align === 'right' ? 'text-align: right; justify-content: flex-end;' : ''}
+					onclick={() => handleSort(col.key)}
+				>
+					<span>{col.label}</span>
+					{#if $sortColumn === col.key}
+						<span class="sort-arrow">{$sortAsc ? '▲' : '▼'}</span>
+					{/if}
+				</button>
+			</div>
 		{/each}
-		<div class="header-cell header-fill"></div>
+		<div class="header-cell header-fill" aria-hidden="true"></div>
 	</div>
 
 	<!-- svelte-ignore a11y_no_static_element_interactions -->
-	<div class="grid-body" bind:this={containerEl} onscroll={handleScroll} onkeydown={handleKeydown} tabindex="-1">
+	<div class="grid-body" bind:this={containerEl} onscroll={handleScroll}>
 		{#if totalRows === 0}
 			<div class="grid-empty">
 				<svg class="empty-icon" aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/></svg>
@@ -352,48 +417,59 @@
 		{:else}
 		<div style="height: {totalHeight}px; position: relative;">
 			<div style="transform: translateY({offsetY}px);">
-				{#each visibleRows as row, i}
+				{#each visibleRows as row, i (row.type === 'dir' ? `d:${row.name}` : `f:${row.file.id}`)}
 					{#if row.type === 'dir'}
-						<button
+						<div
 							class="grid-row dir-row"
+							role="row"
+							aria-rowindex={visibleStart + i + 2}
+							tabindex="0"
 							style="height: {ROW_HEIGHT}px"
 							ondblclick={() => navigateToDir(row.name)}
 							onkeydown={(e) => { if (e.key === 'Enter') navigateToDir(row.name); }}
 						>
-							<div class="cell check-col"></div>
-							<div class="cell dir-cell" style="width: {columns[0].width}px">
+							<div class="cell check-col" role="gridcell"></div>
+							<div class="cell dir-cell" role="gridcell" style="width: {columns[0].width}px">
 								<svg class="dir-icon" aria-hidden="true" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M2 4.5V12a1 1 0 001 1h10a1 1 0 001-1V6a1 1 0 00-1-1H8L6.5 3.5H3a1 1 0 00-1 1z"/></svg>
 								{row.name}
 							</div>
 							{#each columns.slice(1) as col}
-								<div class="cell" style="width: {col.width}px"></div>
+								<div class="cell" role="gridcell" style="width: {col.width}px"></div>
 							{/each}
-							<div class="cell cell-fill"></div>
-						</button>
+							<div class="cell cell-fill" aria-hidden="true"></div>
+						</div>
 					{:else}
 						{@const file = row.file}
 						{@const rowTags = $mergedTags.get(file.id)}
 						{@const isSelected = $selectedIds.has(file.id)}
 						{@const isOdd = (visibleStart + i) % 2 === 1}
 						{@const isFocused = $focusedId === file.id}
-					<button
+						<div
 							class="grid-row"
 							class:selected={isSelected}
 							class:odd={isOdd}
 							class:focused={isFocused}
 							class:dirty={$pendingEdits.has(file.id)}
+							role="row"
+							aria-rowindex={visibleStart + i + 2}
+							aria-selected={isSelected}
+							id="row-{file.id}"
+							tabindex="-1"
 							style="height: {ROW_HEIGHT}px"
 							onclick={(e) => handleRowClick(file, e)}
+							onkeydown={(e) => { if (e.key === 'Enter') handleRowClick(file, e); }}
 							oncontextmenu={(e) => handleContextMenu(file, e)}
 						>
-							<div class="cell check-col">
+							<div class="cell check-col" role="gridcell">
 								<input
 									type="checkbox"
 									class="row-check"
 									aria-label="Select {file.filename}"
+									tabindex="-1"
 									checked={isSelected}
 									onclick={(e) => e.stopPropagation()}
-									onchange={() => toggleSelection(file.id, true)}
+									onkeydown={(e) => { if (e.key === ' ') e.stopPropagation(); }}
+									onchange={() => { toggleSelection(file.id, true); focusedId.set(file.id); gridEl.focus(); }}
 								/>
 							</div>
 							{#each columns as col}
@@ -402,14 +478,15 @@
 									class="cell"
 									class:mono={col.mono}
 									class:tag-cell={col.tag}
+									role="gridcell"
 									style="width: {col.width}px; {col.align === 'right' ? 'text-align: right; justify-content: flex-end;' : ''}"
 									title={val}
 								>
 									{val}
 								</div>
 							{/each}
-							<div class="cell cell-fill"></div>
-						</button>
+							<div class="cell cell-fill" aria-hidden="true"></div>
+						</div>
 					{/if}
 				{/each}
 			</div>
@@ -423,7 +500,7 @@
 		x={contextMenu.x}
 		y={contextMenu.y}
 		items={getContextMenuItems()}
-		onClose={() => (contextMenu = null)}
+		onClose={() => { contextMenu = null; gridEl.focus(); }}
 	/>
 {/if}
 
@@ -460,6 +537,16 @@
 		text-align: left;
 		font-family: var(--font-ui);
 		border-right: 1px solid var(--grid-border);
+	}
+
+	.header-col {
+		display: flex;
+		flex-shrink: 0;
+	}
+
+	.header-col .header-cell {
+		flex: 1;
+		min-width: 0;
 	}
 
 	.header-cell:hover {
@@ -523,6 +610,7 @@
 		text-align: left;
 		color: var(--text-primary);
 		border-bottom: 1px solid var(--grid-border);
+		user-select: none;
 	}
 
 	.grid-row.odd {

@@ -5,21 +5,31 @@ on:
     tags:
       - 'v*'
 
+permissions:
+  contents: read
+
 jobs:
   verify-version:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
-        uses: actions/checkout@v7.0.1
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Verify version matches git tag
+        env:
+          TAG_VERSION: ${{ github.ref_name }}
         run: |
-          TAG_VERSION="${{ github.ref_name }}"
           CLEAN_TAG_VERSION="${TAG_VERSION#v}"
-          CARGO_VERSION=$(awk -F '"' '/^version =/ {print $2}' Cargo.toml)
+          CARGO_VERSION=$(awk -F '"' '/^\[/{f=($0=="[workspace.package]")} f && /^version *=/{print $2; exit}' Cargo.toml)
+          FRONTEND_VERSION=$(jq -r .version frontend/package.json)
           echo "Git tag version: $CLEAN_TAG_VERSION"
           echo "Cargo.toml version: $CARGO_VERSION"
+          echo "frontend/package.json version: $FRONTEND_VERSION"
           if [ "$CLEAN_TAG_VERSION" != "$CARGO_VERSION" ]; then
             echo "Error: Git tag version ($CLEAN_TAG_VERSION) does not match Cargo.toml version ($CARGO_VERSION)"
+            exit 1
+          fi
+          if [ "$CLEAN_TAG_VERSION" != "$FRONTEND_VERSION" ]; then
+            echo "Error: Git tag version ($CLEAN_TAG_VERSION) does not match frontend/package.json version ($FRONTEND_VERSION)"
             exit 1
           fi
 

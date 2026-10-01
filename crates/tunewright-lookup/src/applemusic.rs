@@ -69,6 +69,24 @@ fn upgrade_cover_url(url: &Option<String>) -> Option<String> {
         .map(|u| u.replace("100x100bb.jpg", "800x800bb.jpg"))
 }
 
+fn tracks_from_results(results: &[AppleLookupResult]) -> Vec<TrackInfo> {
+    let mut tracks: Vec<TrackInfo> = results
+        .iter()
+        .filter(|r| r.wrapper_type.as_deref() == Some("track") && r.kind.as_deref() == Some("song"))
+        .filter_map(|r| {
+            Some(TrackInfo {
+                disc_number: r.disc_number.unwrap_or(1),
+                position: r.track_number?,
+                title: r.track_name.clone()?,
+                artist: r.artist_name.clone(),
+                duration_secs: r.track_time_millis.map(|ms| ms as f64 / 1000.0),
+            })
+        })
+        .collect();
+    tracks.sort_by_key(|t| (t.disc_number, t.position));
+    tracks
+}
+
 /// Search iTunes/Apple Music for albums
 pub async fn search_releases(
     client: &Client,
@@ -127,40 +145,7 @@ pub async fn get_release(client: &Client, id: &str) -> Result<ReleaseDetail, Str
         .find(|r| r.wrapper_type.as_deref() == Some("collection"))
         .ok_or_else(|| "Album details not found in Apple Music response".to_string())?;
 
-    // Extract all tracks (where wrapper_type is "track" and kind is "song")
-    let mut temp_tracks: Vec<(u32, u32, TrackInfo)> = body
-        .results
-        .iter()
-        .filter(|r| r.wrapper_type.as_deref() == Some("track") && r.kind.as_deref() == Some("song"))
-        .filter_map(|r| {
-            let disc = r.disc_number.unwrap_or(1);
-            let track = r.track_number?;
-            let title = r.track_name.clone()?;
-            Some((
-                disc,
-                track,
-                TrackInfo {
-                    position: track,
-                    title,
-                    artist: r.artist_name.clone(),
-                    duration_secs: r.track_time_millis.map(|ms| ms as f64 / 1000.0),
-                },
-            ))
-        })
-        .collect();
-
-    // Sort tracks by (disc, track)
-    temp_tracks.sort_by_key(|t| (t.0, t.1));
-
-    // Assign a global sequential position (1..N) to prevent duplicates and ordering issues
-    let tracks: Vec<TrackInfo> = temp_tracks
-        .into_iter()
-        .enumerate()
-        .map(|(i, (_, _, mut t))| {
-            t.position = (i + 1) as u32;
-            t
-        })
-        .collect();
+    let tracks = tracks_from_results(&body.results);
 
     Ok(ReleaseDetail {
         id: id.to_string(),
@@ -226,50 +211,20 @@ mod tests {
 
         let response: AppleLookupResponse = serde_json::from_str(json_data).unwrap();
 
-        let mut temp_tracks: Vec<(u32, u32, TrackInfo)> = response
-            .results
-            .iter()
-            .filter(|r| {
-                r.wrapper_type.as_deref() == Some("track") && r.kind.as_deref() == Some("song")
-            })
-            .filter_map(|r| {
-                let disc = r.disc_number.unwrap_or(1);
-                let track = r.track_number?;
-                let title = r.track_name.clone()?;
-                Some((
-                    disc,
-                    track,
-                    TrackInfo {
-                        position: track,
-                        title,
-                        artist: r.artist_name.clone(),
-                        duration_secs: r.track_time_millis.map(|ms| ms as f64 / 1000.0),
-                    },
-                ))
-            })
-            .collect();
-
-        temp_tracks.sort_by_key(|t| (t.0, t.1));
-
-        let tracks: Vec<TrackInfo> = temp_tracks
-            .into_iter()
-            .enumerate()
-            .map(|(i, (_, _, mut t))| {
-                t.position = (i + 1) as u32;
-                t
-            })
-            .collect();
+        let tracks = tracks_from_results(&response.results);
 
         assert_eq!(tracks.len(), 3);
         // Track 1: Disc 1 Track 1
         assert_eq!(tracks[0].title, "Disc 1 Track 1");
+        assert_eq!(tracks[0].disc_number, 1);
         assert_eq!(tracks[0].position, 1);
         // Track 2: Disc 1 Track 2
         assert_eq!(tracks[1].title, "Disc 1 Track 2");
         assert_eq!(tracks[1].position, 2);
         // Track 3: Disc 2 Track 1
         assert_eq!(tracks[2].title, "Disc 2 Track 1");
-        assert_eq!(tracks[2].position, 3);
+        assert_eq!(tracks[2].disc_number, 2);
+        assert_eq!(tracks[2].position, 1);
     }
 
     #[test]

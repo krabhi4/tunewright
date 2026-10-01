@@ -2,6 +2,7 @@
 	import { goto } from '$app/navigation';
 	import { logout } from '$lib/api/auth';
 	import { auth } from '$lib/stores/auth';
+	import { clearTags } from '$lib/stores/tags';
 
 	interface Props {
 		onManageUsers?: () => void;
@@ -22,6 +23,7 @@
 			// Clear client state even if request fails
 		}
 		auth.set({ checked: true, setupRequired: false, authenticated: false, user: null });
+		clearTags();
 		goto('/login');
 	}
 

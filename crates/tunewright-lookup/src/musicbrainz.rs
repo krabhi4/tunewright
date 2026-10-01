@@ -74,6 +74,8 @@ struct MbRelease {
 
 #[derive(Debug, Deserialize)]
 struct MbArtistCredit {
+    name: Option<String>,
+    joinphrase: Option<String>,
     artist: MbArtist,
 }
 
@@ -94,6 +96,7 @@ struct MbReleaseDetail {
 
 #[derive(Debug, Deserialize)]
 struct MbMedia {
+    position: Option<u32>,
     tracks: Option<Vec<MbTrack>>,
 }
 
@@ -109,10 +112,37 @@ struct MbTrack {
 
 fn extract_artist(credits: &Option<Vec<MbArtistCredit>>) -> String {
     credits
-        .as_ref()
-        .and_then(|c| c.first())
-        .and_then(|c| c.artist.name.clone())
-        .unwrap_or_default()
+        .iter()
+        .flatten()
+        .map(|c| {
+            let name = c.name.as_deref().or(c.artist.name.as_deref());
+            format!(
+                "{}{}",
+                name.unwrap_or_default(),
+                c.joinphrase.as_deref().unwrap_or_default()
+            )
+        })
+        .collect()
+}
+
+fn tracks_from_media(media: Vec<MbMedia>) -> Vec<TrackInfo> {
+    media
+        .into_iter()
+        .enumerate()
+        .flat_map(|(i, m)| {
+            let disc_number = m.position.unwrap_or((i + 1) as u32);
+            m.tracks
+                .unwrap_or_default()
+                .into_iter()
+                .map(move |t| TrackInfo {
+                    disc_number,
+                    position: t.position,
+                    title: t.title.unwrap_or_else(|| "Unknown Track".to_string()),
+                    artist: Some(extract_artist(&t.artist_credit)),
+                    duration_secs: t.length.map(|ms| ms as f64 / 1000.0),
+                })
+        })
+        .collect()
 }
 
 /// Search MusicBrainz for releases
@@ -173,19 +203,7 @@ pub async fn get_release(client: &Client, mbid: &str) -> Result<ReleaseDetail, S
     );
     let detail = detail?;
 
-    let tracks: Vec<TrackInfo> = detail
-        .media
-        .unwrap_or_default()
-        .into_iter()
-        .flat_map(|m| m.tracks.unwrap_or_default())
-        .enumerate()
-        .map(|(i, t)| TrackInfo {
-            position: (i + 1) as u32,
-            title: t.title.unwrap_or_else(|| "Unknown Track".to_string()),
-            artist: Some(extract_artist(&t.artist_credit)),
-            duration_secs: t.length.map(|ms| ms as f64 / 1000.0),
-        })
-        .collect();
+    let tracks = tracks_from_media(detail.media.unwrap_or_default());
 
     Ok(ReleaseDetail {
         id: detail.id.clone(),
@@ -251,24 +269,13 @@ mod tests {
         let detail: MbReleaseDetail = serde_json::from_str(json_data).unwrap();
         assert_eq!(detail.title, "Double Album");
 
-        let tracks: Vec<TrackInfo> = detail
-            .media
-            .unwrap_or_default()
-            .into_iter()
-            .flat_map(|m| m.tracks.unwrap_or_default())
-            .enumerate()
-            .map(|(i, t)| TrackInfo {
-                position: (i + 1) as u32,
-                title: t.title.unwrap_or_else(|| "Unknown Track".to_string()),
-                artist: Some(extract_artist(&t.artist_credit)),
-                duration_secs: t.length.map(|ms| ms as f64 / 1000.0),
-            })
-            .collect();
+        let tracks = tracks_from_media(detail.media.unwrap_or_default());
 
         assert_eq!(tracks.len(), 3);
 
         // Track 1
         assert_eq!(tracks[0].title, "Disc 1 Song 1");
+        assert_eq!(tracks[0].disc_number, 1);
         assert_eq!(tracks[0].position, 1);
         assert_eq!(tracks[0].artist, Some("".to_string())); // null name falls back to empty
 
@@ -278,6 +285,23 @@ mod tests {
 
         // Track 3
         assert_eq!(tracks[2].title, "Disc 2 Song 1");
-        assert_eq!(tracks[2].position, 3);
+        assert_eq!(tracks[2].disc_number, 2);
+        assert_eq!(tracks[2].position, 1);
+    }
+
+    #[test]
+    fn test_extract_artist_joins_all_credits() {
+        let credits: Option<Vec<MbArtistCredit>> = serde_json::from_str(
+            r#"[
+                {"name": "Simon", "joinphrase": " & ", "artist": {"name": "Paul Simon"}},
+                {"joinphrase": " feat. ", "artist": {"name": "Art Garfunkel"}},
+                {"name": "Guest", "artist": {"name": "Guest Artist"}}
+            ]"#,
+        )
+        .unwrap();
+        assert_eq!(
+            extract_artist(&credits),
+            "Simon & Art Garfunkel feat. Guest"
+        );
     }
 }

@@ -1,5 +1,5 @@
 import { apiFetch } from './client';
-import type { TagData } from '$lib/types/audio';
+import type { TagData, TagEdits } from '$lib/types/audio';
 
 interface ReadTagsResponse {
 	tags: Record<string, TagData>;
@@ -19,7 +19,7 @@ export async function readTags(
 interface WriteEntry {
 	id: string;
 	path: string;
-	tags: Partial<TagData>;
+	tags: TagEdits;
 }
 
 interface WriteResult {

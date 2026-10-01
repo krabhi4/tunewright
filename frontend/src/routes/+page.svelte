@@ -24,6 +24,7 @@
 	import { filterVisible, filterText, sidebarWidth, sidebarCollapsed, sortColumn, sortAsc } from '$lib/stores/ui';
 	import {
 		clearTags,
+		discardEdits,
 		fetchTagsForFiles,
 		hasPendingEdits,
 		saveAllEdits,
@@ -64,15 +65,25 @@
 
 	// --- Unsaved edits guard ---
 	let confirmOpen = $state(false);
-	let pendingNavPath = $state<string | null>(null);
+	let pendingAction = $state<(() => void) | null>(null);
+	let saving = $state(false);
 
-	function navigateTo(path: string) {
+	function guardUnsaved(action: () => void) {
 		if ($hasPendingEdits) {
-			pendingNavPath = path;
+			pendingAction = action;
 			confirmOpen = true;
 		} else {
-			doNavigate(path);
+			action();
 		}
+	}
+
+	function navigateTo(path: string) {
+		guardUnsaved(() => doNavigate(path));
+	}
+
+	function openModal(show: () => void) {
+		closeAllModals();
+		guardUnsaved(show);
 	}
 
 	function doNavigate(path: string) {
@@ -80,29 +91,45 @@
 		loadDirectory(path);
 	}
 
+	function reloadKeepingEdits() {
+		clearTags(true);
+		loadDirectory($currentPath);
+	}
+
 	async function handleConfirmSave() {
-		const result = await saveAllEdits();
+		if (saving) return;
+		saving = true;
+		const result = await saveAllEdits().finally(() => (saving = false));
+		const action = pendingAction;
+		pendingAction = null;
+		confirmOpen = false;
 		if (result.failed > 0) {
-			toast.error(`Failed to save edits for ${result.failed} file(s). Navigation cancelled.`);
-			pendingNavPath = null;
-			confirmOpen = false;
+			toast.error(`Failed to save edits for ${result.failed} file(s). Action cancelled.`);
 			return;
 		}
-		confirmOpen = false;
-		if (pendingNavPath) doNavigate(pendingNavPath);
-		pendingNavPath = null;
+		action?.();
 	}
 
 	function handleConfirmDiscard() {
 		confirmOpen = false;
-		if (pendingNavPath) doNavigate(pendingNavPath);
-		pendingNavPath = null;
+		discardEdits();
+		pendingAction?.();
+		pendingAction = null;
 	}
 
 	function handleConfirmCancel() {
 		confirmOpen = false;
-		pendingNavPath = null;
+		pendingAction = null;
 	}
+
+	$effect(() => {
+		if (!$hasPendingEdits) return;
+		function onBeforeUnload(e: BeforeUnloadEvent) {
+			e.preventDefault();
+		}
+		window.addEventListener('beforeunload', onBeforeUnload);
+		return () => window.removeEventListener('beforeunload', onBeforeUnload);
+	});
 
 	// --- URL state sync ---
 	let initialized = false;
@@ -177,8 +204,18 @@
 		return () => clearTimeout(timer);
 	});
 
+	let activeSave: ReturnType<typeof saveAllEdits> | null = null;
+
 	async function handleSave() {
-		const result = await saveAllEdits();
+		const save = saveAllEdits();
+		if (save === activeSave) return;
+		activeSave = save;
+		saving = true;
+		const result = await save.finally(() => {
+			if (activeSave !== save) return;
+			activeSave = null;
+			saving = false;
+		});
 		if (result.failed > 0) {
 			const saved = result.success > 0 ? `; ${result.success} saved` : '';
 			toast.error(`Failed to save edits for ${result.failed} file(s)${saved}.`);
@@ -229,7 +266,10 @@
 		}
 		if ((e.ctrlKey || e.metaKey) && e.key === 's') {
 			e.preventDefault();
-			if ($hasPendingEdits) handleSave();
+			const active = document.activeElement as HTMLElement | null;
+			active?.blur();
+			active?.focus();
+			if (get(hasPendingEdits)) handleSave();
 		}
 	}
 
@@ -246,12 +286,12 @@
 <Toolbar
 	onOpenFolder={() => { closeAllModals(); folderPickerOpen = true; }}
 	onSave={handleSave}
-	onRename={() => { closeAllModals(); renameModalOpen = true; }}
-	onFilenameToTag={() => { closeAllModals(); filenameToTagOpen = true; }}
-	onActions={() => { closeAllModals(); actionsModalOpen = true; }}
-	onLookup={() => { closeAllModals(); lookupModalOpen = true; }}
+	onRename={() => openModal(() => (renameModalOpen = true))}
+	onFilenameToTag={() => openModal(() => (filenameToTagOpen = true))}
+	onActions={() => openModal(() => (actionsModalOpen = true))}
+	onLookup={() => openModal(() => (lookupModalOpen = true))}
 	onManageUsers={() => { closeAllModals(); userManagementOpen = true; }}
-	hasPendingEdits={$hasPendingEdits}
+	hasPendingEdits={$hasPendingEdits && !saving}
 	hasSelection={$selectedCount > 0}
 />
 
@@ -316,7 +356,7 @@
 	open={renameModalOpen}
 	onClose={() => (renameModalOpen = false)}
 	files={$selectedFiles}
-	onComplete={() => { clearTags(); loadDirectory($currentPath); }}
+	onComplete={reloadKeepingEdits}
 />
 
 <FilenameToTagModal
@@ -336,16 +376,17 @@
 <LookupModal
 	open={lookupModalOpen}
 	onClose={() => (lookupModalOpen = false)}
-	onApplied={() => { clearTags(); loadDirectory($currentPath); }}
+	onApplied={reloadKeepingEdits}
 />
 
 <ConfirmModal
 	open={confirmOpen}
 	title="Unsaved Changes"
 	message="You have unsaved tag edits. What would you like to do?"
-	confirmLabel="Save & Navigate"
-	extraLabel="Discard & Navigate"
+	confirmLabel="Save & Continue"
+	extraLabel="Discard & Continue"
 	cancelLabel="Cancel"
+	busy={saving}
 	onConfirm={handleConfirmSave}
 	onExtra={handleConfirmDiscard}
 	onCancel={handleConfirmCancel}

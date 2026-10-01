@@ -4,6 +4,7 @@
 	import { previewRenames, executeRenames } from '$lib/api/rename';
 	import type { RenamePreview } from '$lib/api/rename';
 	import { toast } from '$lib/stores/toast';
+	import { untrack } from 'svelte';
 
 	interface Props {
 		open: boolean;
@@ -18,20 +19,22 @@
 	let previews = $state<RenamePreview[]>([]);
 	let loading = $state(false);
 	let executing = $state(false);
+	let previewPending = $state(false);
 	let previewTaskId = 0;
 
 	$effect(() => {
 		if (open && files.length > 0) {
-			loadPreview();
+			untrack(loadPreview);
 		}
 	});
 
 	async function loadPreview() {
+		const taskId = ++previewTaskId;
 		if (!format.trim()) {
 			previews = [];
+			loading = false;
 			return;
 		}
-		const taskId = ++previewTaskId;
 		loading = true;
 		try {
 			const fileEntries = files.map((f) => ({ id: f.id, path: f.relative_path }));
@@ -80,7 +83,11 @@
 
 	function handleFormatInput() {
 		clearTimeout(previewTimer);
-		previewTimer = setTimeout(() => loadPreview(), 300);
+		previewPending = true;
+		previewTimer = setTimeout(() => {
+			previewPending = false;
+			loadPreview();
+		}, 300);
 	}
 </script>
 
@@ -118,7 +125,7 @@
 					<span class="preview-old mono">{p.old_name}</span>
 					<span class="preview-arrow">&rarr;</span>
 					<span class="preview-new mono" class:changed={p.old_name !== p.new_name}>
-						{p.new_name}
+						{p.error ?? p.new_name}
 					</span>
 				</div>
 			{/each}
@@ -132,7 +139,7 @@
 		<button class="btn btn-secondary" onclick={onClose}>Cancel</button>
 		<button
 			class="btn btn-primary"
-			disabled={previews.length === 0 || hasConflicts || executing}
+			disabled={previews.length === 0 || hasConflicts || executing || loading || previewPending}
 			onclick={handleExecute}
 		>
 			{executing ? 'Renaming...' : 'Rename'}

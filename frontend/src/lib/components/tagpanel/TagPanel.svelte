@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { selectedCount, selectedFiles, selectedIds } from '$lib/stores/files';
-	import { selectedTags, KEEP_VALUE, setPendingEdit, pendingEdits } from '$lib/stores/tags';
+	import { selectedTags, KEEP_VALUE, setPendingEdit, clearPendingEdit, pendingEdits } from '$lib/stores/tags';
 	import { getCoverArtUrl, uploadCoverArt } from '$lib/api/coverart';
 	import { coverArtVersion, bumpCoverArt } from '$lib/stores/ui';
 	import { toast } from '$lib/stores/toast';
@@ -47,6 +47,9 @@
 
 	function onPaste(e: ClipboardEvent) {
 		if ($selectedFiles.length === 0) return;
+		const active = document.activeElement as HTMLElement | null;
+		if (active && (active.matches('input, textarea') || active.isContentEditable)) return;
+		if (document.querySelector('[role="dialog"]')) return;
 		const items = e.clipboardData?.items;
 		if (!items) return;
 		for (const item of items) {
@@ -119,7 +122,7 @@
 		if (key === 'year' || key === 'track_number' || key === 'track_total' || key === 'disc_number' || key === 'disc_total') {
 			const trimmed = val.trim();
 			if (trimmed === '') {
-				setPendingEdit(key, undefined);
+				clearPendingEdit(key);
 				return;
 			}
 
@@ -149,8 +152,7 @@
 				target.value = String(num);
 				setPendingEdit(key, num);
 			} else {
-				// Revert invalid string in UI and clear pending edit
-				setPendingEdit(key, undefined);
+				// Revert invalid string in UI without recording an edit
 				const st = fieldStates[key];
 				if (st) {
 					target.value = st.keep ? '' : st.value;
@@ -159,7 +161,8 @@
 				}
 			}
 		} else {
-			setPendingEdit(key, val);
+			if (val === '') clearPendingEdit(key);
+			else setPendingEdit(key, val);
 		}
 	}
 </script>

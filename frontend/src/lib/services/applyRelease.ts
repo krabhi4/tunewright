@@ -3,8 +3,9 @@ import { executeRenames } from '$lib/api/rename';
 import type { ReleaseDetail } from '$lib/api/lookup';
 import type { FileEntry } from '$lib/types/audio';
 
-/** Filename format used when renaming files to match a looked-up release. */
+/** Filename formats used when renaming files to match a looked-up release. */
 const RENAME_FORMAT = '%track% - %title%';
+const MULTI_DISC_RENAME_FORMAT = '%disc%-%track% - %title%';
 
 export interface ApplyReleaseResult {
 	/** Relative paths cover art should be embedded into (post-rename). */
@@ -29,6 +30,7 @@ export async function applyReleaseToFiles(
 	opts: { rename: boolean }
 ): Promise<ApplyReleaseResult> {
 	const tracks = release.tracks;
+	const discTotal = Math.max(...tracks.map((t) => t.disc_number));
 	const filesToRename: { id: string; path: string }[] = [];
 
 	for (let i = 0; i < tracks.length; i++) {
@@ -43,6 +45,7 @@ export async function applyReleaseToFiles(
 				...existing,
 				title: track.title,
 				track_number: track.position,
+				...(discTotal > 1 ? { disc_number: track.disc_number, disc_total: discTotal } : {}),
 				album: release.title,
 				album_artist: release.artist,
 				...(release.year ? { year: release.year } : {}),
@@ -70,7 +73,10 @@ export async function applyReleaseToFiles(
 
 		if (filesToRenameFiltered.length > 0) {
 			try {
-				const results = await executeRenames(filesToRenameFiltered, RENAME_FORMAT);
+				const results = await executeRenames(
+					filesToRenameFiltered,
+					discTotal > 1 ? MULTI_DISC_RENAME_FORMAT : RENAME_FORMAT
+				);
 				renameFailed = results.filter((r) => r.status === 'error').length;
 				// Use the server-reported new path instead of re-deriving it client-side.
 				const newPaths = new Map<string, string>();

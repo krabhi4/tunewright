@@ -6,7 +6,7 @@ use std::path::PathBuf;
 use tunewright_core::actions::{self, Action, ActionContext};
 use tunewright_core::audio;
 use tunewright_core::scanner;
-use tunewright_core::types::{TagWriteChanges, TunewrightError, WriteResult};
+use tunewright_core::types::{TunewrightError, WriteResult};
 
 use crate::error::{check_action_batch, join_error, AppError};
 use crate::state::AppState;
@@ -60,53 +60,40 @@ pub async fn execute(
             .map_err(TunewrightError::InvalidFormatString)?;
         let valid_files = safe_file_entries(&data_root, body.files);
 
-        // Each file's read → apply → write is independent (per-path locks
-        // serialize conflicting writes), so process files in parallel.
+        // Each file's read → apply → write runs under that file's lock and
+        // writes back only the fields the actions changed, so process files
+        // in parallel.
         let results: Vec<WriteResult> = valid_files
             .par_iter()
             .enumerate()
             .map(|(i, (id, _rel_path, canonical_path))| {
-                let mut tags = match audio::read_tags_fast(canonical_path) {
-                    Ok(t) => t,
-                    Err(e) => {
-                        tracing::error!("Action read failed for {}: {e}", canonical_path.display());
-                        return WriteResult {
-                            id: id.clone(),
-                            status: "error".to_string(),
-                            error: Some("Failed to read tags".to_string()),
-                        };
-                    }
-                };
-
                 let filename = canonical_path
                     .file_stem()
                     .unwrap_or_default()
                     .to_string_lossy()
                     .to_string();
-
-                // Apply all actions in sequence
                 let ctx = ActionContext { index: i, filename };
-                for action in &body.actions {
-                    action.apply(&mut tags, &ctx, &regexes);
-                }
 
-                // Write modified tags back
-                let changes = TagWriteChanges::from(&tags);
-                match audio::write_tags(canonical_path, &changes) {
+                match audio::modify_tags(canonical_path, |tags| {
+                    for action in &body.actions {
+                        action.apply(tags, &ctx, &regexes);
+                    }
+                }) {
                     Ok(()) => WriteResult {
                         id: id.clone(),
                         status: "ok".to_string(),
                         error: None,
                     },
                     Err(e) => {
-                        tracing::error!(
-                            "Action write failed for {}: {e}",
-                            canonical_path.display()
-                        );
+                        tracing::error!("Action failed for {}: {e}", canonical_path.display());
+                        let error = match e {
+                            TunewrightError::TagReadError(_) => "Failed to read tags",
+                            _ => "Failed to write tags",
+                        };
                         WriteResult {
                             id: id.clone(),
                             status: "error".to_string(),
-                            error: Some("Failed to write tags".to_string()),
+                            error: Some(error.to_string()),
                         }
                     }
                 }
@@ -170,7 +157,7 @@ pub async fn preview(
                 .to_string_lossy()
                 .to_string();
 
-            let original = match audio::read_tags_fast(canonical_path) {
+            let original = match audio::read_tags_fast_with(canonical_path, true) {
                 Ok(t) => t,
                 Err(_) => continue,
             };
@@ -207,6 +194,20 @@ pub async fn preview(
 // Helpers
 // ---------------------------------------------------------------------------
 
+const MAX_PREVIEW_VALUE_BYTES: usize = 1024;
+
+fn preview_value(mut value: String) -> String {
+    if value.len() > MAX_PREVIEW_VALUE_BYTES {
+        let mut end = MAX_PREVIEW_VALUE_BYTES;
+        while !value.is_char_boundary(end) {
+            end -= 1;
+        }
+        value.truncate(end);
+        value.push('…');
+    }
+    value
+}
+
 /// Compare two TagData and return a list of changed fields.
 fn diff_tags(
     a: &tunewright_core::types::TagData,
@@ -221,8 +222,8 @@ fn diff_tags(
             if old != new {
                 changes.push(FieldChange {
                     field: $name.to_string(),
-                    old_value: old,
-                    new_value: new,
+                    old_value: preview_value(old),
+                    new_value: preview_value(new),
                 });
             }
         };
@@ -250,11 +251,26 @@ fn diff_tags(
         if old != new {
             changes.push(FieldChange {
                 field: key.clone(),
-                old_value: old,
-                new_value: new,
+                old_value: preview_value(old),
+                new_value: preview_value(new),
             });
         }
     }
 
     changes
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn preview_value_truncates_on_char_boundary() {
+        assert_eq!(preview_value("short".into()), "short");
+        let long = "é".repeat(MAX_PREVIEW_VALUE_BYTES);
+        let out = preview_value(long);
+        assert!(out.ends_with('…'));
+        assert!(out.len() <= MAX_PREVIEW_VALUE_BYTES + '…'.len_utf8());
+        assert!(out.trim_end_matches('…').chars().all(|c| c == 'é'));
+    }
 }

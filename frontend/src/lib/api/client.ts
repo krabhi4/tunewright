@@ -1,4 +1,6 @@
 import { goto } from '$app/navigation';
+import { auth } from '$lib/stores/auth';
+import { clearTags } from '$lib/stores/tags';
 
 const BASE = '/api/v1';
 
@@ -25,6 +27,8 @@ export async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> 
 
 	if (!res.ok) {
 		if (res.status === 401 && !path.startsWith('/auth/')) {
+			auth.update((s) => ({ ...s, authenticated: false, user: null }));
+			clearTags(true);
 			goto('/login');
 		}
 		const body = await res.json().catch(() => ({ error: res.statusText }));

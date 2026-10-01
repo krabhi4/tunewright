@@ -55,7 +55,7 @@ Authentication is always active once a user account exists:
 - Sessions use random 256-bit tokens stored in HttpOnly, SameSite=Lax cookies
 - Brute-force throttling with exponential backoff on failed logins
 - Timing oracle protection: dummy Argon2 verification on unknown usernames
-- User accounts stored in `users.json` with atomic writes (temp file + rename)
+- User accounts stored in `users.json` (mode 0600, location set by `TUNEWRIGHT_STATE_DIR`, defaulting to the data directory) with atomic writes (temp file + rename)
 - Server refuses to start if `users.json` exists but contains invalid JSON (prevents silent data wipe)
 
 ### Setup Mode
@@ -64,7 +64,7 @@ Before any user account exists, only `/auth/*` and `/health` API endpoints are a
 
 ### External API Proxying
 
-MusicBrainz API calls are proxied through the server. This keeps API tokens server-side and enforces rate limiting. The frontend never contacts external services directly.
+MusicBrainz API calls are proxied through the server. This keeps API tokens server-side and enforces rate limiting. The only external requests the browser makes are cover-art thumbnails from Cover Art Archive / archive.org and Apple's mzstatic.com, which the Content-Security-Policy `img-src` restricts to those hosts.
 
 ### Dependencies
 
@@ -77,7 +77,7 @@ MusicBrainz API calls are proxied through the server. This keeps API tokens serv
 
 | Version | Supported |
 |---------|-----------|
-| 0.6.x   | Yes       |
-| < 0.6   | No        |
+| 1.0.x   | Yes       |
+| < 1.0   | No        |
 
 Only the latest release receives security updates.

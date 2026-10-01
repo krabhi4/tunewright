@@ -15,4 +15,7 @@ services:
       # Recommended: require a token to claim the first admin account, since
       # the container is reachable on the network during initial setup.
       # TUNEWRIGHT_SETUP_TOKEN: choose-a-secret-value
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
     restart: unless-stopped

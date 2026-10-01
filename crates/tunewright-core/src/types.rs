@@ -1,4 +1,4 @@
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize};
 use std::collections::HashMap;
 use std::path::PathBuf;
 
@@ -125,60 +125,122 @@ pub struct FileListResult {
     pub directories: Vec<String>,
 }
 
-/// Changes to write to a single file's tags
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+/// Changes to write to a single file's tags. Per field: absent leaves it
+/// unchanged, `null` (or an empty string) removes it, a value sets it.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
 pub struct TagWriteChanges {
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub title: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub artist: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub album: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub album_artist: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub year: Option<u32>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub track_number: Option<u32>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub track_total: Option<u32>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub disc_number: Option<u32>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub disc_total: Option<u32>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub genre: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub comment: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub composer: Option<String>,
+    #[serde(
+        default,
+        deserialize_with = "double_option",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub title: Option<Option<String>>,
+    #[serde(
+        default,
+        deserialize_with = "double_option",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub artist: Option<Option<String>>,
+    #[serde(
+        default,
+        deserialize_with = "double_option",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub album: Option<Option<String>>,
+    #[serde(
+        default,
+        deserialize_with = "double_option",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub album_artist: Option<Option<String>>,
+    #[serde(
+        default,
+        deserialize_with = "double_option",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub year: Option<Option<u32>>,
+    #[serde(
+        default,
+        deserialize_with = "double_option",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub track_number: Option<Option<u32>>,
+    #[serde(
+        default,
+        deserialize_with = "double_option",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub track_total: Option<Option<u32>>,
+    #[serde(
+        default,
+        deserialize_with = "double_option",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub disc_number: Option<Option<u32>>,
+    #[serde(
+        default,
+        deserialize_with = "double_option",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub disc_total: Option<Option<u32>>,
+    #[serde(
+        default,
+        deserialize_with = "double_option",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub genre: Option<Option<String>>,
+    #[serde(
+        default,
+        deserialize_with = "double_option",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub comment: Option<Option<String>>,
+    #[serde(
+        default,
+        deserialize_with = "double_option",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub composer: Option<Option<String>>,
 
-    /// Extra/custom tag fields to write
+    /// Extra/custom tag fields to write; a `null` value removes the key
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub extra: Option<HashMap<String, String>>,
+    pub extra: Option<HashMap<String, Option<String>>>,
 }
 
-impl From<&TagData> for TagWriteChanges {
-    /// Project a full `TagData` onto the writable subset of tag fields.
-    fn from(tags: &TagData) -> Self {
+fn double_option<'de, T, D>(deserializer: D) -> Result<Option<Option<T>>, D::Error>
+where
+    T: Deserialize<'de>,
+    D: Deserializer<'de>,
+{
+    Option::<T>::deserialize(deserializer).map(Some)
+}
+
+impl TagWriteChanges {
+    pub fn diff(old: &TagData, new: &TagData) -> Self {
+        fn field<T: PartialEq + Clone>(old: &Option<T>, new: &Option<T>) -> Option<Option<T>> {
+            (old != new).then(|| new.clone())
+        }
+        let extra: HashMap<String, Option<String>> = old
+            .extra
+            .keys()
+            .chain(new.extra.keys())
+            .filter(|k| old.extra.get(*k) != new.extra.get(*k))
+            .map(|k| (k.clone(), new.extra.get(k).cloned()))
+            .collect();
         Self {
-            title: tags.title.clone(),
-            artist: tags.artist.clone(),
-            album: tags.album.clone(),
-            album_artist: tags.album_artist.clone(),
-            year: tags.year,
-            track_number: tags.track_number,
-            track_total: tags.track_total,
-            disc_number: tags.disc_number,
-            disc_total: tags.disc_total,
-            genre: tags.genre.clone(),
-            comment: tags.comment.clone(),
-            composer: tags.composer.clone(),
-            extra: if tags.extra.is_empty() {
-                None
-            } else {
-                Some(tags.extra.clone())
-            },
+            title: field(&old.title, &new.title),
+            artist: field(&old.artist, &new.artist),
+            album: field(&old.album, &new.album),
+            album_artist: field(&old.album_artist, &new.album_artist),
+            year: field(&old.year, &new.year),
+            track_number: field(&old.track_number, &new.track_number),
+            track_total: field(&old.track_total, &new.track_total),
+            disc_number: field(&old.disc_number, &new.disc_number),
+            disc_total: field(&old.disc_total, &new.disc_total),
+            genre: field(&old.genre, &new.genre),
+            comment: field(&old.comment, &new.comment),
+            composer: field(&old.composer, &new.composer),
+            extra: (!extra.is_empty()).then_some(extra),
         }
     }
 }
@@ -230,4 +292,51 @@ pub enum TunewrightError {
 
     #[error("IO error: {0}")]
     Io(#[from] std::io::Error),
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn tag_write_changes_is_tri_state() {
+        let c: TagWriteChanges =
+            serde_json::from_str(r#"{"title":"T","year":null,"extra":{"Bpm":null,"Mood":"x"}}"#)
+                .unwrap();
+        assert_eq!(c.title, Some(Some("T".to_string())));
+        assert_eq!(c.year, Some(None));
+        assert_eq!(c.artist, None);
+        let extra = c.extra.as_ref().unwrap();
+        assert_eq!(extra.get("Bpm"), Some(&None));
+        assert_eq!(extra.get("Mood"), Some(&Some("x".to_string())));
+
+        let json = serde_json::to_value(&c).unwrap();
+        assert_eq!(json["year"], serde_json::Value::Null);
+        assert!(json.get("artist").is_none());
+    }
+
+    #[test]
+    fn diff_touches_only_changed_fields() {
+        let mut old = TagData {
+            title: Some("a".into()),
+            artist: Some("b".into()),
+            year: Some(2021),
+            ..Default::default()
+        };
+        old.extra.insert("Bpm".into(), "120".into());
+        let mut new = old.clone();
+        new.title = Some("A".into());
+        new.year = None;
+        new.extra.clear();
+
+        let c = TagWriteChanges::diff(&old, &new);
+        assert_eq!(c.title, Some(Some("A".into())));
+        assert_eq!(c.year, Some(None));
+        assert_eq!(c.artist, None);
+        assert_eq!(c.extra.unwrap().get("Bpm"), Some(&None));
+        assert_eq!(
+            TagWriteChanges::diff(&old, &old),
+            TagWriteChanges::default()
+        );
+    }
 }

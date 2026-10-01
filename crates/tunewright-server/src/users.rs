@@ -69,6 +69,16 @@ impl UserManager {
     /// Load users from disk. Panics if the file exists but contains invalid JSON
     /// to prevent silent user data loss (which would allow anyone to re-run setup).
     pub fn load(path: PathBuf) -> Self {
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            if let Err(e) = std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600))
+            {
+                if e.kind() != std::io::ErrorKind::NotFound {
+                    tracing::warn!("Could not restrict permissions on {:?}: {}", path, e);
+                }
+            }
+        }
         let store = if path.exists() {
             match std::fs::read_to_string(&path) {
                 Ok(contents) if contents.trim().is_empty() => UserStore::default(),
@@ -105,7 +115,9 @@ impl UserManager {
         }
     }
 
-    fn save_store_data(&self, store: &UserStore) -> Result<(), &'static str> {
+    fn save_store_data(&self, store: &mut UserStore) -> Result<(), &'static str> {
+        let now = Utc::now();
+        store.invites.retain(|i| !i.used && i.expires_at >= now);
         let json = serde_json::to_string_pretty(store).map_err(|e| {
             tracing::error!("Failed to serialize users: {}", e);
             "Failed to save user data"
@@ -113,8 +125,16 @@ impl UserManager {
 
         use std::io::Write;
         let tmp_path = self.path.with_extension("json.tmp");
+        let _ = std::fs::remove_file(&tmp_path);
 
-        let mut file = std::fs::File::create(&tmp_path).map_err(|e| {
+        let mut options = std::fs::OpenOptions::new();
+        options.write(true).create(true).truncate(true);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::OpenOptionsExt;
+            options.mode(0o600);
+        }
+        let mut file = options.open(&tmp_path).map_err(|e| {
             tracing::error!("Failed to create users temp file: {}", e);
             "Failed to save user data"
         })?;
@@ -183,7 +203,7 @@ impl UserManager {
         };
         cloned_store.users.push(user.clone());
 
-        self.save_store_data(&cloned_store)?;
+        self.save_store_data(&mut cloned_store)?;
 
         // Success, now update the actual store
         {
@@ -222,7 +242,7 @@ impl UserManager {
         }
         cloned_store.users.remove(idx);
 
-        self.save_store_data(&cloned_store)?;
+        self.save_store_data(&mut cloned_store)?;
 
         // Success, now update the actual store
         {
@@ -254,7 +274,7 @@ impl UserManager {
         };
         cloned_store.invites.push(invite.clone());
 
-        self.save_store_data(&cloned_store)?;
+        self.save_store_data(&mut cloned_store)?;
 
         // Success, now update the actual store
         {
@@ -314,7 +334,7 @@ impl UserManager {
         };
         cloned_store.users.push(user.clone());
 
-        self.save_store_data(&cloned_store)?;
+        self.save_store_data(&mut cloned_store)?;
 
         // Success, now update the actual store
         {
@@ -350,7 +370,7 @@ impl UserManager {
         };
         cloned_store.invites.remove(idx);
 
-        self.save_store_data(&cloned_store)?;
+        self.save_store_data(&mut cloned_store)?;
 
         // Success, now update the actual store
         {
@@ -449,6 +469,48 @@ mod tests {
         assert!(manager.remove_user(&user.id).unwrap());
         // User should not be found anymore
         assert!(manager.find_by_username("regular_user").is_none());
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn test_used_and_expired_invites_pruned_on_save() {
+        let path = std::env::temp_dir().join(format!("users_test_{}.json", uuid::Uuid::new_v4()));
+        let manager = UserManager::load(path.clone());
+        let used = manager.create_invite("admin").unwrap();
+        manager
+            .register_with_invite(&used.token, "someone", "hash".to_string())
+            .unwrap();
+        {
+            let mut store = manager.store.lock().unwrap();
+            store.invites.push(Invite {
+                token: "expired".to_string(),
+                created_by: "admin".to_string(),
+                expires_at: Utc::now() - Duration::hours(1),
+                used: false,
+            });
+        }
+        let fresh = manager.create_invite("admin").unwrap();
+
+        let saved: UserStore =
+            serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+        let tokens: Vec<_> = saved.invites.iter().map(|i| i.token.as_str()).collect();
+        assert_eq!(tokens, vec![fresh.token.as_str()]);
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn test_users_file_is_private() {
+        use std::os::unix::fs::PermissionsExt;
+        let path = std::env::temp_dir().join(format!("users_test_{}.json", uuid::Uuid::new_v4()));
+        let manager = UserManager::load(path.clone());
+        manager.add_first_user("admin", "hash".to_string()).unwrap();
+        let mode = |p: &PathBuf| std::fs::metadata(p).unwrap().permissions().mode() & 0o777;
+        assert_eq!(mode(&path), 0o600);
+
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o644)).unwrap();
+        UserManager::load(path.clone());
+        assert_eq!(mode(&path), 0o600);
         let _ = std::fs::remove_file(&path);
     }
 }

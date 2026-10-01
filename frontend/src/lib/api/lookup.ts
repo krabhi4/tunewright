@@ -11,6 +11,7 @@ export interface ReleaseSearchResult {
 }
 
 export interface TrackInfo {
+	disc_number: number;
 	position: number;
 	title: string;
 	artist: string | null;

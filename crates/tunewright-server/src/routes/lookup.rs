@@ -91,11 +91,11 @@ pub async fn musicbrainz_release(
     State(state): State<AppState>,
     Path(mbid): Path<String>,
 ) -> Response {
-    if let Err(resp) = rate_limit_musicbrainz(&state).await {
-        return resp;
-    }
     if !musicbrainz::is_valid_mbid(&mbid) {
         return bad_request("Invalid MusicBrainz ID");
+    }
+    if let Err(resp) = rate_limit_musicbrainz(&state).await {
+        return resp;
     }
     match musicbrainz::get_release(&state.http_client, &mbid).await {
         Ok(detail) => Json(detail).into_response(),
@@ -141,10 +141,12 @@ mod tests {
         let user_manager = UserManager::load(temp_dir.join("users.json"));
         let config = Config {
             data_dir: temp_dir.clone(),
+            state_dir: None,
             static_dir: temp_dir.clone(),
             port: 8080,
             host: "127.0.0.1".to_string(),
             cookie_secure: false,
+            trust_proxy: false,
             setup_token: None,
         };
         let state = AppState::new(config, user_manager);

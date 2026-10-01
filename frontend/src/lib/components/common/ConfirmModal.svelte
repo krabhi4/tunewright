@@ -11,6 +11,7 @@
 		onConfirm: () => void;
 		onCancel: () => void;
 		onExtra?: () => void;
+		busy?: boolean;
 	}
 
 	let {
@@ -22,18 +23,19 @@
 		extraLabel,
 		onConfirm,
 		onCancel,
-		onExtra
+		onExtra,
+		busy = false
 	}: Props = $props();
 </script>
 
-<Modal {title} {open} onClose={onCancel}>
+<Modal {title} {open} onClose={() => { if (!busy) onCancel(); }}>
 	<p class="confirm-message">{message}</p>
 	<div class="confirm-actions">
-		<button class="btn btn-secondary" onclick={onCancel}>{cancelLabel}</button>
+		<button class="btn btn-secondary" onclick={onCancel} disabled={busy}>{cancelLabel}</button>
 		{#if extraLabel && onExtra}
-			<button class="btn btn-danger" onclick={onExtra}>{extraLabel}</button>
+			<button class="btn btn-danger" onclick={onExtra} disabled={busy}>{extraLabel}</button>
 		{/if}
-		<button class="btn btn-primary" onclick={onConfirm}>{confirmLabel}</button>
+		<button class="btn btn-primary" onclick={onConfirm} disabled={busy}>{confirmLabel}</button>
 	</div>
 </Modal>
 
