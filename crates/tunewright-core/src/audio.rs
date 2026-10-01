@@ -37,6 +37,13 @@ fn full_parse_options() -> ParseOptions {
         .parsing_mode(ParsingMode::BestAttempt)
 }
 
+pub(crate) fn probe(
+    path: &Path,
+    options: ParseOptions,
+) -> Result<Probe<std::io::BufReader<std::fs::File>>, Box<dyn std::error::Error>> {
+    Ok(Probe::open(path)?.options(options).guess_file_type()?)
+}
+
 /// Read tags FAST — skips audio properties and cover art data.
 /// Returns tag text fields only (title, artist, album, etc.).
 /// Use this for populating the grid quickly.
@@ -45,9 +52,8 @@ pub fn read_tags_fast(path: &Path) -> Result<TagData, TunewrightError> {
 }
 
 pub fn read_tags_fast_with(path: &Path, unfiltered: bool) -> Result<TagData, TunewrightError> {
-    let tagged = Probe::open(path)
+    let tagged = probe(path, fast_parse_options())
         .map_err(|e| TunewrightError::TagReadError(format!("{}: {}", path.display(), e)))?
-        .options(fast_parse_options())
         .read()
         .map_err(|e| TunewrightError::TagReadError(format!("{}: {}", path.display(), e)))?;
 
@@ -111,9 +117,8 @@ pub fn read_tags_fast_with(path: &Path, unfiltered: bool) -> Result<TagData, Tun
 /// Read tags with full audio properties (duration, bitrate, sample rate).
 /// Slower — use for detailed view or when user explicitly requests properties.
 pub fn read_tags_full(path: &Path) -> Result<TagData, TunewrightError> {
-    let tagged = Probe::open(path)
+    let tagged = probe(path, full_parse_options())
         .map_err(|e| TunewrightError::TagReadError(format!("{}: {}", path.display(), e)))?
-        .options(full_parse_options())
         .read()
         .map_err(|e| TunewrightError::TagReadError(format!("{}: {}", path.display(), e)))?;
 
@@ -241,9 +246,8 @@ type ExtraChanges = Vec<(ItemKey, Option<String>)>;
 fn apply_tag_changes(path: &Path, changes: &TagWriteChanges) -> Result<(), TunewrightError> {
     // Keep cover art (default) so existing pictures survive the save, but
     // skip audio properties — they aren't needed for tag writes.
-    let mut tagged = Probe::open(path)
+    let mut tagged = probe(path, ParseOptions::new().read_properties(false))
         .map_err(|e| write_error(path, e))?
-        .options(ParseOptions::new().read_properties(false))
         .read()
         .map_err(|e| write_error(path, e))?;
 
@@ -461,7 +465,18 @@ impl Native {
                 }
                 result
             }
-            Self::Ape(t) => split_edit(t, edit),
+            Self::Ape(t) => {
+                let pictures = ape_pictures(t);
+                for key in lofty::ape::APE_PICTURE_TYPES {
+                    t.remove(key);
+                }
+                split_edit(t, |tag| {
+                    for picture in pictures {
+                        tag.push_picture(picture);
+                    }
+                    edit(tag)
+                })
+            }
             Self::Id3v2(t) => split_edit(t, edit),
             Self::Ilst(t) => split_edit(t, edit),
         }
@@ -560,6 +575,37 @@ impl Native {
             Self::Id3v2(t) => t.save_to_path(path, options),
             Self::Ilst(t) => t.save_to_path(path, options),
         }
+    }
+}
+
+fn ape_pictures(t: &ApeTag) -> Vec<lofty::picture::Picture> {
+    lofty::ape::APE_PICTURE_TYPES
+        .iter()
+        .filter_map(|key| match t.get(key)?.value() {
+            ItemValue::Binary(bytes) => lofty::picture::Picture::from_ape_bytes(key, bytes).ok(),
+            _ => None,
+        })
+        .collect()
+}
+
+pub(crate) fn primary_ape_pictures(
+    path: &Path,
+    tagged: &TaggedFile,
+) -> Vec<lofty::picture::Picture> {
+    let Some(primary) = tagged
+        .primary_tag()
+        .filter(|t| t.tag_type() == TagType::Ape)
+    else {
+        return Vec::new();
+    };
+    match Native::load(
+        path,
+        tagged.file_type(),
+        primary,
+        ParseOptions::new().read_properties(false),
+    ) {
+        Ok(Some(Native::Ape(t))) => ape_pictures(&t),
+        _ => Vec::new(),
     }
 }
 
@@ -1445,6 +1491,157 @@ mod tests {
         assert!(crate::picture::extract_cover_art(&path).unwrap().is_none());
         assert_eq!(mykey(&path).as_deref(), Some("x"));
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn format_is_detected_from_content_not_extension() {
+        for name in ["mislabeled.ogg", "mislabeled.mp3", "mislabeled.m4a"] {
+            let (dir, flac) = temp_flac(&[(ItemKey::TrackTitle, "Old")]);
+            let path = dir.join(name);
+            std::fs::rename(&flac, &path).unwrap();
+
+            assert_eq!(
+                super::read_tags_fast(&path).unwrap().title.as_deref(),
+                Some("Old"),
+                "{name}"
+            );
+            super::write_tags(&path, &title("New")).unwrap();
+            assert_eq!(
+                super::read_tags_fast(&path).unwrap().title.as_deref(),
+                Some("New"),
+                "{name}"
+            );
+            assert!(std::fs::read(&path).unwrap().starts_with(b"fLaC"), "{name}");
+            let _ = std::fs::remove_dir_all(dir);
+        }
+    }
+
+    fn pcm_chunk_file(name: &str, aiff: bool) -> (std::path::PathBuf, std::path::PathBuf, Vec<u8>) {
+        let samples: Vec<u8> = (0..4000u32)
+            .flat_map(|i| ((i * 37) as u16).to_le_bytes())
+            .collect();
+        let mut body = Vec::new();
+        if aiff {
+            let mut comm = Vec::new();
+            comm.extend_from_slice(&1u16.to_be_bytes());
+            comm.extend_from_slice(&((samples.len() / 2) as u32).to_be_bytes());
+            comm.extend_from_slice(&16u16.to_be_bytes());
+            comm.extend_from_slice(&[0x40, 0x0E, 0xAC, 0x44, 0, 0, 0, 0, 0, 0]);
+            body.extend_from_slice(b"AIFF");
+            body.extend_from_slice(b"COMM");
+            body.extend_from_slice(&(comm.len() as u32).to_be_bytes());
+            body.extend_from_slice(&comm);
+            body.extend_from_slice(b"SSND");
+            body.extend_from_slice(&((samples.len() + 8) as u32).to_be_bytes());
+            body.extend_from_slice(&[0; 8]);
+            body.extend_from_slice(&samples);
+        } else {
+            body.extend_from_slice(b"WAVEfmt ");
+            body.extend_from_slice(&16u32.to_le_bytes());
+            body.extend_from_slice(&[1, 0, 1, 0]);
+            body.extend_from_slice(&44100u32.to_le_bytes());
+            body.extend_from_slice(&88200u32.to_le_bytes());
+            body.extend_from_slice(&[2, 0, 16, 0]);
+            body.extend_from_slice(b"data");
+            body.extend_from_slice(&(samples.len() as u32).to_le_bytes());
+            body.extend_from_slice(&samples);
+        }
+        let mut file = Vec::new();
+        file.extend_from_slice(if aiff { b"FORM" } else { b"RIFF" });
+        let size = body.len() as u32;
+        file.extend_from_slice(&if aiff {
+            size.to_be_bytes()
+        } else {
+            size.to_le_bytes()
+        });
+        file.extend_from_slice(&body);
+        let (dir, path) = temp_file(name, &file);
+        (dir, path, samples)
+    }
+
+    fn chunk_layout_is_valid(bytes: &[u8], aiff: bool) -> bool {
+        let read = |b: &[u8]| {
+            let a: [u8; 4] = b.try_into().unwrap();
+            (if aiff {
+                u32::from_be_bytes(a)
+            } else {
+                u32::from_le_bytes(a)
+            }) as usize
+        };
+        if read(&bytes[4..8]) + 8 != bytes.len() {
+            return false;
+        }
+        let mut i = 12;
+        while i + 8 <= bytes.len() {
+            i += 8 + read(&bytes[i + 4..i + 8]);
+            i += i & 1;
+        }
+        i == bytes.len()
+    }
+
+    #[test]
+    fn growing_and_shrinking_tags_keep_wav_and_aiff_intact() {
+        for (name, aiff) in [("t.wav", false), ("t.aiff", true)] {
+            let (dir, path, samples) = pcm_chunk_file(name, aiff);
+            super::write_tags(&path, &title("Short")).unwrap();
+            let png = [0x89, b'P', b'N', b'G', 0x0D, 0x0A, 0x1A, 0x0A]
+                .into_iter()
+                .chain(std::iter::repeat_n(7u8, 5000))
+                .collect::<Vec<_>>();
+            crate::picture::embed_cover_art(&path, &png).unwrap();
+            let bytes = std::fs::read(&path).unwrap();
+            assert!(chunk_layout_is_valid(&bytes, aiff), "{name} after growing");
+            crate::picture::remove_cover_art(&path).unwrap();
+            super::write_tags(&path, &title("A much longer title than before")).unwrap();
+
+            let bytes = std::fs::read(&path).unwrap();
+            assert!(
+                chunk_layout_is_valid(&bytes, aiff),
+                "{name} after shrinking"
+            );
+            assert!(
+                bytes.windows(samples.len()).any(|w| w == samples),
+                "{name} audio changed"
+            );
+            let tags = super::read_tags_fast(&path).unwrap();
+            assert_eq!(
+                tags.title.as_deref(),
+                Some("A much longer title than before")
+            );
+            assert!(crate::picture::extract_cover_art(&path).unwrap().is_none());
+            let _ = std::fs::remove_dir_all(dir);
+        }
+    }
+
+    #[test]
+    fn embedding_cover_replaces_untyped_existing_art() {
+        use lofty::picture::{MimeType, Picture, PictureType};
+
+        let (dir, path) = temp_flac(&[(ItemKey::TrackTitle, "Song")]);
+        let old = [0xFF, 0xD8, 0xFF, 0xE0, 1, 2, 3, 4];
+        let mut tagged = lofty::probe::Probe::open(&path).unwrap().read().unwrap();
+        tagged.primary_tag_mut().unwrap().push_picture(
+            Picture::unchecked(old.to_vec())
+                .pic_type(PictureType::Other)
+                .mime_type(MimeType::Jpeg)
+                .build(),
+        );
+        tagged
+            .save_to_path(&path, lofty::config::WriteOptions::default())
+            .unwrap();
+
+        let new = [0x89, b'P', b'N', b'G', 0x0D, 0x0A, 0x1A, 0x0A, 9, 9];
+        crate::picture::embed_cover_art(&path, &new).unwrap();
+
+        let tagged = lofty::probe::Probe::open(&path).unwrap().read().unwrap();
+        let pictures: Vec<_> = tagged
+            .tags()
+            .iter()
+            .flat_map(|t| t.pictures().iter())
+            .collect();
+        assert_eq!(pictures.len(), 1);
+        assert_eq!(pictures[0].data(), new);
+        let _ = std::fs::remove_dir_all(dir);
     }
 
     #[test]

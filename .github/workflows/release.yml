@@ -8,6 +8,10 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
 jobs:
   verify-version:
     runs-on: ubuntu-latest
@@ -49,8 +53,11 @@ jobs:
         type=semver,pattern={{version}}
         type=semver,pattern={{major}}.{{minor}}
         type=semver,pattern={{major}}
-        type=raw,value=latest
+      set-meta-labels: true
+      set-meta-annotations: true
+      sbom: true
       cache: true
+      cache-mode: max
     secrets:
       registry-auths: |
         - registry: ghcr.io

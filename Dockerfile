@@ -1,8 +1,8 @@
 # Stage 1: Build frontend
 FROM --platform=$BUILDPLATFORM node:26-slim@sha256:ec7758ee051e457b468b32bde57b0879010b325bb9862718e9615225ce4aaae1 AS frontend-builder
-RUN npm install -g pnpm@9.15.4
 WORKDIR /app/frontend
 COPY frontend/package.json frontend/pnpm-lock.yaml* frontend/pnpm-workspace.yaml* ./
+RUN npm install -g "$(node -p "require('./package.json').packageManager")"
 RUN --mount=type=cache,target=/root/.local/share/pnpm/store \
     pnpm install --frozen-lockfile
 COPY frontend/ ./

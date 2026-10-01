@@ -17,7 +17,9 @@ Tunewright runs as a single Docker container, serves a web UI, and operates dire
 
 ### Supported Formats
 
-MP3, FLAC, M4A/MP4, OGG Vorbis, Opus, WAV, AIFF
+MP3, FLAC, M4A/MP4, AAC (ADTS), OGG Vorbis, Opus, Speex, WAV, AIFF, WavPack, APE, Musepack
+
+Formats are detected from file contents, so a file with the wrong extension (for example Opus audio saved as `.ogg`) is still read and written correctly.
 
 ### Tag Types
 
@@ -146,7 +148,7 @@ No database. Tag data lives in the audio files. User accounts live in `users.jso
 ### Prerequisites
 
 - Rust 1.89+
-- Node.js 20+ with pnpm
+- Node.js 20+ with pnpm 12 (the exact version is pinned in `frontend/package.json` `packageManager`)
 - Docker (for container builds)
 
 ### Development

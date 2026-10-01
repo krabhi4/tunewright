@@ -9,6 +9,10 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
   backend:
     name: Rust
@@ -40,7 +44,7 @@ jobs:
 
       - uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6.0.10
         with:
-          version: 9.15.4
+          package_json_file: frontend/package.json
 
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v6
         with:
@@ -79,20 +83,29 @@ jobs:
       - name: Check
         run: cargo check --workspace --locked
 
+  docker-image:
+    name: Docker Image
+    uses: docker/github-builder/.github/workflows/build.yml@58cb9f5b71b1836d6f690c1e95effdeb9b98cb8a # v1.17.0
+    permissions:
+      contents: read
+    with:
+      output: image
+      push: false
+      platforms: linux/amd64,linux/arm64
+      meta-images: ghcr.io/${{ github.repository }}
+      meta-tags: |
+        type=ref,event=pr
+        type=sha
+      cache: true
+      cache-mode: max
+
   docker:
     name: Docker Build
+    needs: docker-image
+    if: always()
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@37fe631027851001ddb9b187196cc803df7f5f0e # v4
-
-      - name: Build (no push)
-        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
-        with:
-          context: .
-          push: false
-          tags: tunewright:ci
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+      - name: Require multi-arch image build to pass
+        env:
+          RESULT: ${{ needs.docker-image.result }}
+        run: test "$RESULT" = success

@@ -1,8 +1,8 @@
 {
   "name": "tunewright-frontend",
-  "version": "1.1.0",
+  "version": "1.1.1",
   "private": true,
-  "packageManager": "pnpm@9.15.4",
+  "packageManager": "pnpm@12.8.1",
   "description": "Tunewright web frontend (SvelteKit SPA)",
   "license": "MIT",
   "repository": {

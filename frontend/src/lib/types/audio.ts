@@ -1,4 +1,16 @@
-export type AudioFormat = 'mp3' | 'flac' | 'mp4' | 'ogg' | 'opus' | 'wav' | 'aiff';
+export type AudioFormat =
+	| 'mp3'
+	| 'flac'
+	| 'mp4'
+	| 'ogg'
+	| 'opus'
+	| 'wav'
+	| 'aiff'
+	| 'aac'
+	| 'wavpack'
+	| 'ape'
+	| 'musepack'
+	| 'speex';
 
 export interface FileEntry {
 	id: string;

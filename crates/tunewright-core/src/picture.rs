@@ -3,7 +3,6 @@ use image::imageops::FilterType;
 use lofty::config::ParseOptions;
 use lofty::file::{AudioFile, TaggedFile, TaggedFileExt};
 use lofty::picture::{MimeType, Picture, PictureType};
-use lofty::probe::Probe;
 use lofty::tag::{Tag, TagType};
 use std::io::Cursor;
 use std::path::Path;
@@ -48,18 +47,22 @@ fn detect_mime(data: &[u8]) -> Option<&'static str> {
 /// Extract the first embedded cover art from an audio file
 pub fn extract_cover_art(path: &Path) -> Result<Option<(Vec<u8>, String)>, TunewrightError> {
     // We only want the cover picture, not audio properties — skip parsing those.
-    let tagged = Probe::open(path)
+    let tagged = crate::audio::probe(path, ParseOptions::new().read_properties(false))
         .map_err(|e| TunewrightError::TagReadError(format!("{}: {}", path.display(), e)))?
-        .options(ParseOptions::new().read_properties(false))
         .read()
         .map_err(|e| TunewrightError::TagReadError(format!("{}: {}", path.display(), e)))?;
 
-    for tag in tagged.tags() {
-        let pic = tag
-            .pictures()
+    let ape = crate::audio::primary_ape_pictures(path, &tagged);
+    for pictures in tagged
+        .tags()
+        .iter()
+        .map(|t| t.pictures())
+        .chain([ape.as_slice()])
+    {
+        let pic = pictures
             .iter()
             .find(|p| p.pic_type() == PictureType::CoverFront)
-            .or_else(|| tag.pictures().first());
+            .or_else(|| pictures.first());
 
         if let Some(pic) = pic {
             let mime = match detect_mime(pic.data()) {
@@ -149,9 +152,8 @@ pub fn embed_cover_art(path: &Path, image_data: &[u8]) -> Result<(), TunewrightE
 }
 
 fn embed_cover_art_inner(path: &Path, image_data: &[u8]) -> Result<(), TunewrightError> {
-    let mut tagged = Probe::open(path)
+    let mut tagged = crate::audio::probe(path, ParseOptions::new().read_properties(false))
         .map_err(|e| TunewrightError::TagWriteError(format!("{}: {}", path.display(), e)))?
-        .options(ParseOptions::new().read_properties(false))
         .read()
         .map_err(|e| TunewrightError::TagWriteError(format!("{}: {}", path.display(), e)))?;
 
@@ -185,6 +187,7 @@ fn embed_cover_art_inner(path: &Path, image_data: &[u8]) -> Result<(), Tunewrigh
     // Remove existing cover art and add new
     crate::audio::update_primary(path, &mut tagged, primary_type, &[], options, |tag| {
         tag.remove_picture_type(PictureType::CoverFront);
+        tag.remove_picture_type(PictureType::Other);
         tag.push_picture(picture);
         Ok(())
     })?;
@@ -209,18 +212,23 @@ pub fn remove_cover_art(path: &Path) -> Result<(), TunewrightError> {
 }
 
 fn remove_cover_art_inner(path: &Path) -> Result<(), TunewrightError> {
-    let mut tagged = Probe::open(path)
+    let mut tagged = crate::audio::probe(path, ParseOptions::new().read_properties(false))
         .map_err(|e| TunewrightError::TagWriteError(format!("{}: {}", path.display(), e)))?
-        .options(ParseOptions::new().read_properties(false))
         .read()
         .map_err(|e| TunewrightError::TagWriteError(format!("{}: {}", path.display(), e)))?;
 
     // Remove all pictures from every tag; tags without any are left untouched
     let primary_type = tagged.primary_tag_type();
     let options = crate::audio::write_options(path, &tagged);
+    let ape_has_pictures = !crate::audio::primary_ape_pictures(path, &tagged).is_empty();
     for tag_type in tag_types(&tagged) {
         match tagged.tag_mut(tag_type) {
-            Some(tag) if !tag.pictures().is_empty() => {
+            Some(tag)
+                if !tag.pictures().is_empty()
+                    || (tag_type == primary_type
+                        && tag_type == TagType::Ape
+                        && ape_has_pictures) =>
+            {
                 if tag_type == primary_type {
                     crate::audio::update_primary(
                         path,

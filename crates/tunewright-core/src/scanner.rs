@@ -275,6 +275,11 @@ mod tests {
         assert_eq!(AudioFormat::from_extension("mp3"), Some(AudioFormat::Mp3));
         assert_eq!(AudioFormat::from_extension("FLAC"), Some(AudioFormat::Flac));
         assert_eq!(AudioFormat::from_extension("m4a"), Some(AudioFormat::Mp4));
+        assert_eq!(AudioFormat::from_extension("aac"), Some(AudioFormat::Aac));
+        assert_eq!(
+            AudioFormat::from_extension("WV"),
+            Some(AudioFormat::WavPack)
+        );
         assert_eq!(AudioFormat::from_extension("txt"), None);
     }
 

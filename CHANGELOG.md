@@ -2,6 +2,32 @@
 
 All notable changes to Tunewright are documented here.
 
+## [1.1.1] - 2026-10-01
+
+A bug-fix release for audio format handling and the build pipeline. Every change was exercised end-to-end against real files in each format ffmpeg can produce (MP3, AAC and ALAC in M4A, raw AAC, FLAC, Vorbis, Opus, WAV, AIFF, WavPack, plus deliberately mislabeled files): tags, custom keys, field removal, cover embed/replace/remove and rename all pass with decoded audio unchanged.
+
+### Fixed
+
+- **WAV and AIFF Corruption** - Any edit that grew the ID3 chunk at the end of a WAV or AIFF file (for example embedding cover art) wrote a RIFF/FORM size that was too small, and the next write then damaged the audio. Fixed by updating lofty to 0.25.4; a regression test checks the chunk layout and samples after growing and shrinking tags.
+- **Formats Detected From Contents** - The tag parser was chosen from the file extension, so an Opus file saved as `.ogg` read as untagged and could not be edited. Files are now identified by their contents, falling back to the extension.
+- **Cover Art Duplicated in M4A** - Embedding a cover only replaced pictures typed "front cover". MP4 covers carry no type, so the old cover stayed alongside the new one. Untyped covers are now replaced too.
+- **WavPack, APE and Musepack Covers** - Cover art embedded into APE tags was written but never read back, and removing it did nothing. APE picture items are now read, replaced and removed correctly.
+
+### Added
+
+- **More Formats** - AAC (`.aac`), WavPack (`.wv`), APE (`.ape`), Musepack (`.mpc`) and Speex (`.spx`) files are now listed and editable.
+
+### Changed
+
+- **pnpm 12** - The frontend toolchain moves from pnpm 9.15.4 to 12.8.1. The version lives only in `frontend/package.json` `packageManager`; CI and the Docker build read it from there. pnpm 12 also enforces the 7-day `minimumReleaseAge` supply-chain floor on frozen installs.
+- **Node 26 Build Image** - The Docker frontend stage uses Node 26 and installs pnpm with npm, since Node 26 no longer bundles corepack.
+- **Dependencies** - Svelte 5.57, lofty 0.25.4, thiserror 2.0.21 and rand 0.10.3.
+
+### Internal
+
+- **Release Images** - Builds now cache every stage (`cache-mode: max`), so the Rust dependency layer is reused across releases. Images carry an SBOM attestation and OCI labels/annotations (source, revision, version, license), and `latest` only moves on stable versions, never on pre-release tags. Each platform still builds natively: amd64 on `ubuntu-24.04`, arm64 on `ubuntu-24.04-arm`.
+- **CI Builds Both Architectures** - Pull requests now build the amd64 and arm64 images natively with the same builder as releases, so an arm64 break shows up before tagging. Superseded PR runs are cancelled.
+
 ## [1.1.0] - 2026-10-01
 
 A robustness release. A full review of the backend, frontend and build pipeline was followed by three rounds of fixes and re-reviews, and every tag-writing change was checked against real FLAC files compared byte-for-byte with an untouched baseline copy (audio, cover art and vendor string identical; only the requested tags changed).

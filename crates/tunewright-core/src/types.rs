@@ -13,6 +13,11 @@ pub enum AudioFormat {
     Opus,
     Wav,
     Aiff,
+    Aac,
+    WavPack,
+    Ape,
+    Musepack,
+    Speex,
 }
 
 impl AudioFormat {
@@ -25,6 +30,11 @@ impl AudioFormat {
             "opus" => Some(Self::Opus),
             "wav" | "wave" => Some(Self::Wav),
             "aif" | "aiff" | "aifc" => Some(Self::Aiff),
+            "aac" => Some(Self::Aac),
+            "wv" => Some(Self::WavPack),
+            "ape" => Some(Self::Ape),
+            "mpc" => Some(Self::Musepack),
+            "spx" => Some(Self::Speex),
             _ => None,
         }
     }
@@ -38,6 +48,11 @@ impl AudioFormat {
             Self::Opus => "Opus",
             Self::Wav => "WAV",
             Self::Aiff => "AIFF",
+            Self::Aac => "AAC",
+            Self::WavPack => "WavPack",
+            Self::Ape => "APE",
+            Self::Musepack => "Musepack",
+            Self::Speex => "Speex",
         }
     }
 }
