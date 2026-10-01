@@ -2,6 +2,57 @@
 
 All notable changes to Tunewright are documented here.
 
+## [1.1.0] - 2026-10-01
+
+A robustness release. A full review of the backend, frontend and build pipeline was followed by three rounds of fixes and re-reviews, and every tag-writing change was checked against real FLAC files compared byte-for-byte with an untouched baseline copy (audio, cover art and vendor string identical; only the requested tags changed).
+
+**Upgrade notes:**
+- Running behind a reverse proxy? Set `TUNEWRIGHT_TRUST_PROXY=true` so login throttling sees real client addresses instead of the proxy's. The server logs a one-time warning when it sees `X-Forwarded-For` without it.
+- `TUNEWRIGHT_STATE_DIR` is new and optional. If you set it on an existing install, move `users.json` from the data directory into it first; the server refuses to start rather than silently reopening setup.
+- The example `docker-compose.yml` now runs with `read_only: true`, `cap_drop: [ALL]` and `no-new-privileges`. The app only writes inside the data (and state) directory, so these are safe to adopt.
+
+### Security
+
+- **Rename Could Move the Library Root** - A rename request for `/` resolved to the music root itself, and a directory rename fell back to `fs::rename`, moving the whole library (and `users.json`) out from under the app. Rename now only accepts regular files with a supported audio extension, never the root or a directory.
+- **`users.json` Hardening** - The password-hash store is created with mode `0600` and existing files are tightened at startup. It can live outside the music folder via `TUNEWRIGHT_STATE_DIR`.
+- **Login Throttle Lockout** - Throttling is now keyed on username plus client address (IPv6 grouped by /64), with one verification in flight per client and a non-queuing hash pool that answers `503` instead of stalling. An attacker failing logins from one address can no longer lock the owner out from another, and parallel guesses from one address get `429`.
+- **Stricter Content Security Policy** - The header now sets `default-src 'self'` and `script-src` with the SvelteKit bootstrap hashes read from the built `index.html`. The inline theme script moved to `/theme-init.js` so it is no longer blocked.
+- **Username Limits** - New accounts are limited to 1-64 characters with no control characters. Used and expired invites are pruned.
+- **Dependency Advisories** - Resolved RUSTSEC-2026-0258 (h2, removed entirely by dropping reqwest's unused HTTP/2 support), RUSTSEC-2026-0204 (crossbeam-epoch) and RUSTSEC-2026-0190 (anyhow), and updated yanked `chacha20` and `spin`.
+
+### Fixed
+
+- **Actions Rewrote Every Field** - Running any action (for example "Trim title") wrote every tag back, truncating full dates like `2021-05-30` to `2021` and collapsing multi-value fields such as two `ARTIST` entries into one. Actions now read, apply and write under one file lock and only write fields that actually changed; a no-op action leaves the file byte-identical.
+- **Removals Did Nothing** - Remove field, remove all except, setting a field to empty, and clearing Year or Track reported success but left the value on disk. Tag writes are now tri-state: an absent key is unchanged, `null` or `""` removes it.
+- **Custom Tags Deleted on Every Write** - Any Vorbis comment lofty has no name for (custom keys, `ENCODER`) was dropped from FLAC/Ogg/Opus files on every save, and APE, ID3v1 and RIFF INFO secondary tags were stripped. Writes now go through each format's native tag type, preserving unknown keys, multi-value order, the vendor string and secondary tags. Custom keys can be written and removed on Vorbis, APE, ID3v2 (TXXX) and MP4 (freeform) tags.
+- **ID3v2.3 Silently Upgraded** - Files tagged as ID3v2.3 were saved as v2.4 on every write; they now stay v2.3.
+- **Removed Cover Art Reappearing** - Removing cover art only cleared the primary tag, so art in a secondary tag came back. It is now removed from every tag.
+- **Multi-Disc Lookups** - MusicBrainz and Apple Music track numbers ran across the whole release (disc 2 track 1 became track 13). Tracks now carry `disc_number` and a per-disc position, auto-match pairs on disc and track, and multi-disc renames use `%disc%-%track% - %title%`. Featured artists are kept from MusicBrainz artist credits.
+- **Hidden Files From Renames** - Titles starting with dots (e.g. "...And Justice for All") produced dot-files the file list never showed. Leading dots now become `_`. Files whose tags can't be read are reported instead of being renamed to `-.mp3`.
+- **Unsaved Edits Lost** - Rename, Actions, Filename-to-Tag and Lookup now ask to save or discard pending edits first. Pressing Ctrl+S while typing in a field saves the typed value. An expired session keeps your edits, a different user logging in clears them, and closing the tab with unsaved edits asks for confirmation.
+- **Session Expiry Redirect Loop** - A `401` sent the browser to `/login` without clearing the session state, which bounced it straight back in an endless loop.
+- **Double Saves and Stale Previews** - Saves are de-duplicated and edits made during a save are written afterwards. Rename and Filename-to-Tag can no longer apply a preview for an older pattern. Background property loading no longer overwrites freshly saved tags.
+- **Mixed Values Wiped** - Clearing a field that showed `< keep >` across files with different values removed it from all of them; it now leaves them unchanged.
+- **Grid** - Numeric columns (track, year, duration, size) sort numerically. Keyboard focus survives scrolling, PageUp/PageDown work, and rows use proper grid roles. Copy Filename/Path works over plain HTTP.
+- **Deep Links Returned 404** - Loading `/login` or any other client route directly served the app with a `404` status; it is now `200`, while missing `/_app` assets still return `404`.
+- **Graceful Shutdown** - The server ignored `SIGTERM` (as PID 1 in a container), so `docker stop` waited 10 seconds and killed it mid-request. It now drains connections, exits on a second signal or after 25 seconds.
+- **Memory Exhaustion via Expressions** - Nested `$replace`/`$regex` expressions could build gigabytes of output per file. Results are capped at 64 KiB, and action preview values at 1 KiB.
+- **Secondary Tag Errors** - Failures removing secondary tags are logged instead of swallowed.
+
+### Changed
+
+- **Login Responses** - Login can now return `429 Too Many Requests` (with `Retry-After`) or `503 Service Unavailable`.
+- **Rename Preview Errors** - Preview entries that can't be renamed include an `error` message.
+- **New Settings** - `TUNEWRIGHT_TRUST_PROXY` and `TUNEWRIGHT_STATE_DIR`, documented in the README.
+- **Track Numbers** - Writing a FLAC/Ogg file normalizes `TRACKNUMBER=1/10` to `TRACKNUMBER=1` plus `TRACKTOTAL=10`.
+
+### Internal
+
+- **CI** - Added `cargo fmt --check`, clippy over all targets, `--locked` everywhere, read-only workflow permissions and a separate weekly `cargo audit` workflow. The release workflow pins every action by SHA, reads the tag from the environment, and also checks `frontend/package.json` against the tag.
+- **Docker** - Base images are pinned by digest with Dependabot updates, `cargo-chef` is pinned, and the frontend stage builds natively on multi-arch builds.
+- **Dependencies** - Routine Rust, frontend and GitHub Actions updates via Dependabot, with TypeScript held on 6.x until `svelte-check` supports 7.
+- **Tests** - 163 Rust tests (up from 131) and 76 frontend tests (up from 62).
+
 ## [1.0.3] - 2026-08-09
 
 A security release. An existing audit report was verified finding-by-finding against the code (7 of its 38 findings turned out to be incorrect and were withdrawn, and 15 real issues it had missed were found), then everything genuine was fixed and the fixes were themselves adversarially reviewed twice more.
