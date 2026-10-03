@@ -1,5 +1,6 @@
 use crate::audio;
 use crate::format_string;
+use crate::fsutil::is_same_file;
 use crate::types::{AudioFormat, TunewrightError};
 use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
@@ -86,7 +87,7 @@ pub fn preview_renames(
     // Old paths freed by earlier batch items (execute_renames runs in the
     // same order), so a later item may legally target them.
     let mut vacated: HashSet<PathBuf> = HashSet::new();
-    let case_sensitive = is_case_sensitive(data_root);
+    let case_sensitive = is_case_sensitive(computed.first().map_or(data_root, |c| c.3.as_path()));
 
     for (id, old_name, new_name, canonical_path, error) in computed {
         if error.is_some() {
@@ -100,13 +101,13 @@ pub fn preview_renames(
             continue;
         }
 
+        let target = canonical_path.with_file_name(&new_name);
         let key = if case_sensitive {
-            new_name.clone()
+            target.to_string_lossy().into_owned()
         } else {
-            new_name.to_lowercase()
+            target.to_string_lossy().to_lowercase()
         };
-        let mut conflict = used_names.contains(&key);
-        used_names.insert(key);
+        let mut conflict = new_name != old_name && used_names.contains(&key);
 
         // Also flag targets that already exist on disk (and aren't this very
         // file via a case-only rename, or a path vacated earlier in the batch).
@@ -120,15 +121,18 @@ pub fn preview_renames(
         {
             let new_path = canonical_path.with_file_name(&new_name);
             if new_path.try_exists().unwrap_or(false)
-                && !is_same_file(&canonical_path, &new_path)
+                && !is_case_only_rename(&canonical_path, &new_path)
                 && !vacated.contains(&new_path)
             {
                 conflict = true;
             }
         }
 
-        if !conflict && new_name != old_name {
-            vacated.insert(canonical_path.clone());
+        if !conflict {
+            used_names.insert(key);
+            if new_name != old_name {
+                vacated.insert(canonical_path.clone());
+            }
         }
 
         previews.push(RenamePreview {
@@ -189,7 +193,7 @@ pub fn execute_renames(
                 // Distinguish an on-disk collision from an in-batch duplicate.
                 let conflict_path = canonical_path.with_file_name(&preview.new_name);
                 let msg = if conflict_path.try_exists().unwrap_or(false)
-                    && !is_same_file(canonical_path, &conflict_path)
+                    && !is_case_only_rename(canonical_path, &conflict_path)
                 {
                     "Target file already exists"
                 } else {
@@ -262,7 +266,7 @@ pub fn execute_renames(
                     };
                 }
                 Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {
-                    if !is_same_file(&old_path, &new_path) {
+                    if !is_case_only_rename(&old_path, &new_path) {
                         return RenameResult {
                             id: preview.id,
                             status: "error".to_string(),
@@ -278,8 +282,59 @@ pub fn execute_renames(
                 }
             }
 
+            if is_case_only_rename(&old_path, &new_path) {
+                static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+                let tmp_path = loop {
+                    let candidate = old_path.with_file_name(format!(
+                        ".tw-rename-{}-{}",
+                        std::process::id(),
+                        NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+                    ));
+                    if std::fs::symlink_metadata(&candidate).is_err() {
+                        break candidate;
+                    }
+                };
+                let result = std::fs::rename(&old_path, &tmp_path).and_then(|()| {
+                    if std::fs::symlink_metadata(&new_path).is_ok()
+                        && !is_stale_alias(&new_path, &tmp_path)
+                    {
+                        let _ = std::fs::rename(&tmp_path, &old_path);
+                        return Err(std::io::ErrorKind::AlreadyExists.into());
+                    }
+                    std::fs::rename(&tmp_path, &new_path).inspect_err(|_| {
+                        let _ = std::fs::rename(&tmp_path, &old_path);
+                    })
+                });
+                return match result {
+                    Ok(()) => RenameResult {
+                        id: preview.id,
+                        status: "ok".to_string(),
+                        old_name: preview.old_name,
+                        new_name: preview.new_name,
+                        new_relative_path: target_rel,
+                        error: None,
+                    },
+                    Err(e) => {
+                        tracing::error!("Rename failed for {}: {e}", old_path.display());
+                        let error = if e.kind() == std::io::ErrorKind::AlreadyExists {
+                            "Target file already exists"
+                        } else {
+                            "Rename failed"
+                        };
+                        RenameResult {
+                            id: preview.id,
+                            status: "error".to_string(),
+                            old_name: preview.old_name,
+                            new_name: preview.new_name,
+                            new_relative_path: unchanged_rel,
+                            error: Some(error.to_string()),
+                        }
+                    }
+                };
+            }
+
             // Fallback: standard rename (cross-filesystem or unsupported hard_link)
-            if new_path.try_exists().unwrap_or(false) && !is_same_file(&old_path, &new_path) {
+            if new_path.try_exists().unwrap_or(false) {
                 return RenameResult {
                     id: preview.id,
                     status: "error".to_string(),
@@ -340,11 +395,23 @@ fn rel_path_with_name(rel_path: &str, new_name: &str) -> String {
 }
 
 /// Check if two paths point to the same physical file.
-fn is_same_file(path1: &Path, path2: &Path) -> bool {
-    match (std::fs::canonicalize(path1), std::fs::canonicalize(path2)) {
-        (Ok(p1), Ok(p2)) => p1 == p2,
-        _ => false,
+fn is_stale_alias(new_path: &Path, tmp_path: &Path) -> bool {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::MetadataExt;
+        is_same_file(new_path, tmp_path)
+            && std::fs::metadata(tmp_path).is_ok_and(|m| m.nlink() == 1)
     }
+    #[cfg(not(unix))]
+    {
+        let _ = (new_path, tmp_path);
+        false
+    }
+}
+
+fn is_case_only_rename(old_path: &Path, new_path: &Path) -> bool {
+    is_same_file(old_path, new_path)
+        && std::fs::symlink_metadata(new_path).is_ok_and(|m| !m.file_type().is_symlink())
 }
 
 /// Detect if the filesystem at the given path is case-sensitive.
@@ -483,6 +550,88 @@ mod tests {
         } else {
             // Under case-insensitive OS, they must conflict!
             assert!(previews[1].conflict);
+        }
+
+        let _ = std::fs::remove_dir_all(&temp_dir);
+    }
+
+    #[test]
+    fn unchanged_file_is_skipped_and_case_only_rename_applies() {
+        let temp_dir = std::env::temp_dir().join(format!("tunewright_test_{}", rand_num()));
+        std::fs::create_dir_all(&temp_dir).unwrap();
+        let temp_dir = temp_dir.canonicalize().unwrap();
+        use std::io::Write;
+        let flac_bytes = b"fLaC\x80\x00\x00\x22\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00";
+        let title = |name: &str, title: &str| {
+            let path = temp_dir.join(name);
+            File::create(&path).unwrap().write_all(flac_bytes).unwrap();
+            let changes = crate::types::TagWriteChanges {
+                title: Some(Some(title.to_string())),
+                ..Default::default()
+            };
+            crate::audio::write_tags(&path, &changes).unwrap();
+            (name.to_string(), name.to_string(), path)
+        };
+        let files = vec![
+            title("A.flac", "B"),
+            title("B.flac", "B"),
+            title("song.flac", "Song"),
+        ];
+
+        for n in 0..4 {
+            std::fs::write(
+                temp_dir.join(format!(".tw-rename-{}-{n}", std::process::id())),
+                b"keep",
+            )
+            .unwrap();
+        }
+        let results = execute_renames(&temp_dir, &files, "%title%");
+        for n in 0..4 {
+            assert_eq!(
+                std::fs::read(temp_dir.join(format!(".tw-rename-{}-{n}", std::process::id())))
+                    .unwrap(),
+                b"keep"
+            );
+        }
+        assert_eq!(results[0].status, "error");
+        assert_eq!(results[1].status, "skipped");
+        assert_eq!(results[2].status, "ok", "{:?}", results[2].error);
+        let names: Vec<String> = std::fs::read_dir(&temp_dir)
+            .unwrap()
+            .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
+            .collect();
+        assert!(names.contains(&"Song.flac".to_string()), "{names:?}");
+        assert!(!names.contains(&"song.flac".to_string()), "{names:?}");
+
+        let linked = title("linked.flac", "Other");
+        std::fs::hard_link(&linked.2, temp_dir.join("Other.flac")).unwrap();
+        let results = execute_renames(&temp_dir, &[linked], "%title%");
+        assert_eq!(results[0].status, "error");
+        assert_eq!(
+            results[0].error.as_deref(),
+            Some("Target file already exists")
+        );
+        assert!(temp_dir.join("linked.flac").exists());
+        assert!(temp_dir.join("Other.flac").exists());
+
+        #[cfg(unix)]
+        {
+            let target = title("real.flac", "alias");
+            std::os::unix::fs::symlink("real.flac", temp_dir.join("alias.flac")).unwrap();
+            let results = execute_renames(&temp_dir, &[target], "%title%");
+            assert_eq!(results[0].status, "error");
+            assert!(std::fs::symlink_metadata(temp_dir.join("alias.flac"))
+                .unwrap()
+                .file_type()
+                .is_symlink());
+            assert!(temp_dir.join("real.flac").exists());
+        }
+
+        #[cfg(target_os = "macos")]
+        {
+            let nfd = title("Cafe\u{301}.flac", "Caf\u{e9}");
+            let results = execute_renames(&temp_dir, &[nfd], "%title%");
+            assert_eq!(results[0].status, "ok", "{:?}", results[0].error);
         }
 
         let _ = std::fs::remove_dir_all(&temp_dir);

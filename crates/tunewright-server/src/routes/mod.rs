@@ -45,6 +45,7 @@ use crate::auth;
 use crate::state::AppState;
 
 pub fn create_router(state: AppState) -> Router {
+    let batch = DefaultBodyLimit::max(32 * 1024 * 1024);
     let api = Router::new()
         .route("/health", get(health::check))
         .route("/auth/setup", post(auth::setup))
@@ -60,9 +61,12 @@ pub fn create_router(state: AppState) -> Router {
         .route("/auth/users", get(auth::list_users))
         .route("/auth/users/{id}", delete(auth::delete_user))
         .route("/files", get(files::list_files))
-        .route("/tags/read", post(tags::read_tags))
-        .route("/tags/read-properties", post(tags::read_properties))
-        .route("/tags/write", post(tags::write_tags))
+        .route("/tags/read", post(tags::read_tags).layer(batch))
+        .route(
+            "/tags/read-properties",
+            post(tags::read_properties).layer(batch),
+        )
+        .route("/tags/write", post(tags::write_tags).layer(batch))
         .route(
             "/coverart",
             get(coverart::get_cover_art)
@@ -74,11 +78,14 @@ pub fn create_router(state: AppState) -> Router {
             "/coverart/from-url",
             post(coverart::embed_cover_art_from_url),
         )
-        .route("/rename/preview", post(rename::preview))
-        .route("/rename/execute", post(rename::execute))
-        .route("/filename-to-tag/preview", post(filename_to_tag::preview))
-        .route("/actions/preview", post(actions::preview))
-        .route("/actions/execute", post(actions::execute))
+        .route("/rename/preview", post(rename::preview).layer(batch))
+        .route("/rename/execute", post(rename::execute).layer(batch))
+        .route(
+            "/filename-to-tag/preview",
+            post(filename_to_tag::preview).layer(batch),
+        )
+        .route("/actions/preview", post(actions::preview).layer(batch))
+        .route("/actions/execute", post(actions::execute).layer(batch))
         .route(
             "/lookup/musicbrainz/search",
             get(lookup::musicbrainz_search),
@@ -163,6 +170,81 @@ mod tests {
 
         let empty = content_security_policy(&dir.join("missing"));
         assert!(empty.to_str().unwrap().contains("script-src 'self';"));
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[tokio::test]
+    async fn only_batch_routes_accept_large_bodies() {
+        use axum::body::Body;
+        use axum::http::{Request, StatusCode};
+        use tower::ServiceExt;
+
+        let dir = std::env::temp_dir().join(format!("tunewright_limits_{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let dir = dir.canonicalize().unwrap();
+        std::fs::write(
+            dir.join("users.json"),
+            r#"{"users":[{"id":"u","username":"admin","password_hash":"x","role":"super_admin","created_at":"2026-06-05T07:00:00Z"}],"invites":[]}"#,
+        )
+        .unwrap();
+        let config = crate::config::Config {
+            data_dir: dir.clone(),
+            state_dir: None,
+            static_dir: dir.clone(),
+            port: 8080,
+            host: "127.0.0.1".to_string(),
+            cookie_secure: false,
+            trust_proxy: false,
+            setup_token: None,
+        };
+        let state = AppState::new(
+            config,
+            crate::users::UserManager::load(dir.join("users.json")),
+        );
+        state.add_session(
+            "t".to_string(),
+            crate::state::Session {
+                user_id: "u".to_string(),
+                username: "admin".to_string(),
+                role: crate::users::Role::SuperAdmin,
+                created_at: std::time::Instant::now(),
+            },
+        );
+        let app = create_router(state);
+        let request = |uri: &str, content_type: &str, body: Vec<u8>| {
+            Request::builder()
+                .method("POST")
+                .uri(uri)
+                .header("Cookie", "tunewright_session=t")
+                .header("Content-Type", content_type)
+                .body(Body::from(body))
+                .unwrap()
+        };
+
+        let entry = format!(
+            r#"{{"id":"x","path":"{}.mp3","tags":{{}}}}"#,
+            "a".repeat(200)
+        );
+        let changes = vec![entry; 15_000].join(",");
+        let body = format!(r#"{{"changes":[{changes}]}}"#).into_bytes();
+        assert!(body.len() > 3 * 1024 * 1024);
+        let resp = app
+            .clone()
+            .oneshot(request(
+                "/api/v1/tags/write",
+                "application/json",
+                body.clone(),
+            ))
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+
+        let resp = app
+            .oneshot(request("/api/v1/auth/register", "application/json", body))
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::PAYLOAD_TOO_LARGE);
 
         let _ = std::fs::remove_dir_all(&dir);
     }

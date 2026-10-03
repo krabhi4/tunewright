@@ -6,17 +6,22 @@
 
 	interface Props {
 		onManageUsers?: () => void;
+		guard?: (action: () => void) => void;
 	}
 
-	let { onManageUsers }: Props = $props();
+	let { onManageUsers, guard = (action) => action() }: Props = $props();
 	let open = $state(false);
 	let dropdownEl = $state<HTMLDivElement>();
 
 	let user = $derived($auth.user);
 	let isSuperAdmin = $derived(user?.role === 'super_admin');
 
-	async function handleLogout() {
+	function handleLogout() {
 		open = false;
+		guard(doLogout);
+	}
+
+	async function doLogout() {
 		try {
 			await logout();
 		} catch {

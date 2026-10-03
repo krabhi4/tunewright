@@ -93,6 +93,7 @@ describe('applyReleaseToFiles', () => {
 		expect(pe.get('file-1')).toEqual({
 			title: 'Track 1',
 			track_number: 1,
+			track_total: 2,
 			album: 'Test Album',
 			album_artist: 'Test Artist',
 			year: 2026,
@@ -103,6 +104,7 @@ describe('applyReleaseToFiles', () => {
 		expect(pe.get('file-2')).toEqual({
 			title: 'Track 2',
 			track_number: 2,
+			track_total: 2,
 			album: 'Test Album',
 			album_artist: 'Test Artist',
 			year: 2026,
@@ -127,7 +129,7 @@ describe('applyReleaseToFiles', () => {
 		await applyReleaseToFiles(multiDisc, [mockFile1, mockFile2], { rename: false });
 
 		const pe = get(pendingEdits);
-		expect(pe.get('file-1')).toMatchObject({ track_number: 1, disc_number: 1, disc_total: 2 });
+		expect(pe.get('file-1')).toMatchObject({ track_number: 1, track_total: 1, disc_number: 1, disc_total: 2 });
 		expect(pe.get('file-2')).toMatchObject({ track_number: 1, disc_number: 2, disc_total: 2 });
 	});
 
@@ -159,6 +161,7 @@ describe('applyReleaseToFiles', () => {
 		expect(pe.get('file-2')).toEqual({
 			title: 'Track 2',
 			track_number: 2,
+			track_total: 2,
 			album: 'Test Album',
 			album_artist: 'Test Artist',
 			year: 2026,

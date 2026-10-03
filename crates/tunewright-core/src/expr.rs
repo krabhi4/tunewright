@@ -16,6 +16,7 @@ const MAX_REGEX_PATTERN_BYTES: usize = 1024;
 /// rejects the automaton-blowup patterns used to pin memory.
 pub(crate) const REGEX_SIZE_LIMIT: usize = 1024 * 1024;
 pub const MAX_OUTPUT_BYTES: usize = 64 * 1024;
+const MAX_COMPILED_PATTERN_BYTES: usize = 64 * 1024;
 
 /// AST node
 #[derive(Debug, Clone, PartialEq)]
@@ -217,7 +218,8 @@ pub fn run(nodes: &[Node], ctx: &ExprContext) -> String {
             Node::Literal(s) => push_capped(&mut result, s),
             Node::Variable(var) => push_capped(&mut result, &resolve_variable(var, ctx)),
             Node::FuncCall { name, args } => {
-                let evaluated_args: Vec<String> = args.iter().map(|a| run(a, ctx)).collect();
+                let evaluated_args: Vec<String> =
+                    args.iter().take(4).map(|a| run(a, ctx)).collect();
                 push_capped(&mut result, &call_function(name, &evaluated_args, ctx))
             }
         };
@@ -250,14 +252,14 @@ pub fn evaluate(input: &str, ctx: &ExprContext) -> String {
 fn resolve_variable(var: &str, ctx: &ExprContext) -> String {
     // Standard fields (case-insensitive)
     let result = match var.to_lowercase().as_str() {
-        "title" => ctx.tags.title.clone(),
-        "artist" => ctx.tags.artist.clone(),
-        "album" => ctx.tags.album.clone(),
-        "albumartist" | "album_artist" => ctx.tags.album_artist.clone(),
+        "title" => ctx.tags.title.as_deref().map(capped),
+        "artist" => ctx.tags.artist.as_deref().map(capped),
+        "album" => ctx.tags.album.as_deref().map(capped),
+        "albumartist" | "album_artist" => ctx.tags.album_artist.as_deref().map(capped),
         "year" => ctx.tags.year.map(|y| y.to_string()),
-        "genre" => ctx.tags.genre.clone(),
-        "comment" => ctx.tags.comment.clone(),
-        "composer" => ctx.tags.composer.clone(),
+        "genre" => ctx.tags.genre.as_deref().map(capped),
+        "comment" => ctx.tags.comment.as_deref().map(capped),
+        "composer" => ctx.tags.composer.as_deref().map(capped),
         "track" | "track_number" => ctx.tags.track_number.map(|n| format!("{:02}", n)),
         "track_total" => ctx.tags.track_total.map(|n| n.to_string()),
         "disc" | "disc_number" => ctx.tags.disc_number.map(|n| n.to_string()),
@@ -272,15 +274,22 @@ fn resolve_variable(var: &str, ctx: &ExprContext) -> String {
 
     // Extra tags: try exact case first, then case-insensitive
     if let Some(val) = ctx.tags.extra.get(var) {
-        return val.clone();
+        return capped(val);
     }
     let lower = var.to_lowercase();
-    for (key, val) in &ctx.tags.extra {
-        if key.to_lowercase() == lower {
-            return val.clone();
-        }
-    }
-    String::new()
+    ctx.tags
+        .extra
+        .iter()
+        .filter(|(key, _)| key.to_lowercase() == lower)
+        .min_by(|a, b| a.0.cmp(b.0))
+        .map(|(_, val)| capped(val))
+        .unwrap_or_default()
+}
+
+fn capped(s: &str) -> String {
+    let mut out = String::new();
+    push_capped(&mut out, s);
+    out
 }
 
 // ---------------------------------------------------------------------------
@@ -534,6 +543,9 @@ fn cached_regex(pattern: &str) -> Option<std::sync::Arc<regex::Regex>> {
 /// Compile with a tight size budget: the default 10 MiB lets a single pattern
 /// pin a large automaton, and these patterns come from request bodies.
 pub fn build_regex(pattern: &str) -> Result<regex::Regex, regex::Error> {
+    if pattern.len() > MAX_COMPILED_PATTERN_BYTES {
+        return Err(regex::Error::CompiledTooBig(MAX_COMPILED_PATTERN_BYTES));
+    }
     regex::RegexBuilder::new(pattern)
         .size_limit(REGEX_SIZE_LIMIT)
         .dfa_size_limit(REGEX_SIZE_LIMIT)

@@ -53,7 +53,12 @@
 		}
 	}
 
+	let creatingInvite = $state(false);
+	let revoking = $state(new Set<string>());
+
 	async function handleCreateInvite() {
+		if (creatingInvite) return;
+		creatingInvite = true;
 		error = '';
 		try {
 			const invite = await createInvite();
@@ -61,6 +66,8 @@
 			invites = await listInvites();
 		} catch (err: any) {
 			error = err.message || 'Failed to create invite';
+		} finally {
+			creatingInvite = false;
 		}
 	}
 
@@ -70,16 +77,17 @@
 	}
 
 	async function confirmDeleteUser() {
-		if (!pendingDeleteUser) return;
+		const target = pendingDeleteUser;
+		if (!target) return;
+		pendingDeleteUser = null;
 		error = '';
 		deleteConfirmOpen = false;
 		try {
-			await deleteUser(pendingDeleteUser.id);
+			await deleteUser(target.id);
 			users = await listUsers();
 		} catch (err: any) {
 			error = err.message || 'Failed to delete user';
 		}
-		pendingDeleteUser = null;
 	}
 
 	function cancelDeleteUser() {
@@ -88,12 +96,18 @@
 	}
 
 	async function handleDeleteInvite(token: string) {
+		if (revoking.has(token)) return;
+		revoking = new Set(revoking).add(token);
 		error = '';
 		try {
 			await deleteInvite(token);
+			if (newInviteLink.endsWith('#token=' + token)) newInviteLink = '';
 			invites = await listInvites();
 		} catch (err: any) {
 			error = err.message || 'Failed to delete invite';
+		} finally {
+			revoking.delete(token);
+			revoking = new Set(revoking);
 		}
 	}
 
@@ -178,7 +192,7 @@
 		<section class="um-section">
 			<div class="um-section-header">
 				<h3 class="um-heading">Invites</h3>
-				<button class="um-btn-invite" onclick={handleCreateInvite}>Create Invite</button>
+				<button class="um-btn-invite" onclick={handleCreateInvite} disabled={creatingInvite}>Create Invite</button>
 			</div>
 
 			{#if newInviteLink}
@@ -202,6 +216,7 @@
 								<button
 									class="um-btn-delete"
 									onclick={() => handleDeleteInvite(invite.token)}
+									disabled={revoking.has(invite.token)}
 								>
 									Revoke
 								</button>

@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { untrack } from 'svelte';
 	import { filterText, filterVisible } from '$lib/stores/ui';
 
 	interface Props {
@@ -33,8 +34,12 @@
 	}
 
 	$effect(() => {
+		if (!$filterVisible) clearFilter();
+	});
+
+	$effect(() => {
 		if ($filterVisible && inputEl) {
-			localValue = $filterText;
+			localValue = untrack(() => $filterText);
 			inputEl.focus();
 		}
 	});

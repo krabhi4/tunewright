@@ -134,7 +134,10 @@ pub async fn get_release(client: &Client, id: &str) -> Result<ReleaseDetail, Str
         return Err("Invalid Apple Music ID".to_string());
     }
 
-    let url = format!("https://itunes.apple.com/lookup?id={}&entity=song", id);
+    let url = format!(
+        "https://itunes.apple.com/lookup?id={}&entity=song&limit=200",
+        id
+    );
 
     let body: AppleLookupResponse = get_json(client, &url, APPLE_HEADERS, "Apple Music").await?;
 

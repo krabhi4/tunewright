@@ -38,15 +38,23 @@ export const mergedTags = derived([loadedTags, pendingEdits], ([$loaded, $pendin
 });
 
 // Tags for currently selected files, with intersection logic
+const unreadableIds = writable<Set<string>>(new Set());
+
+export const selectedUnreadableCount = derived(
+	[selectedIds, unreadableIds],
+	([$selected, $unreadable]) => Array.from($selected).filter((id) => $unreadable.has(id)).length
+);
+
 export const selectedTags = derived(
-	[mergedTags, selectedIds],
-	([$merged, $selected]) => {
-		const ids = Array.from($selected);
+	[mergedTags, selectedIds, unreadableIds],
+	([$merged, $selected, $unreadable]) => {
+		const ids = Array.from($selected).filter((id) => !$unreadable.has(id));
 		if (ids.length === 0) return null;
 
 		const tagsList = ids.map((id) => $merged.get(id)).filter(Boolean) as TagData[];
 		if (tagsList.length === 0) return null;
 
+		if (tagsList.length < ids.length) return intersectTags([...tagsList, NOT_LOADED]);
 		if (tagsList.length === 1) return tagsList[0];
 
 		// Intersection: find common values
@@ -63,6 +71,11 @@ const TAG_NUMBER_FIELDS = [
 ] as const;
 
 export const KEEP_VALUE = '< keep >';
+
+const NOT_LOADED = Object.fromEntries([
+	...TAG_FIELDS.map((f) => [f, '\u0000not-loaded']),
+	...TAG_NUMBER_FIELDS.map((f) => [f, NaN])
+]) as TagData;
 
 function intersectTags(tagsList: TagData[]): TagData {
 	const result: TagData = {};
@@ -95,7 +108,10 @@ export async function fetchTagsForFiles(ids: string[], force = false) {
 	const gen = fetchGeneration;
 
 	// Only fetch for files we don't already have or aren't already fetching (unless forced)
-	const needed = force ? ids : ids.filter((id) => !$loaded.has(id) && !tagsInFlight.has(id));
+	const $unreadable = get(unreadableIds);
+	const needed = force
+		? ids
+		: ids.filter((id) => !$loaded.has(id) && !tagsInFlight.has(id) && !$unreadable.has(id));
 	if (needed.length === 0) return;
 
 	// Build id -> relative_path map
@@ -112,10 +128,30 @@ export async function fetchTagsForFiles(ids: string[], force = false) {
 		const tags = await readTags(needed, paths);
 		// Discard if directory changed while fetching
 		if (gen !== fetchGeneration) return;
+		unreadableIds.update((set) => {
+			const next = new Set(set);
+			for (const id of Object.keys(paths)) {
+				if (id in tags) next.delete(id);
+				else next.add(id);
+			}
+			return next;
+		});
 		loadedTags.update((map) => {
 			const next = new Map(map);
 			for (const [id, data] of Object.entries(tags)) {
-				next.set(id, data);
+				const prev = next.get(id);
+				next.set(
+					id,
+					prev
+						? {
+								...data,
+								bitrate: prev.bitrate,
+								sample_rate: prev.sample_rate,
+								channels: prev.channels,
+								duration_secs: prev.duration_secs
+							}
+						: data
+				);
 			}
 			return next;
 		});
@@ -123,7 +159,7 @@ export async function fetchTagsForFiles(ids: string[], force = false) {
 		console.error('Failed to fetch tags:', err);
 		if ((err as ApiError).status !== 401) toast.error('Failed to load tags.');
 	} finally {
-		for (const id of needed) tagsInFlight.delete(id);
+		if (gen === fetchGeneration) for (const id of needed) tagsInFlight.delete(id);
 	}
 }
 
@@ -153,22 +189,27 @@ const propertiesLoaded = new Set<string>();
 let propertiesTimer: ReturnType<typeof setTimeout> | null = null;
 let pendingPropertyIds: string[] = [];
 
-function processNextPropertiesBatch() {
+let propertiesRunning = false;
+let propertiesBatch = new Set<string>();
+
+async function processNextPropertiesBatch() {
+	propertiesTimer = null;
+	propertiesRunning = true;
 	const batch = pendingPropertyIds.splice(0, 50);
-	if (batch.length > 0) {
-		fetchPropertiesForFiles(batch);
-	}
-	if (pendingPropertyIds.length > 0) {
+	propertiesBatch = new Set(batch);
+	if (batch.length > 0) await fetchPropertiesForFiles(batch);
+	propertiesBatch = new Set();
+	propertiesRunning = false;
+	if (pendingPropertyIds.length > 0 && !propertiesTimer) {
 		propertiesTimer = setTimeout(processNextPropertiesBatch, 50);
-	} else {
-		propertiesTimer = null;
 	}
 }
 
 export function queuePropertiesFetch(ids: string[]) {
-	const needed = ids.filter((id) => !propertiesLoaded.has(id));
+	const needed = ids.filter((id) => !propertiesLoaded.has(id) && !propertiesBatch.has(id));
 	if (needed.length === 0) return;
 	pendingPropertyIds = [...new Set([...pendingPropertyIds, ...needed])];
+	if (propertiesRunning) return;
 
 	if (propertiesTimer) clearTimeout(propertiesTimer);
 	propertiesTimer = setTimeout(processNextPropertiesBatch, 200);
@@ -189,6 +230,8 @@ async function fetchPropertiesForFiles(ids: string[]) {
 		const tags = await readProperties(ids, paths);
 		// Discard if directory changed while fetching
 		if (gen !== fetchGeneration) return;
+		for (const id of Object.keys(paths)) propertiesLoaded.add(id);
+		if (Object.keys(tags).length === 0) return;
 		loadedTags.update((map) => {
 			const next = new Map(map);
 			for (const [id, data] of Object.entries(tags)) {
@@ -196,7 +239,6 @@ async function fetchPropertiesForFiles(ids: string[]) {
 				// Merge: keep existing tag fields, add audio properties
 				const { bitrate, sample_rate, channels, duration_secs } = data;
 				next.set(id, existing ? { ...existing, bitrate, sample_rate, channels, duration_secs } : data);
-				propertiesLoaded.add(id);
 			}
 			return next;
 		});
@@ -206,31 +248,38 @@ async function fetchPropertiesForFiles(ids: string[]) {
 }
 
 // Set a pending edit for a field on all currently selected files
-export function setPendingEdit(field: string, value: string | number | null | undefined) {
-	const $selected = get(selectedIds);
-	if ($selected.size === 0) return;
+function editableSelection(): string[] {
+	const $unreadable = get(unreadableIds);
+	return Array.from(get(selectedIds)).filter((id) => !$unreadable.has(id));
+}
 
+export function setPendingEdit(field: string, value: string | number | null | undefined) {
+	const $selected = editableSelection();
+	if ($selected.length === 0) return;
+
+	const $loaded = get(loadedTags);
 	pendingEdits.update((map) => {
 		const next = new Map(map);
 		for (const id of $selected) {
-			const existing = next.get(id) || {};
-			next.set(id, { ...existing, [field]: value });
+			const existing = { ...(next.get(id) || {}) } as Record<string, unknown>;
+			const loaded = $loaded.get(id) as Record<string, unknown> | undefined;
+			if (loaded && (loaded[field] ?? null) === (value ?? null)) delete existing[field];
+			else existing[field] = value;
+			if (Object.keys(existing).length === 0) next.delete(id);
+			else next.set(id, existing as TagEdits);
 		}
 		return next;
 	});
 }
 
 export function clearPendingEdit(field: string) {
-	const $selected = get(selectedIds);
+	const $selected = editableSelection();
 	const $loaded = get(loadedTags);
-	const values = Array.from($selected, (id) => ($loaded.get(id) as any)?.[field] ?? '');
-	if (values[0] !== '' && values.every((v) => v === values[0])) {
-		setPendingEdit(field, null);
-		return;
-	}
+	const values = $selected.map((id) => ($loaded.get(id) as any)?.[field] ?? '');
+	const removeShared = values.length > 0 && values[0] !== '' && values.every((v) => v === values[0]);
 	pendingEdits.update((map) => {
 		const next = new Map(map);
-		for (const id of $selected) {
+		for (const id of get(selectedIds)) {
 			const existing = next.get(id);
 			if (!existing || !(field in existing)) continue;
 			const rest = { ...existing };
@@ -240,6 +289,7 @@ export function clearPendingEdit(field: string) {
 		}
 		return next;
 	});
+	if (removeShared) setPendingEdit(field, null);
 }
 
 type SaveResult = { success: number; failed: number; failedIds: string[] };
@@ -360,9 +410,11 @@ export function discardEdits() {
 export function clearTags(keepEdits = false) {
 	fetchGeneration++; // invalidate any in-flight fetches
 	loadedTags.set(new Map());
+	unreadableIds.set(new Set());
 	if (!keepEdits) pendingEdits.set(new Map());
 	tagsInFlight.clear();
 	propertiesLoaded.clear();
+	propertiesBatch = new Set();
 	pendingPropertyIds = [];
 	if (propertiesTimer) {
 		clearTimeout(propertiesTimer);

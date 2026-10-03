@@ -7,6 +7,8 @@ import {
 	setPendingEdit,
 	clearPendingEdit,
 	queuePropertiesFetch,
+	fetchTagsForFiles,
+	clearTags,
 	selectedTags,
 	hasPendingEdits,
 	KEEP_VALUE
@@ -32,6 +34,8 @@ const mockFiles: FileEntry[] = [
 	{ id: 'file-1', filename: 'song1.mp3', relative_path: 'song1.mp3', size: 100, duration_secs: 120, format_label: 'MP3', format: 'mp3', has_cover: false, modified_at: '2026-06-05T00:00:00Z' },
 	{ id: 'file-2', filename: 'song2.mp3', relative_path: 'song2.mp3', size: 200, duration_secs: 180, format_label: 'MP3', format: 'mp3', has_cover: false, modified_at: '2026-06-05T00:00:00Z' }
 ];
+
+beforeEach(() => clearTags());
 
 describe('tags store saveAllEdits', () => {
 	beforeEach(() => {
@@ -231,6 +235,13 @@ describe('tags store write semantics', () => {
 		expect(get(pendingEdits).get('file-1')).toEqual({ title: 'Kept' });
 	});
 
+	it('a forced tag re-read keeps already loaded audio properties', async () => {
+		loadedTags.set(new Map([['file-1', { title: 'Old', duration_secs: 120, bitrate: 320 } as TagData]]));
+		vi.mocked(tagsApi.readTags).mockResolvedValueOnce({ 'file-1': { title: 'New' } as TagData });
+		await fetchTagsForFiles(['file-1'], true);
+		expect(get(loadedTags).get('file-1')).toMatchObject({ title: 'New', duration_secs: 120, bitrate: 320 });
+	});
+
 	it('properties backfill only merges audio properties into loaded tags', async () => {
 		vi.useFakeTimers();
 		try {
@@ -259,6 +270,50 @@ describe('tags store mixed values', () => {
             ['file-2', { title: 'Same', artist: 'B', year: 2002 } as TagData]
         ]));
         vi.clearAllMocks();
+    });
+
+    it('does not keep refetching files whose tags could not be read', async () => {
+        vi.mocked(tagsApi.readTags).mockResolvedValue({});
+        await fetchTagsForFiles(['file-2'], true);
+        vi.mocked(tagsApi.readTags).mockClear();
+        await fetchTagsForFiles(['file-2']);
+        expect(tagsApi.readTags).not.toHaveBeenCalled();
+    });
+
+    it('ignores selected files whose tags could not be read', async () => {
+        loadedTags.set(new Map([['file-1', { title: 'Same', year: 2001 } as TagData]]));
+        vi.mocked(tagsApi.readTags).mockResolvedValueOnce({});
+        await fetchTagsForFiles(['file-2'], true);
+        expect(get(selectedTags)).toMatchObject({ title: 'Same', year: 2001 });
+
+        clearPendingEdit('title');
+        expect(get(pendingEdits).get('file-1')).toEqual({ title: null });
+        expect(get(pendingEdits).has('file-2')).toBe(false);
+    });
+
+    it('clearing a field also unstages edits on files found unreadable later', async () => {
+        loadedTags.set(new Map([
+            ['file-1', { title: 'A' } as TagData],
+            ['file-2', { title: 'B' } as TagData]
+        ]));
+        setPendingEdit('title', 'T');
+        vi.mocked(tagsApi.readTags).mockResolvedValueOnce({});
+        await fetchTagsForFiles(['file-2'], true);
+        loadedTags.update((m) => new Map(m).set('file-1', { title: 'A' } as TagData));
+        clearPendingEdit('title');
+        expect([...get(pendingEdits)]).toEqual([['file-1', { title: null }]]);
+    });
+
+    it('shows keep for every field until all selected files have tags', () => {
+        loadedTags.set(new Map([['file-1', { title: 'Same', year: 2001 } as TagData]]));
+        expect(get(selectedTags)).toMatchObject({ title: KEEP_VALUE, year: KEEP_VALUE });
+    });
+
+    it('drops an edit that restores the loaded value', () => {
+        setPendingEdit('title', 'Changed');
+        expect(get(pendingEdits).size).toBe(2);
+        setPendingEdit('title', 'Same');
+        expect(get(pendingEdits).size).toBe(0);
     });
 
     it('shows keep for mixed numeric fields', () => {

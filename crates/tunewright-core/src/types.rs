@@ -305,6 +305,9 @@ pub enum TunewrightError {
     #[error("Invalid input: {0}")]
     InvalidInput(String),
 
+    #[error("Upstream request failed: {0}")]
+    Upstream(String),
+
     #[error("IO error: {0}")]
     Io(#[from] std::io::Error),
 }

@@ -1,7 +1,7 @@
 use crate::types::TunewrightError;
 use image::imageops::FilterType;
 use lofty::config::ParseOptions;
-use lofty::file::{AudioFile, TaggedFile, TaggedFileExt};
+use lofty::file::{AudioFile, FileType, TaggedFile, TaggedFileExt};
 use lofty::picture::{MimeType, Picture, PictureType};
 use lofty::tag::{Tag, TagType};
 use std::io::Cursor;
@@ -53,12 +53,11 @@ pub fn extract_cover_art(path: &Path) -> Result<Option<(Vec<u8>, String)>, Tunew
         .map_err(|e| TunewrightError::TagReadError(format!("{}: {}", path.display(), e)))?;
 
     let ape = crate::audio::primary_ape_pictures(path, &tagged);
-    for pictures in tagged
-        .tags()
-        .iter()
-        .map(|t| t.pictures())
-        .chain([ape.as_slice()])
-    {
+    for pictures in [ape.as_slice()].into_iter().chain(
+        crate::audio::ordered_tags(&tagged)
+            .into_iter()
+            .map(|t| t.pictures()),
+    ) {
         let pic = pictures
             .iter()
             .find(|p| p.pic_type() == PictureType::CoverFront)
@@ -79,6 +78,8 @@ pub fn extract_cover_art(path: &Path) -> Result<Option<(Vec<u8>, String)>, Tunew
     Ok(None)
 }
 
+const MAX_THUMBNAIL_SIZE: u32 = 1024;
+
 /// Extract cover art and optionally resize to a thumbnail
 pub fn extract_cover_art_thumbnail(
     path: &Path,
@@ -89,6 +90,7 @@ pub fn extract_cover_art_thumbnail(
         None => Ok(None),
         Some((data, mime)) if max_size == 0 => Ok(Some((data, mime))),
         Some((data, mime)) => {
+            let max_size = max_size.min(MAX_THUMBNAIL_SIZE);
             let decoded = image::ImageReader::new(Cursor::new(&data))
                 .with_guessed_format()
                 .map_err(|e| TunewrightError::ImageError(e.to_string()))
@@ -195,6 +197,13 @@ fn embed_cover_art_inner(path: &Path, image_data: &[u8]) -> Result<(), Tunewrigh
     tagged
         .save_to_path(path, options)
         .map_err(|e| TunewrightError::TagWriteError(format!("{}: {}", path.display(), e)))?;
+    if tagged.file_type() == FileType::Mpeg {
+        let replaced: Vec<&str> = [PictureType::CoverFront, PictureType::Other]
+            .iter()
+            .filter_map(|t| t.as_ape_key())
+            .collect();
+        crate::audio::remove_mpeg_ape_pictures(path, &replaced)?;
+    }
 
     Ok(())
 }
@@ -254,6 +263,9 @@ fn remove_cover_art_inner(path: &Path) -> Result<(), TunewrightError> {
     tagged
         .save_to_path(path, options)
         .map_err(|e| TunewrightError::TagWriteError(format!("{}: {}", path.display(), e)))?;
+    if tagged.file_type() == FileType::Mpeg {
+        crate::audio::remove_mpeg_ape_pictures(path, &lofty::ape::APE_PICTURE_TYPES)?;
+    }
 
     Ok(())
 }

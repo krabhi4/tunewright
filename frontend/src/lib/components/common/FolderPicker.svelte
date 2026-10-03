@@ -18,7 +18,10 @@
 	}
 
 	function handleKeydown(e: KeyboardEvent) {
-		if (e.key === 'Enter') handleOpen();
+		if (e.key === 'Enter') {
+			e.preventDefault();
+			handleOpen();
+		}
 	}
 </script>
 

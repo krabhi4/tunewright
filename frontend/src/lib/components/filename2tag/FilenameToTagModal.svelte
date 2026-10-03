@@ -115,7 +115,7 @@
 	}
 </script>
 
-<Modal title="Filename → Tag" {open} {onClose} wide={true}>
+<Modal title="Filename → Tag" {open} {onClose} wide={true} busy={applying}>
 	<div class="form">
 		<label class="label" for="f2t-pattern">Pattern</label>
 		<input
@@ -174,7 +174,7 @@
 				{matchCount}/{previews.length} matched
 			</span>
 		{/if}
-		<button class="btn btn-secondary" onclick={onClose}>Cancel</button>
+		<button class="btn btn-secondary" onclick={onClose} disabled={applying}>Cancel</button>
 		<button
 			class="btn btn-primary"
 			disabled={matchCount === 0 || applying || loading || previewPending}

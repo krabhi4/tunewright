@@ -31,6 +31,8 @@ export async function applyReleaseToFiles(
 ): Promise<ApplyReleaseResult> {
 	const tracks = release.tracks;
 	const discTotal = Math.max(...tracks.map((t) => t.disc_number));
+	const tracksOnDisc = new Map<number, number>();
+	for (const t of tracks) tracksOnDisc.set(t.disc_number, (tracksOnDisc.get(t.disc_number) ?? 0) + 1);
 	const filesToRename: { id: string; path: string }[] = [];
 
 	for (let i = 0; i < tracks.length; i++) {
@@ -45,6 +47,7 @@ export async function applyReleaseToFiles(
 				...existing,
 				title: track.title,
 				track_number: track.position,
+				track_total: tracksOnDisc.get(track.disc_number),
 				...(discTotal > 1 ? { disc_number: track.disc_number, disc_total: discTotal } : {}),
 				album: release.title,
 				album_artist: release.artist,

@@ -40,26 +40,16 @@
 		}
 	});
 
+	let redirectTarget = $derived.by(() => {
+		if (!authChecked) return null;
+		const path = page.url.pathname;
+		if ($auth.setupRequired) return path.startsWith('/setup') ? null : '/setup';
+		if ($auth.authenticated) return authPages.some((p) => path.startsWith(p)) ? '/' : null;
+		return path.startsWith('/login') || path.startsWith('/register') ? null : '/login';
+	});
+
 	$effect(() => {
-		if (authChecked) {
-			const path = page.url.pathname;
-			if ($auth.setupRequired) {
-				if (!path.startsWith('/setup')) {
-					goto('/setup');
-				}
-			} else if ($auth.authenticated) {
-				if (authPages.some((p) => path.startsWith(p))) {
-					goto('/');
-				}
-			} else {
-				if (
-					!path.startsWith('/login') &&
-					!path.startsWith('/register')
-				) {
-					goto('/login');
-				}
-			}
-		}
+		if (redirectTarget) goto(redirectTarget);
 	});
 </script>
 
@@ -68,7 +58,7 @@
 		<div class="error-screen">
 			<span>Server is unreachable. Please try again later.</span>
 		</div>
-	{:else if authChecked}
+	{:else if authChecked && !redirectTarget}
 		{@render children()}
 	{:else}
 		<div class="loading-screen">

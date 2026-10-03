@@ -78,6 +78,9 @@ pub async fn musicbrainz_search(
     State(state): State<AppState>,
     Query(params): Query<SearchQuery>,
 ) -> Response {
+    if params.query.trim().is_empty() {
+        return empty_query();
+    }
     if let Err(resp) = rate_limit_musicbrainz(&state).await {
         return resp;
     }
@@ -108,6 +111,9 @@ pub async fn applemusic_search(
     State(state): State<AppState>,
     Query(params): Query<SearchQuery>,
 ) -> Result<Json<Vec<ReleaseSearchResult>>, Response> {
+    if params.query.trim().is_empty() {
+        return Err(empty_query());
+    }
     applemusic::search_releases(&state.http_client, &params.query)
         .await
         .map(Json)
@@ -126,6 +132,14 @@ pub async fn applemusic_release(
         .await
         .map(Json)
         .map_err(bad_gateway)
+}
+
+fn empty_query() -> Response {
+    (
+        axum::http::StatusCode::BAD_REQUEST,
+        Json(serde_json::json!({ "error": "Search query is empty" })),
+    )
+        .into_response()
 }
 
 #[cfg(test)]

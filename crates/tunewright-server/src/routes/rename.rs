@@ -5,7 +5,7 @@ use std::path::PathBuf;
 use tunewright_core::rename::{self, RenamePreview, RenameResult};
 use tunewright_core::scanner;
 
-use crate::error::{check_batch_size, join_error, AppError};
+use crate::error::{check_batch_size, check_format_len, join_error, AppError};
 use crate::state::AppState;
 
 #[derive(Deserialize)]
@@ -35,16 +35,19 @@ pub async fn preview(
     Json(body): Json<RenameRequest>,
 ) -> Result<Json<PreviewResponse>, AppError> {
     check_batch_size(body.files.len())?;
+    check_format_len(&body.format)?;
     let data_root = state.data_root.clone();
     let format = body.format.clone();
 
     let previews = tokio::task::spawn_blocking(move || {
+        let mut seen = std::collections::HashSet::new();
         let files: Vec<(String, String, PathBuf)> = body
             .files
             .into_iter()
             .filter_map(|f| {
                 scanner::resolve_safe_path(&data_root, &f.path)
                     .ok()
+                    .filter(|safe_path| seen.insert(safe_path.clone()))
                     .map(|safe_path| (f.id, f.path, safe_path))
             })
             .collect();
@@ -62,21 +65,32 @@ pub async fn execute(
     Json(body): Json<RenameRequest>,
 ) -> Result<Json<ExecuteResponse>, AppError> {
     check_batch_size(body.files.len())?;
+    check_format_len(&body.format)?;
     let data_root = state.data_root.clone();
     let format = body.format.clone();
 
     let results = tokio::task::spawn_blocking(move || {
-        let files: Vec<(String, String, PathBuf)> = body
-            .files
-            .into_iter()
-            .filter_map(|f| {
-                scanner::resolve_safe_path(&data_root, &f.path)
-                    .ok()
-                    .map(|safe_path| (f.id, f.path, safe_path))
-            })
-            .collect();
+        let mut files: Vec<(String, String, PathBuf)> = Vec::new();
+        let mut rejected = Vec::new();
+        let mut seen = std::collections::HashSet::new();
+        for f in body.files {
+            match scanner::resolve_safe_path(&data_root, &f.path) {
+                Ok(safe_path) if !seen.insert(safe_path.clone()) => {}
+                Ok(safe_path) => files.push((f.id, f.path, safe_path)),
+                Err(_) => rejected.push(RenameResult {
+                    id: f.id,
+                    status: "error".to_string(),
+                    old_name: f.path.rsplit('/').next().unwrap_or_default().to_string(),
+                    new_name: String::new(),
+                    new_relative_path: f.path,
+                    error: Some("File not found".to_string()),
+                }),
+            }
+        }
 
-        rename::execute_renames(&data_root, &files, &format)
+        let mut results = rename::execute_renames(&data_root, &files, &format);
+        results.extend(rejected);
+        results
     })
     .await
     .map_err(join_error)?;

@@ -39,6 +39,8 @@ where
         // fs::copy preserves permissions, keeping the swapped-in file consistent.
         std::fs::copy(path, &tmp_path)
             .map_err(|e| TunewrightError::TagWriteError(format!("{}: {}", path.display(), e)))?;
+        add_missing_ape_header(&tmp_path)
+            .map_err(|e| TunewrightError::TagWriteError(format!("{}: {}", path.display(), e)))?;
         mutate(&tmp_path)?;
         // Flush the temp file's data before the rename so a crash right after
         // the rename cannot surface a truncated/empty file.
@@ -62,6 +64,82 @@ where
         let _ = std::fs::remove_file(&tmp_path);
     }
     result
+}
+
+fn add_missing_ape_header(path: &Path) -> std::io::Result<()> {
+    use std::io::{Read, Seek, SeekFrom, Write};
+    let mut file = std::fs::OpenOptions::new()
+        .read(true)
+        .write(true)
+        .open(path)?;
+    let len = file.metadata()?.len();
+    let read_at = |file: &mut std::fs::File, pos: u64, buf: &mut [u8]| {
+        file.seek(SeekFrom::Start(pos))?;
+        file.read_exact(buf)
+    };
+    let mut end = len;
+    let mut marker = [0u8; 3];
+    if end >= 128 {
+        read_at(&mut file, end - 128, &mut marker)?;
+        if &marker == b"TAG" {
+            end -= 128;
+        }
+    }
+    let mut lyrics = [0u8; 15];
+    if end >= 15 {
+        read_at(&mut file, end - 15, &mut lyrics)?;
+        if &lyrics[6..] == b"LYRICS200" {
+            let size: u64 = std::str::from_utf8(&lyrics[..6])
+                .ok()
+                .and_then(|n| n.parse().ok())
+                .unwrap_or(u64::MAX);
+            end = end.saturating_sub(size.saturating_add(15));
+        }
+    }
+    if end < 32 {
+        return Ok(());
+    }
+    let mut footer = [0u8; 32];
+    read_at(&mut file, end - 32, &mut footer)?;
+    let field = |i: usize| u32::from_le_bytes(footer[i..i + 4].try_into().unwrap());
+    let (version, size, flags) = (field(8), u64::from(field(12)), field(20));
+    if &footer[..8] != b"APETAGEX"
+        || version != 2000
+        || flags & (1 << 31) != 0
+        || size < 32
+        || size > end
+    {
+        return Ok(());
+    }
+    let items_start = end - size;
+    let mut header = footer;
+    header[20..24].copy_from_slice(&(flags | (1 << 31) | (1 << 29)).to_le_bytes());
+    footer[20..24].copy_from_slice(&(flags | (1 << 31)).to_le_bytes());
+    let mut tail = Vec::new();
+    file.seek(SeekFrom::Start(items_start))?;
+    file.read_to_end(&mut tail)?;
+    let footer_at = (size - 32) as usize;
+    tail[footer_at..footer_at + 32].copy_from_slice(&footer);
+    file.seek(SeekFrom::Start(items_start))?;
+    file.write_all(&header)?;
+    file.write_all(&tail)
+}
+
+#[cfg(unix)]
+pub(crate) fn is_same_file(path1: &Path, path2: &Path) -> bool {
+    use std::os::unix::fs::MetadataExt;
+    match (std::fs::metadata(path1), std::fs::metadata(path2)) {
+        (Ok(m1), Ok(m2)) => (m1.dev(), m1.ino()) == (m2.dev(), m2.ino()),
+        _ => false,
+    }
+}
+
+#[cfg(not(unix))]
+pub(crate) fn is_same_file(path1: &Path, path2: &Path) -> bool {
+    match (std::fs::canonicalize(path1), std::fs::canonicalize(path2)) {
+        (Ok(p1), Ok(p2)) => p1 == p2,
+        _ => false,
+    }
 }
 
 #[cfg(test)]

@@ -13,11 +13,12 @@
 		onActions?: () => void;
 		onLookup?: () => void;
 		onManageUsers?: () => void;
+		guard?: (action: () => void) => void;
 		hasPendingEdits?: boolean;
 		hasSelection?: boolean;
 	}
 
-	let { onOpenFolder, onSave, onRename, onFilenameToTag, onActions, onLookup, onManageUsers, hasPendingEdits = false, hasSelection = false }: Props = $props();
+	let { onOpenFolder, onSave, onRename, onFilenameToTag, onActions, onLookup, onManageUsers, guard, hasPendingEdits = false, hasSelection = false }: Props = $props();
 </script>
 
 <div class="toolbar">
@@ -64,7 +65,7 @@
 
 	<ThemeMenu />
 
-	<UserMenu {onManageUsers} />
+	<UserMenu {onManageUsers} {guard} />
 </div>
 
 <style>

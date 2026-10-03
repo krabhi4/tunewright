@@ -55,6 +55,9 @@ fn tokenize_pattern(pattern: &str) -> Vec<PatternToken> {
 
 /// Build a regex from a pattern string. Returns the compiled regex and the
 /// ordered list of variable names that correspond to capture groups.
+const MAX_VARIABLE_BYTES: usize = 256;
+const MAX_VARIABLE_TOTAL_BYTES: usize = 1024;
+
 fn pattern_to_regex(pattern: &str) -> Result<(regex::Regex, Vec<String>), TunewrightError> {
     let tokens = tokenize_pattern(pattern);
     let mut regex_str = String::from("^");
@@ -64,6 +67,15 @@ fn pattern_to_regex(pattern: &str) -> Result<(regex::Regex, Vec<String>), Tunewr
         match token {
             PatternToken::Literal(s) => {
                 regex_str.push_str(&regex::escape(s));
+            }
+            PatternToken::Variable(name)
+                if name.len() > MAX_VARIABLE_BYTES
+                    || var_names.iter().map(String::len).sum::<usize>() + name.len()
+                        > MAX_VARIABLE_TOTAL_BYTES =>
+            {
+                return Err(TunewrightError::InvalidFormatString(format!(
+                    "Variable names longer than {MAX_VARIABLE_BYTES} bytes each or {MAX_VARIABLE_TOTAL_BYTES} in total"
+                )));
             }
             PatternToken::Variable(name) => {
                 let idx = var_names.len();
@@ -75,7 +87,7 @@ fn pattern_to_regex(pattern: &str) -> Result<(regex::Regex, Vec<String>), Tunewr
 
     regex_str.push('$');
 
-    let re = regex::Regex::new(&regex_str)
+    let re = crate::expr::build_regex(&regex_str)
         .map_err(|e| TunewrightError::InvalidFormatString(format!("Invalid pattern: {e}")))?;
 
     Ok((re, var_names))
@@ -304,5 +316,18 @@ mod tests {
         let changes = values_to_changes(&values);
         let extra = changes.extra.unwrap();
         assert_eq!(extra.get("BPM"), Some(&Some("120".to_string())));
+    }
+
+    #[test]
+    fn oversized_patterns_are_rejected_before_parsing() {
+        let pattern = "%a%".repeat(100_000);
+        let start = std::time::Instant::now();
+        assert!(pattern_to_regex(&pattern).is_err());
+        assert!(start.elapsed() < std::time::Duration::from_millis(500));
+        assert!(pattern_to_regex(&format!("%{}%", "k".repeat(300))).is_err());
+        let name = |c: char| format!("%{}%", c.to_string().repeat(200));
+        let six: String = "abcdef".chars().map(name).collect::<Vec<_>>().join("-");
+        assert!(pattern_to_regex(&six).is_err());
+        assert!(pattern_to_regex("%artist% - %title%").is_ok());
     }
 }

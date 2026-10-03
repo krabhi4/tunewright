@@ -19,6 +19,17 @@
 	let { x, y, items, onClose }: Props = $props();
 
 	let menuEl = $state<HTMLDivElement>();
+	let pos = $state({ left: 0, top: 0 });
+
+	$effect(() => {
+		pos = { left: x, top: y };
+		if (menuEl) {
+			pos = {
+				left: Math.max(0, Math.min(x, window.innerWidth - menuEl.offsetWidth)),
+				top: Math.max(0, Math.min(y, window.innerHeight - menuEl.offsetHeight))
+			};
+		}
+	});
 
 	$effect(() => {
 		if (menuEl) {
@@ -64,7 +75,7 @@
 	role="menu"
 	tabindex={-1}
 	bind:this={menuEl}
-	style="left: {x}px; top: {y}px"
+	style="left: {pos.left}px; top: {pos.top}px"
 	onclick={(e) => e.stopPropagation()}
 	onkeydown={(e) => { e.stopPropagation(); handleKeydown(e); }}
 >

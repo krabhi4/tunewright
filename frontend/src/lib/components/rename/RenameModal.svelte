@@ -63,7 +63,7 @@
 			const ok = results.filter((r) => r.status === 'ok').length;
 			if (failed.length > 0) {
 				console.warn(`Rename: ${ok} ok, ${failed.length} failed`);
-				toast.warning(`Renamed ${ok} file(s); ${failed.length} failed.`);
+				toast.warning(`Renamed ${ok} file(s); ${failed.length} failed: ${failed[0].error ?? 'unknown error'}.`);
 			} else if (ok > 0) {
 				toast.success(`Renamed ${ok} file(s).`);
 			}
@@ -91,7 +91,7 @@
 	}
 </script>
 
-<Modal title="Rename Files" {open} {onClose} wide={true}>
+<Modal title="Rename Files" {open} {onClose} wide={true} busy={executing}>
 	<div class="rename-form">
 		<label class="label" for="rename-format">Format String</label>
 		<input
@@ -136,7 +136,7 @@
 		{#if hasConflicts}
 			<span class="conflict-warning" role="alert">Conflicts detected</span>
 		{/if}
-		<button class="btn btn-secondary" onclick={onClose}>Cancel</button>
+		<button class="btn btn-secondary" onclick={onClose} disabled={executing}>Cancel</button>
 		<button
 			class="btn btn-primary"
 			disabled={previews.length === 0 || hasConflicts || executing || loading || previewPending}

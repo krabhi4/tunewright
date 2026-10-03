@@ -46,18 +46,26 @@ impl Config {
                 }
             },
             host: std::env::var("TUNEWRIGHT_HOST").unwrap_or_else(|_| "127.0.0.1".to_string()),
-            cookie_secure: std::env::var("TUNEWRIGHT_COOKIE_SECURE")
-                .map(|v| v == "true" || v == "1")
-                .unwrap_or(false),
-            trust_proxy: std::env::var("TUNEWRIGHT_TRUST_PROXY")
-                .map(|v| v == "true" || v == "1")
-                .unwrap_or(false),
+            cookie_secure: env_flag("TUNEWRIGHT_COOKIE_SECURE"),
+            trust_proxy: env_flag("TUNEWRIGHT_TRUST_PROXY"),
             setup_token: std::env::var("TUNEWRIGHT_SETUP_TOKEN")
                 .ok()
                 .map(|s| s.trim().to_string())
                 .filter(|s| !s.is_empty()),
         }
     }
+}
+
+fn env_flag(name: &str) -> bool {
+    let Ok(v) = std::env::var(name) else {
+        return false;
+    };
+    let v = v.trim();
+    let on = v == "1" || v.eq_ignore_ascii_case("true");
+    if !on && !v.is_empty() && v != "0" && !v.eq_ignore_ascii_case("false") {
+        tracing::warn!("{name} value '{v}' is not true/false/1/0, treating it as false");
+    }
+    on
 }
 
 #[cfg(test)]

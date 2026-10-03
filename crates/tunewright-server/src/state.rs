@@ -11,6 +11,10 @@ const MAX_CONCURRENT_HASHES: usize = 4;
 
 const MAX_LOGIN_GATES: usize = 1000;
 
+const MAX_SESSIONS_PER_USER: usize = 20;
+
+const MAX_CONCURRENT_THUMBNAILS: usize = 4;
+
 #[derive(Debug, Clone)]
 pub struct Session {
     pub user_id: String,
@@ -67,6 +71,7 @@ pub struct AppState {
     pub musicbrainz_next_allowed: Arc<Mutex<Instant>>,
     pub failed_logins: Arc<Mutex<HashMap<String, (u32, Instant)>>>,
     pub password_hash_limit: Arc<tokio::sync::Semaphore>,
+    pub thumbnail_limit: Arc<tokio::sync::Semaphore>,
     pub login_gates: Arc<Mutex<HashMap<String, Arc<tokio::sync::Mutex<()>>>>>,
     /// Shared HTTP client for external lookups; reuses the connection pool
     /// across MusicBrainz/Apple Music requests (it is internally `Arc`-backed).
@@ -96,7 +101,7 @@ impl AppState {
             .timeout(std::time::Duration::from_secs(10))
             .connect_timeout(std::time::Duration::from_secs(10))
             .build()
-            .unwrap_or_else(|_| reqwest::Client::new());
+            .expect("failed to build HTTP client");
 
         let coverart_client = reqwest::Client::builder()
             .user_agent(concat!(
@@ -117,7 +122,7 @@ impl AppState {
             .timeout(std::time::Duration::from_secs(10))
             .connect_timeout(std::time::Duration::from_secs(10))
             .build()
-            .unwrap_or_else(|_| reqwest::Client::new());
+            .expect("failed to build HTTP client");
 
         Self {
             config,
@@ -127,6 +132,7 @@ impl AppState {
             musicbrainz_next_allowed: Arc::new(Mutex::new(Instant::now())),
             failed_logins: Arc::new(Mutex::new(HashMap::new())),
             password_hash_limit: Arc::new(tokio::sync::Semaphore::new(MAX_CONCURRENT_HASHES)),
+            thumbnail_limit: Arc::new(tokio::sync::Semaphore::new(MAX_CONCURRENT_THUMBNAILS)),
             login_gates: Arc::new(Mutex::new(HashMap::new())),
             http_client,
             coverart_client,
@@ -143,13 +149,35 @@ impl AppState {
 
     pub fn add_session(&self, token: String, session: Session) {
         let mut sessions = self.sessions.lock().unwrap_or_else(|e| e.into_inner());
+        sessions.retain(|_, s| s.created_at.elapsed().as_secs() < SESSION_TTL_SECS);
+        let mut own: Vec<_> = sessions
+            .iter()
+            .filter(|(_, s)| s.user_id == session.user_id)
+            .map(|(t, s)| (s.created_at, t.clone()))
+            .collect();
+        if own.len() >= MAX_SESSIONS_PER_USER {
+            own.sort();
+            for (_, t) in &own[..=own.len() - MAX_SESSIONS_PER_USER] {
+                sessions.remove(t);
+            }
+        }
         sessions.insert(token, session);
     }
 
     pub fn get_session(&self, token: &str) -> Option<Session> {
-        let mut sessions = self.sessions.lock().unwrap_or_else(|e| e.into_inner());
-        sessions.retain(|_, s| s.created_at.elapsed().as_secs() < SESSION_TTL_SECS);
-        sessions.get(token).cloned()
+        let session = self
+            .sessions
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .get(token)
+            .cloned()?;
+        if session.created_at.elapsed().as_secs() < SESSION_TTL_SECS
+            && self.users.has_user_id(&session.user_id)
+        {
+            return Some(session);
+        }
+        self.remove_session(token);
+        None
     }
 
     pub fn remove_session(&self, token: &str) {

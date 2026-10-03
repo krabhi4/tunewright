@@ -18,6 +18,7 @@
 	let actions = $state<Action[]>([]);
 	let previews = $state<ActionPreview[]>([]);
 	let loading = $state(false);
+	let previewError = $state('');
 	let executing = $state(false);
 	let previewTaskId = 0;
 
@@ -35,8 +36,10 @@
 
 	$effect(() => {
 		if (open) {
+			previewTaskId++;
 			actions = [];
 			previews = [];
+			previewError = '';
 			loading = false;
 			executing = false;
 			actionType = 'case_conversion';
@@ -85,17 +88,19 @@
 
 	function removeAction(index: number) {
 		actions = actions.filter((_, i) => i !== index);
-		if (actions.length > 0) loadPreview();
-		else previews = [];
+		loadPreview();
 	}
 
 	async function loadPreview() {
+		const taskId = ++previewTaskId;
 		if (actions.length === 0 || files.length === 0) {
 			previews = [];
+			previewError = '';
+			loading = false;
 			return;
 		}
-		const taskId = ++previewTaskId;
 		loading = true;
+		previewError = '';
 		try {
 			const fileEntries = files.map((f) => ({ id: f.id, path: f.relative_path }));
 			const results = await previewActions(fileEntries, actions);
@@ -106,6 +111,7 @@
 			console.error('Actions preview failed:', err);
 			if (taskId === previewTaskId) {
 				previews = [];
+				previewError = (err as Error).message || 'Preview failed';
 			}
 		} finally {
 			if (taskId === previewTaskId) {
@@ -166,7 +172,7 @@
 	];
 </script>
 
-<Modal title="Actions" {open} {onClose} wide>
+<Modal title="Actions" {open} {onClose} wide busy={executing}>
 	<div class="actions-layout">
 		<!-- Action builder -->
 		<div class="builder">
@@ -249,13 +255,15 @@
 					<div class="preview-more">...and {previews.length - 20} more</div>
 				{/if}
 			</div>
+		{:else if previewError && actions.length > 0}
+			<div class="preview-empty">Preview failed: {previewError}</div>
 		{:else if actions.length > 0}
 			<div class="preview-empty">No changes detected</div>
 		{/if}
 	</div>
 
 	<div class="modal-actions">
-		<button class="btn btn-secondary" onclick={onClose}>Cancel</button>
+		<button class="btn btn-secondary" onclick={onClose} disabled={executing}>Cancel</button>
 		<button
 			class="btn btn-primary"
 			disabled={actions.length === 0 || executing}

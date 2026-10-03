@@ -2,6 +2,42 @@
 
 All notable changes to Tunewright are documented here.
 
+## [1.1.2] - 2026-10-03
+
+A robustness release from an extended review and end-to-end testing pass. A real FLAC album was converted with ffmpeg into every supported extension (MP3 with ID3v2.3 and ID3v2.4, FLAC, M4A/M4B/MP4/M4V, Ogg Vorbis, Ogg FLAC, Opus, WAV, AIFF/AIFC, raw AAC, WavPack, plus real Monkey's Audio, Musepack and Speex samples) and driven through every workflow in the hardened Docker image. Decoded audio was compared before and after each write and stayed bit-identical in every format.
+
+### Security
+
+- **Cross-Site Request Check** - Requests that change data are refused when the browser marks them as cross-site or same-site (`Sec-Fetch-Site`). Same-site pages on other ports could previously post a cover upload with the user's cookie.
+- **Deleted Users Keep No Session** - A login that finished just after the user was deleted left a working session for 24 hours. Sessions are now rejected once their user is gone, and each user is capped at 20 sessions.
+- **Proxy Address Spoofing** - With `TUNEWRIGHT_TRUST_PROXY` on, only the last `X-Forwarded-For` entry is used, so a client can no longer pick its own throttle key when the proxy writes an unparseable address.
+- **Request Size and Work Limits** - Several authenticated requests could use gigabytes of memory or hours of CPU from a small body: format strings (now 4 KiB), regex patterns (64 KiB), action field names (256 bytes, 64 per action), the whole action list (64 KiB of JSON), action results (each file may grow by at most 64 KiB), custom fields per write (1,024), action previews (16 MiB), and repeated paths in one request (each file is processed once). Batch routes accept bodies up to 32 MiB; every other route keeps the 2 MiB default, and login, setup and register are never raised.
+- **Folder Symlinks Outside the Library** - Folder links pointing outside the music root are no longer listed.
+
+### Fixed
+
+- **Monkey's Audio Corruption** - Saving tags on a Monkey's Audio 3.99 file (whose APEv2 tag has no header) overwrote the last 32 bytes of audio. A header is now added before any APE tag is rewritten, which also protects WavPack, Musepack and MP3 files carrying such tags.
+- **Ogg FLAC Retagged as MP3** - An `.oga` file holding FLAC was detected as MP3 and saving put an ID3 tag in front of the Ogg stream. Ogg streams the tag library can't read are now refused and left untouched; Ogg Vorbis `.oga` works as before.
+- **ID3v2.3 Frames Dropped** - Saving an ID3v2.3 file discarded frames that only exist in ID3v2.4, such as mood and the artist/album/title sort names, and new mood values were silently lost. Such tags are now written as ID3v2.4; plain ID3v2.3 files stay ID3v2.3.
+- **Years Over 9999** - MP3 stored 12345 as 1234. Years above 9999 are now rejected.
+- **Stale Secondary Tags Shown** - A stale ID3v2 tag in a FLAC file, or a truncated ID3v1 title in an APE file, was shown instead of the real tag and could be written back by actions. Reads now use the file's main tag first, and tags the format can only read are ignored.
+- **Cover Art** - Embedding a front cover in an MP3 left old artwork in its APE tag (and no longer deletes other APE picture types); thumbnails are capped at 1024 px and four at a time; covers are revalidated instead of cached for an hour.
+- **Renames** - Case-only renames now work on case-insensitive filesystems and Docker Desktop mounts, Unicode-normalization aliases on macOS no longer count as conflicts, hard links and symlinks at the target are refused instead of overwritten, files in different folders no longer conflict over the same name, unchanged files are skipped rather than reported as errors, and the error now says why a rename failed.
+- **Actions** - Auto-Number follows the order shown in the grid; Remove All Except honours field aliases; a regex or plain replace can no longer explode a value; Split no longer builds every piece in memory.
+- **Lookup** - Apple Music releases with more than 50 tracks lost the rest; applying a release now writes the track total; files are matched in natural order (1, 2, 10); stale searches and errors from a previous session no longer appear; the modal can't be closed mid-apply.
+- **Unsaved Edits** - Clearing a field or restoring its original value now works with unreadable files in the selection, a session expiry returns you to the same folder with edits intact, sign-out asks first, and the tag panel no longer overwrites what you are typing when tags finish loading.
+- **Grid** - Filtering and tag-column sorting now see every file in the folder, not just rows already on screen; names sort naturally and ignore case and accents; Ctrl+A selects the visible files; hiding the filter bar clears the filter; Shift-click works after changing folders; the status bar counts files only and shows the total duration; symlinked files show their real size.
+- **Background Loading** - An unreadable file no longer makes the grid refetch tags forever, property reads run one batch at a time without duplicates, and a folder change mid-load no longer causes repeated reads.
+- **Tag Panel** - Unreadable files show a notice instead of an editable panel that ignored input, and fields show "keep" until every selected file has loaded.
+- **Modals** - Escape works after focus leaves the dialog, Enter on a folder no longer reopens Open Folder or cancels the unsaved-changes prompt, the first text field is focused, and the right-click menu stays inside the window.
+- **Setup and Users** - A fresh install no longer shows a stuck error toast, a failed save of the first account reports the error instead of sending you to login, double clicks no longer create two invites or show a false revoke error, and a revoked invite's link is cleared.
+- **Status Codes** - Unreadable files return 422, failed cover downloads 502 and empty lookup searches 400 instead of 500/502.
+
+### Changed
+
+- **Boolean Settings** - `TUNEWRIGHT_COOKIE_SECURE` and `TUNEWRIGHT_TRUST_PROXY` accept `true`/`TRUE`/`1` and warn about other values.
+- **Docs** - The API reference now documents invite links as `#token=`, per-file "File not found" results for missing paths, `Cache-Control: no-cache` on covers, and that `has_cover` is never computed.
+
 ## [1.1.1] - 2026-10-01
 
 A bug-fix release for audio format handling and the build pipeline. Every change was exercised end-to-end against real files in each format ffmpeg can produce (MP3, AAC and ALAC in M4A, raw AAC, FLAC, Vorbis, Opus, WAV, AIFF, WavPack, plus deliberately mislabeled files): tags, custom keys, field removal, cover embed/replace/remove and rename all pass with decoded audio unchanged.

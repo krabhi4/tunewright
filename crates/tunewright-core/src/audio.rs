@@ -41,7 +41,19 @@ pub(crate) fn probe(
     path: &Path,
     options: ParseOptions,
 ) -> Result<Probe<std::io::BufReader<std::fs::File>>, Box<dyn std::error::Error>> {
-    Ok(Probe::open(path)?.options(options).guess_file_type()?)
+    let probe = Probe::open(path)?.options(options).guess_file_type()?;
+    let mut magic = [0u8; 4];
+    let is_ogg = std::io::Read::read_exact(&mut std::fs::File::open(path)?, &mut magic).is_ok()
+        && &magic == b"OggS";
+    if is_ogg
+        && !matches!(
+            probe.file_type(),
+            Some(FileType::Vorbis | FileType::Opus | FileType::Speex)
+        )
+    {
+        return Err("unsupported Ogg stream".into());
+    }
+    Ok(probe)
 }
 
 /// Read tags FAST — skips audio properties and cover art data.
@@ -63,7 +75,7 @@ pub fn read_tags_fast_with(path: &Path, unfiltered: bool) -> Result<TagData, Tun
         .map(|t| format!("{:?}", t.tag_type()))
         .collect();
 
-    let tags: Vec<&Tag> = tagged.tags().iter().collect();
+    let tags = ordered_tags(&tagged);
 
     let title = first_string(&tags, |t| t.title());
     let artist = first_string(&tags, |t| t.artist());
@@ -136,7 +148,7 @@ pub fn read_tags_full(path: &Path) -> Result<TagData, TunewrightError> {
         .map(|t| format!("{:?}", t.tag_type()))
         .collect();
 
-    let tags: Vec<&Tag> = tagged.tags().iter().collect();
+    let tags = ordered_tags(&tagged);
 
     let title = first_string(&tags, |t| t.title());
     let artist = first_string(&tags, |t| t.artist());
@@ -244,6 +256,12 @@ fn write_error(path: &Path, e: impl std::fmt::Display) -> TunewrightError {
 type ExtraChanges = Vec<(ItemKey, Option<String>)>;
 
 fn apply_tag_changes(path: &Path, changes: &TagWriteChanges) -> Result<(), TunewrightError> {
+    if let Some(Some(year)) = changes.year.filter(|y| y.is_some_and(|y| y > 9999)) {
+        return Err(write_error(
+            path,
+            format!("year {year} is out of range (0-9999)"),
+        ));
+    }
     // Keep cover art (default) so existing pictures survive the save, but
     // skip audio properties — they aren't needed for tag writes.
     let mut tagged = probe(path, ParseOptions::new().read_properties(false))
@@ -572,11 +590,22 @@ impl Native {
         match self {
             Self::Vorbis(t) => t.save_to_path(path, options),
             Self::Ape(t) => t.save_to_path(path, options),
-            Self::Id3v2(t) => t.save_to_path(path, options),
+            Self::Id3v2(t) => {
+                let mut options = options;
+                if t.iter().any(|f| ID3V24_ONLY_FRAMES.contains(&f.id_str())) {
+                    options.use_id3v23(false);
+                }
+                t.save_to_path(path, options)
+            }
             Self::Ilst(t) => t.save_to_path(path, options),
         }
     }
 }
+
+const ID3V24_ONLY_FRAMES: &[&str] = &[
+    "ASPI", "EQU2", "RVA2", "SEEK", "SIGN", "TDEN", "TDRL", "TDTG", "TMOO", "TPRO", "TSOA", "TSOP",
+    "TSOT", "TSST",
+];
 
 fn ape_pictures(t: &ApeTag) -> Vec<lofty::picture::Picture> {
     lofty::ape::APE_PICTURE_TYPES
@@ -586,6 +615,18 @@ fn ape_pictures(t: &ApeTag) -> Vec<lofty::picture::Picture> {
             _ => None,
         })
         .collect()
+}
+
+pub(crate) fn ordered_tags(tagged: &TaggedFile) -> Vec<&Tag> {
+    let primary = tagged.primary_tag_type();
+    let file_type = tagged.file_type();
+    let mut tags: Vec<&Tag> = tagged
+        .tags()
+        .iter()
+        .filter(|t| file_type.tag_support(t.tag_type()).is_writable())
+        .collect();
+    tags.sort_by_key(|t| (t.tag_type() != primary, t.tag_type() == TagType::Id3v1));
+    tags
 }
 
 pub(crate) fn primary_ape_pictures(
@@ -659,6 +700,30 @@ fn update_mpeg_ape(
             .map_err(|e| write_error(path, e))?;
     }
     Ok(())
+}
+
+pub(crate) fn remove_mpeg_ape_pictures(path: &Path, keys: &[&str]) -> Result<(), TunewrightError> {
+    let mut file = MpegFile::read_from(
+        &mut std::fs::File::open(path)?,
+        ParseOptions::new().read_properties(false),
+    )
+    .map_err(|e| write_error(path, e))?;
+    let Some(mut ape) = file.remove_ape() else {
+        return Ok(());
+    };
+    let keys: Vec<&str> = keys
+        .iter()
+        .copied()
+        .filter(|key| ape.get(key).is_some())
+        .collect();
+    if keys.is_empty() {
+        return Ok(());
+    }
+    for key in keys {
+        ape.remove(key);
+    }
+    ape.save_to_path(path, WriteOptions::default())
+        .map_err(|e| write_error(path, e))
 }
 
 fn update_wav_riff_info(
@@ -776,11 +841,20 @@ pub fn batch_write_tags(changes: &[(String, PathBuf, TagWriteChanges)]) -> Vec<W
                     status: "ok".to_string(),
                     error: None,
                 },
-                Err(e) => WriteResult {
-                    id: id.clone(),
-                    status: "error".to_string(),
-                    error: Some(e.to_string()),
-                },
+                Err(e) => {
+                    tracing::error!("Tag write failed for {}: {e}", canonical_path.display());
+                    WriteResult {
+                        id: id.clone(),
+                        status: "error".to_string(),
+                        error: Some(
+                            match e {
+                                TunewrightError::TagReadError(_) => "Failed to read tags",
+                                _ => "Failed to write tags",
+                            }
+                            .to_string(),
+                        ),
+                    }
+                }
             },
         )
         .collect()
@@ -1614,6 +1688,81 @@ mod tests {
     }
 
     #[test]
+    fn flac_primary_tag_wins_over_stale_id3v2() {
+        use lofty::picture::{MimeType, Picture, PictureType};
+        use lofty::tag::TagExt;
+
+        let (dir, path) = temp_flac(&[(ItemKey::TrackTitle, "Correct")]);
+        let mut id3 = Tag::new(TagType::Id3v2);
+        id3.set_title("Stale".to_string());
+        id3.set_artist("Real Artist".to_string());
+        id3.push_picture(
+            Picture::unchecked(vec![0xFF, 0xD8, 0xFF, 0xE0, 1, 2, 3, 4])
+                .pic_type(PictureType::CoverFront)
+                .mime_type(MimeType::Jpeg)
+                .build(),
+        );
+        let mut bytes = Vec::new();
+        id3.dump_to(&mut bytes, lofty::config::WriteOptions::default())
+            .unwrap();
+        bytes.extend(std::fs::read(&path).unwrap());
+        std::fs::write(&path, bytes).unwrap();
+
+        assert_eq!(
+            super::read_tags_fast(&path).unwrap().title.as_deref(),
+            Some("Correct")
+        );
+        let png = [0x89, b'P', b'N', b'G', 0x0D, 0x0A, 0x1A, 0x0A, 9, 9];
+        crate::picture::embed_cover_art(&path, &png).unwrap();
+        assert_eq!(
+            crate::picture::extract_cover_art(&path).unwrap().unwrap().0,
+            png
+        );
+        crate::picture::remove_cover_art(&path).unwrap();
+        assert!(crate::picture::extract_cover_art(&path).unwrap().is_none());
+        let tags = super::read_tags_fast(&path).unwrap();
+        assert_eq!(tags.title.as_deref(), Some("Correct"));
+        assert_eq!(tags.artist, None);
+        assert!(std::fs::read(&path).unwrap().starts_with(b"ID3"));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn clearing_a_field_ignores_read_only_id3v2_and_keeps_it_intact() {
+        use lofty::picture::{MimeType, Picture, PictureType};
+        use lofty::tag::TagExt;
+
+        let (dir, path) = temp_flac(&[(ItemKey::Genre, "Jazz"), (ItemKey::Year, "2001")]);
+        let mut id3 = Tag::new(TagType::Id3v2);
+        id3.set_genre("Rock".to_string());
+        id3.set_artist("Real Artist".to_string());
+        id3.insert_text(ItemKey::RecordingDate, "1999".to_string());
+        id3.push_picture(
+            Picture::unchecked(vec![0xFF, 0xD8, 0xFF, 0xE0, 1, 2, 3, 4])
+                .pic_type(PictureType::CoverFront)
+                .mime_type(MimeType::Jpeg)
+                .build(),
+        );
+        let mut bytes = Vec::new();
+        id3.dump_to(&mut bytes, lofty::config::WriteOptions::default())
+            .unwrap();
+        bytes.extend(std::fs::read(&path).unwrap());
+        std::fs::write(&path, bytes).unwrap();
+
+        let changes = crate::types::TagWriteChanges {
+            genre: Some(None),
+            ..Default::default()
+        };
+        super::write_tags(&path, &changes).unwrap();
+        let tags = super::read_tags_fast(&path).unwrap();
+        assert_eq!(tags.genre, None);
+        assert_eq!(tags.year, Some(2001));
+        let bytes = std::fs::read(&path).unwrap();
+        assert!(bytes.starts_with(b"ID3") && bytes.windows(4).any(|w| w == b"Rock"));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
     fn embedding_cover_replaces_untyped_existing_art() {
         use lofty::picture::{MimeType, Picture, PictureType};
 
@@ -1681,6 +1830,136 @@ mod tests {
             Some("+001,+001,N")
         );
         assert_eq!(mpeg.id3v2().unwrap().title().as_deref(), Some("New"));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn mp3_cover_changes_clear_secondary_ape_art() {
+        use lofty::ape::{ApeItem, ApeTag};
+        use lofty::config::{ParseOptions, WriteOptions};
+        use lofty::tag::TagExt;
+
+        let (dir, _) = temp_flac(&[]);
+        let path = dir.join("test.mp3");
+        let mut frame = vec![0xFF, 0xFB, 0x90, 0x00];
+        frame.resize(417, 0);
+        std::fs::write(&path, frame.repeat(4)).unwrap();
+        let mut ape = ApeTag::new();
+        ape.insert(ApeItem::new("Title".into(), ItemValue::Text("Song".into())).unwrap());
+        ape.insert(
+            ApeItem::new(
+                "Cover Art (Front)".into(),
+                ItemValue::Binary(b"c.jpg\0\xFF\xD8\xFF\xE0\x01\x02".to_vec()),
+            )
+            .unwrap(),
+        );
+        ape.insert(
+            ApeItem::new(
+                "Cover Art (Back)".into(),
+                ItemValue::Binary(b"b.jpg\0\xFF\xD8\xFF\xE0\x03\x04".to_vec()),
+            )
+            .unwrap(),
+        );
+        ape.save_to_path(&path, WriteOptions::default()).unwrap();
+        let ape_item = |path: &std::path::Path, key: &str| {
+            super::MpegFile::read_from(&mut std::fs::File::open(path).unwrap(), ParseOptions::new())
+                .unwrap()
+                .ape()
+                .and_then(|a| a.get(key).map(|_| ()))
+                .is_some()
+        };
+        let ape_art = |path: &std::path::Path| ape_item(path, "Cover Art (Front)");
+
+        let png = [0x89, b'P', b'N', b'G', 0x0D, 0x0A, 0x1A, 0x0A, 9, 9];
+        crate::picture::embed_cover_art(&path, &png).unwrap();
+        assert!(!ape_art(&path));
+        assert!(ape_item(&path, "Cover Art (Back)"));
+        assert_eq!(
+            crate::picture::extract_cover_art(&path).unwrap().unwrap().0,
+            png
+        );
+
+        let mut ape = ApeTag::new();
+        ape.insert(
+            ApeItem::new(
+                "Cover Art (Front)".into(),
+                ItemValue::Binary(b"c.jpg\0\xFF\xD8\xFF\xE0\x01\x02".to_vec()),
+            )
+            .unwrap(),
+        );
+        ape.save_to_path(&path, WriteOptions::default()).unwrap();
+        crate::picture::remove_cover_art(&path).unwrap();
+        assert!(!ape_art(&path));
+        assert!(!ape_item(&path, "Cover Art (Back)"));
+        assert!(crate::picture::extract_cover_art(&path).unwrap().is_none());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn unsupported_ogg_streams_are_refused_not_retagged() {
+        let (dir, _) = temp_flac(&[]);
+        let path = dir.join("test.oga");
+        let mut frame = vec![0xFF, 0xFB, 0x90, 0x00];
+        frame.resize(417, 0);
+        let bytes = [b"OggS\0\x02".to_vec(), frame.repeat(4)].concat();
+        std::fs::write(&path, &bytes).unwrap();
+        assert!(super::read_tags_fast(&path).is_err());
+        assert!(super::write_tags(&path, &title("New")).is_err());
+        assert_eq!(std::fs::read(&path).unwrap(), bytes);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn writing_a_headerless_apev2_tag_keeps_the_audio() {
+        let (dir, _) = temp_flac(&[]);
+        let path = dir.join("test.mp3");
+        let mut frame = vec![0xFF, 0xFB, 0x90, 0x00];
+        frame.resize(417, 0x55);
+        let audio = frame.repeat(4);
+        let mut item = Vec::new();
+        item.extend_from_slice(&3u32.to_le_bytes());
+        item.extend_from_slice(&0u32.to_le_bytes());
+        item.extend_from_slice(b"Title\0Old");
+        let mut footer = b"APETAGEX".to_vec();
+        footer.extend_from_slice(&2000u32.to_le_bytes());
+        footer.extend_from_slice(&((item.len() + 32) as u32).to_le_bytes());
+        footer.extend_from_slice(&1u32.to_le_bytes());
+        footer.extend_from_slice(&(1u32 << 30).to_le_bytes());
+        footer.extend_from_slice(&[0; 8]);
+        std::fs::write(&path, [audio.clone(), item, footer].concat()).unwrap();
+
+        super::write_tags(&path, &title("New")).unwrap();
+        let bytes = std::fs::read(&path).unwrap();
+        assert!(bytes.windows(audio.len()).any(|w| w == audio.as_slice()));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn mp3_ape_title_wins_over_truncated_id3v1() {
+        use lofty::ape::{ApeItem, ApeTag};
+        use lofty::config::WriteOptions;
+        use lofty::id3::v1::Id3v1Tag;
+        use lofty::tag::TagExt;
+
+        let (dir, _) = temp_flac(&[]);
+        let path = dir.join("test.mp3");
+        let mut frame = vec![0xFF, 0xFB, 0x90, 0x00];
+        frame.resize(417, 0);
+        std::fs::write(&path, frame.repeat(4)).unwrap();
+        let long = "A Really Long Song Title That Exceeds Thirty Chars";
+        let mut ape = ApeTag::new();
+        ape.insert(ApeItem::new("Title".into(), ItemValue::Text(long.into())).unwrap());
+        ape.save_to_path(&path, WriteOptions::default()).unwrap();
+        let mut v1 = Id3v1Tag::new();
+        v1.set_title(long.to_string());
+        v1.save_to_path(&path, WriteOptions::default()).unwrap();
+
+        let tagged = lofty::probe::Probe::open(&path).unwrap().read().unwrap();
+        assert!(tagged.tag(TagType::Id3v1).is_some() && tagged.tag(TagType::Ape).is_some());
+        assert_eq!(
+            super::read_tags_fast(&path).unwrap().title.as_deref(),
+            Some(long)
+        );
         let _ = std::fs::remove_dir_all(&dir);
     }
 
@@ -1800,6 +2079,64 @@ mod tests {
         assert_eq!(tag.get_string(ItemKey::UnsyncLyrics), None);
         assert_eq!(tag.get_string(ItemKey::Description), None);
         assert_eq!(tag.get_string(ItemKey::TrackTitle), Some("New"));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn years_beyond_four_digits_are_refused_not_truncated() {
+        let (dir, path) = temp_mp3(&lofty::id3::v2::Id3v2Tag::new(), false);
+        let year = |y| crate::types::TagWriteChanges {
+            year: Some(Some(y)),
+            ..Default::default()
+        };
+        assert!(super::write_tags(&path, &year(12345)).is_err());
+        super::write_tags(&path, &year(2016)).unwrap();
+        assert_eq!(super::read_tags_fast(&path).unwrap().year, Some(2016));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn id3v23_files_keep_frames_that_only_exist_in_id3v24() {
+        let text = |id: &[u8], value: &str| {
+            let body = [&[0u8][..], value.as_bytes()].concat();
+            [id, &(body.len() as u32).to_be_bytes()[..], &[0, 0], &body].concat()
+        };
+        let frames = [text(b"TIT2", "Song"), text(b"TSOP", "Artist, The")].concat();
+        let size = frames.len() as u32;
+        let syncsafe = [
+            (size >> 21) & 0x7F,
+            (size >> 14) & 0x7F,
+            (size >> 7) & 0x7F,
+            size & 0x7F,
+        ]
+        .map(|b| b as u8);
+        let mut frame = vec![0xFF, 0xFB, 0x90, 0x00];
+        frame.resize(417, 0);
+        let bytes = [
+            &b"ID3\x03\x00\x00"[..],
+            &syncsafe,
+            &frames,
+            &frame.repeat(4),
+        ]
+        .concat();
+        let (dir, path) = temp_file("t.mp3", &bytes);
+
+        let mood = crate::types::TagWriteChanges {
+            extra: Some([("MOOD".to_string(), Some("Happy".to_string()))].into()),
+            ..title("New")
+        };
+        super::write_tags(&path, &mood).unwrap();
+        let tag = id3v2(&path);
+        assert_eq!(tag.title().as_deref(), Some("New"));
+        assert!(tag.iter().any(|f| f.id_str() == "TSOP"));
+        assert_eq!(
+            super::read_tags_fast(&path)
+                .unwrap()
+                .extra
+                .get("Mood")
+                .map(String::as_str),
+            Some("Happy")
+        );
         let _ = std::fs::remove_dir_all(&dir);
     }
 

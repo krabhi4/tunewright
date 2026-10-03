@@ -53,10 +53,14 @@ pub fn scan_directory(
 
     let mut candidates: Vec<(&fs::DirEntry, String, AudioFormat)> = Vec::new();
     let mut directories: Vec<String> = Vec::new();
+    let mut link_targets = std::collections::HashSet::new();
 
     let mut entries: Vec<_> = fs::read_dir(&dir)?.filter_map(|e| e.ok()).collect();
 
-    entries.sort_by_key(|a| a.file_name());
+    entries.sort_by_cached_key(|a| {
+        let name = a.file_name();
+        (name.to_string_lossy().to_lowercase(), name)
+    });
 
     for entry in &entries {
         let path = entry.path();
@@ -71,6 +75,9 @@ pub fn scan_directory(
         };
 
         if is_dir {
+            if is_symlink && !path.canonicalize().is_ok_and(|p| p.starts_with(data_root)) {
+                continue;
+            }
             if let Some(name) = path.file_name().and_then(|n| n.to_str()) {
                 directories.push(name.to_string());
             }
@@ -104,6 +111,7 @@ pub fn scan_directory(
             match path
                 .canonicalize()
                 .ok()
+                .filter(|p| p.parent() != Some(dir.as_path()))
                 .and_then(|p| p.strip_prefix(data_root).ok().map(|r| r.to_path_buf()))
             {
                 Some(r) => r,
@@ -116,7 +124,11 @@ pub fn scan_directory(
             }
         };
 
-        candidates.push((entry, relative.to_string_lossy().to_string(), format));
+        let relative = relative.to_string_lossy().to_string();
+        if is_symlink && !link_targets.insert(relative.clone()) {
+            continue;
+        }
+        candidates.push((entry, relative, format));
     }
 
     let total_dirs = directories.len();
@@ -144,7 +156,7 @@ pub fn scan_directory(
         .skip(files_skip)
         .take(files_limit)
         .map(|(entry, relative_str, format)| {
-            let metadata = entry.metadata().ok();
+            let metadata = fs::metadata(entry.path()).ok();
             let id = file_id(&relative_str);
 
             let filename = entry.file_name().to_string_lossy().to_string();
@@ -281,6 +293,43 @@ mod tests {
             Some(AudioFormat::WavPack)
         );
         assert_eq!(AudioFormat::from_extension("txt"), None);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn symlinks_list_once_under_their_target() {
+        use std::os::unix::fs::symlink;
+        let root = std::env::temp_dir().join(format!(
+            "tunewright_scan_links_{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(root.join("a")).unwrap();
+        std::fs::create_dir_all(root.join("b")).unwrap();
+        let root = root.canonicalize().unwrap();
+        std::fs::write(root.join("a/song.flac"), b"x").unwrap();
+        symlink("song.flac", root.join("a/alias.flac")).unwrap();
+        symlink("../a/song.flac", root.join("b/one.flac")).unwrap();
+        symlink("../a/song.flac", root.join("b/two.flac")).unwrap();
+        symlink("/", root.join("b/escape")).unwrap();
+        symlink("../a", root.join("b/inside")).unwrap();
+
+        let paths = |dir: &str| -> Vec<String> {
+            scan_directory(&root, dir, 0, 100)
+                .unwrap()
+                .files
+                .into_iter()
+                .map(|f| f.relative_path)
+                .collect()
+        };
+        assert_eq!(paths("a"), vec!["a/song.flac"]);
+        assert_eq!(paths("b"), vec!["a/song.flac"]);
+        let listed = scan_directory(&root, "b", 0, 100).unwrap();
+        assert_eq!(listed.files[0].size, 1);
+        assert_eq!(listed.directories, vec!["inside"]);
+        let _ = std::fs::remove_dir_all(&root);
     }
 
     #[test]

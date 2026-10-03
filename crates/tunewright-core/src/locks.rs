@@ -87,7 +87,7 @@ pub fn lock_two_files(p1: &Path, p2: &Path) -> (FileLockGuard, FileLockGuard) {
     let cp1 = std::fs::canonicalize(p1).unwrap_or_else(|_| p1.to_path_buf());
     let cp2 = std::fs::canonicalize(p2).unwrap_or_else(|_| p2.to_path_buf());
 
-    if cp1 == cp2 {
+    if cp1 == cp2 || crate::fsutil::is_same_file(&cp1, &cp2) {
         let g1 = lock_file(&cp1);
         let g2 = FileLockGuard {
             path: PathBuf::new(),

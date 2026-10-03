@@ -167,6 +167,11 @@ impl UserManager {
         !store.users.is_empty()
     }
 
+    pub fn has_user_id(&self, id: &str) -> bool {
+        let store = self.store.lock().unwrap_or_else(|e| e.into_inner());
+        store.users.iter().any(|u| u.id == id)
+    }
+
     pub fn find_by_username(&self, username: &str) -> Option<User> {
         let store = self.store.lock().unwrap_or_else(|e| e.into_inner());
         let normalized = username.trim().to_lowercase();

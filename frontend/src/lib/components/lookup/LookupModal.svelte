@@ -61,11 +61,16 @@
 	let applying = $state(false);
 
 	// Click-to-assign: select a file from unmatched, then click a slot to assign
-	let selectedUnmatchedIdx = $state<number | null>(null);
+	let selectedUnmatchedId = $state<string | null>(null);
+	let selectedUnmatchedIdx = $derived.by(() => {
+		const i = unmatchedFiles.findIndex((f) => f.id === selectedUnmatchedId);
+		return i === -1 ? null : i;
+	});
 
 	// Move an unmatched file into a track slot, sending any displaced file back.
 	function assignToSlot(srcIdx: number, targetIdx: number) {
 		const file = unmatchedFiles[srcIdx];
+		if (!file) return;
 		const displaced = matchedFiles[targetIdx];
 		matchedFiles[targetIdx] = file;
 		matchedFiles = [...matchedFiles];
@@ -76,12 +81,13 @@
 	function handleSlotClick(targetIdx: number) {
 		if (selectedUnmatchedIdx !== null) {
 			assignToSlot(selectedUnmatchedIdx, targetIdx);
-			selectedUnmatchedIdx = null;
+			selectedUnmatchedId = null;
 		}
 	}
 
 	function handleUnmatchedClick(idx: number) {
-		selectedUnmatchedIdx = selectedUnmatchedIdx === idx ? null : idx;
+		const id = unmatchedFiles[idx]?.id ?? null;
+		selectedUnmatchedId = selectedUnmatchedId === id ? null : id;
 	}
 
 	// Auto-fill search + reset state only when the modal transitions to open.
@@ -90,6 +96,7 @@
 	// in-progress search. (Tracking $selectedTags here cleared results a beat
 	// after every search once the backfill landed.)
 	let wasOpen = false;
+	let searchGen = 0;
 	$effect(() => {
 		if (open && !wasOpen) {
 			const tags = get(selectedTags);
@@ -105,7 +112,11 @@
 			loadingReleaseId = null;
 			matchedFiles = [];
 			unmatchedFiles = [];
+			selectedUnmatchedId = null;
+			searchError = '';
 			provider = 'musicbrainz';
+			searchGen++;
+			searching = false;
 		}
 		wasOpen = open;
 	});
@@ -122,6 +133,7 @@
 	async function handleSearch() {
 		if (!searchQuery.trim()) return;
 		const query = searchQuery;
+		const gen = ++searchGen;
 		searching = true;
 		searchError = '';
 		searchResults = [];
@@ -130,15 +142,15 @@
 			const results = provider === 'musicbrainz'
 				? await searchMusicBrainz(query)
 				: await searchAppleMusic(query);
-			if (open && searchQuery === query) {
+			if (gen === searchGen && searchQuery === query) {
 				searchResults = results;
 			}
 		} catch (err: any) {
-			if (open && searchQuery === query) {
+			if (gen === searchGen && searchQuery === query) {
 				searchError = err.message || 'Search failed';
 			}
 		} finally {
-			if (searchQuery === query) {
+			if (gen === searchGen) {
 				searching = false;
 			}
 		}
@@ -175,7 +187,7 @@
 		const currentFiles = get(files);
 		const selectedFilesList = currentFiles
 			.filter((f) => currentSelectedIds.has(f.id))
-			.sort((a, b) => a.filename.localeCompare(b.filename));
+			.sort((a, b) => a.filename.localeCompare(b.filename, undefined, { numeric: true }));
 
 		const tracks = selectedRelease.tracks;
 
@@ -282,12 +294,13 @@
 	}
 
 	async function applyMatches() {
+		const rename = renameFiles;
 		if (!selectedRelease) return;
 		applying = true;
 		try {
 			const coverArtUrl = selectedRelease.cover_art_url;
 			const result = await applyReleaseToFiles(selectedRelease, matchedFiles, {
-				rename: renameFiles
+				rename
 			});
 			const coverPaths = result.coverPaths;
 
@@ -299,9 +312,11 @@
 			} else {
 				// Without rename the edits are only staged, not written to disk yet.
 				toast.success(
-					renameFiles
+					rename
 						? `Applied "${selectedRelease.title}" to ${matchedCount} file(s).`
-						: `Staged tags for ${matchedCount} file(s). Save to write them.`
+						: coverArtUrl
+							? `Staged tags for ${matchedCount} file(s). Save to write them. Cover art is written to the files now.`
+							: `Staged tags for ${matchedCount} file(s). Save to write them.`
 				);
 			}
 
@@ -309,7 +324,7 @@
 
 			// Renames rewrite file paths on disk; refresh the directory so the
 			// store doesn't keep stale paths (which break a later apply/save).
-			if (renameFiles) onApplied?.();
+			if (rename) onApplied?.();
 
 			// Embed cover art in the background after the modal closes
 			if (coverArtUrl && coverPaths.length > 0) {
@@ -348,7 +363,7 @@
 	}
 </script>
 
-<Modal title="Metadata Lookup" {open} {onClose} wide={true}>
+<Modal title="Metadata Lookup" {open} {onClose} wide={true} busy={applying}>
 	{#if step === 'search'}
 		<div class="search-bar">
 			<select
@@ -539,9 +554,9 @@
 		{/if}
 
 		<div class="apply-bar">
-			<button class="btn btn-secondary" onclick={() => (step = 'search')}>Back</button>
+			<button class="btn btn-secondary" onclick={() => (step = 'search')} disabled={applying}>Back</button>
 			<label class="rename-check">
-				<input type="checkbox" bind:checked={renameFiles} />
+				<input type="checkbox" bind:checked={renameFiles} disabled={applying} />
 				<span>Rename files to match</span>
 			</label>
 			<span class="match-count">{matchedCount}/{selectedRelease.tracks.length} matched</span>
@@ -872,7 +887,7 @@
 
 	.match-row {
 		display: grid;
-		grid-template-columns: 1fr 24px 1fr;
+		grid-template-columns: minmax(0, 1fr) 24px minmax(0, 1fr);
 		gap: 4px;
 		align-items: center;
 		padding: 3px 0;
@@ -894,6 +909,7 @@
 	}
 
 	.match-file {
+		min-width: 0;
 		min-height: 26px;
 		display: flex;
 		align-items: center;
@@ -944,6 +960,7 @@
 	}
 
 	.file-chip-name {
+		min-width: 0;
 		font-size: 11px;
 		font-family: var(--font-mono);
 		overflow: hidden;

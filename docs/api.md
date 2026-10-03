@@ -31,7 +31,7 @@ All Tunewright endpoints are prefixed with `/api/v1/` unless specified otherwise
   * `path` (string, optional): The target directory path relative to the data root. Defaults to the root.
   * `offset` (integer, optional): Number of entries (directories + files) to skip. Defaults to 0.
   * `limit` (integer, optional): Maximum number of entries to return. Defaults to 500.
-* **Description:** Lists subdirectories and audio files in the specified directory path. Directories are paginated before files; `total` counts both. Does not read tags, so `duration_secs` is always `null` and `has_cover` is always `false` here (fetch them via the tag endpoints).
+* **Description:** Lists subdirectories and audio files in the specified directory path. Directories are paginated before files; `total` counts both. Does not read tags, so `duration_secs` is always `null` here (fetch it via `/tags/read-properties`). `has_cover` is always `false` in every response, because tag reads skip picture data for speed; request `GET /coverart` to find out whether a file has art.
 * **Response:** `200 OK` (application/json)
   ```json
   {
@@ -87,7 +87,7 @@ All Tunewright endpoints are prefixed with `/api/v1/` unless specified otherwise
         "genre": "Electronic",
         "format": "Mpeg",
         "tag_types": ["Id3v2"],
-        "has_cover": true,
+        "has_cover": false,
         "extra": {
           "BPM": "128"
         }
@@ -124,7 +124,7 @@ All Tunewright endpoints are prefixed with `/api/v1/` unless specified otherwise
         "duration_secs": 240.5,
         "format": "Mpeg",
         "tag_types": ["Id3v2"],
-        "has_cover": true
+        "has_cover": false
       }
     }
   }
@@ -149,7 +149,7 @@ All Tunewright endpoints are prefixed with `/api/v1/` unless specified otherwise
     ]
   }
   ```
-* **Description:** Writes new tag values to the specified files in place. Writable fields: `title`, `artist`, `album`, `album_artist`, `year`, `track_number`, `track_total`, `disc_number`, `disc_total`, `genre`, `comment`, `composer` and `extra` (a map of custom fields). Fields omitted from `tags` are left unchanged; a field (or `extra` key) set to `null` or `""` is removed from the file. A custom key the file's tag format can't store returns `status: "error"`. Entries with unsafe paths are dropped and produce no result.
+* **Description:** Writes new tag values to the specified files in place. Writable fields: `title`, `artist`, `album`, `album_artist`, `year`, `track_number`, `track_total`, `disc_number`, `disc_total`, `genre`, `comment`, `composer` and `extra` (a map of custom fields). Fields omitted from `tags` are left unchanged; a field (or `extra` key) set to `null` or `""` is removed from the file. A custom key the file's tag format can't store returns `status: "error"`. Entries whose path no longer resolves to a file in the library return `status: "error"` with `error: "File not found"`.
 * **Response:** `200 OK` (application/json). `status` is `ok` or `error` (with an `error` message).
   ```json
   {
@@ -173,7 +173,7 @@ All Tunewright endpoints are prefixed with `/api/v1/` unless specified otherwise
 * **Query Parameters:**
   * `path` (string, required): Safe path to the audio file containing embedded cover art.
   * `size` (integer, optional): Maximum pixel dimension for resizing. Defaults to 250; `0` returns the original image without resizing.
-* **Description:** Extracts and returns the embedded cover art image, resized on the server if larger than `size`. Responses carry an `ETag` (derived from the file's mtime, size and the requested thumbnail size) and `Cache-Control: private, max-age=3600`; requests with a matching `If-None-Match` header receive `304 Not Modified`.
+* **Description:** Extracts and returns the embedded cover art image, resized on the server if larger than `size`. Responses carry an `ETag` (derived from the file's mtime, size and the requested thumbnail size) and `Cache-Control: private, no-cache`; requests with a matching `If-None-Match` header receive `304 Not Modified`.
 * **Response:** `200 OK` (image/jpeg or image/png), `304 Not Modified` on ETag match, or `404 Not Found` if the file has no embedded cover art.
 
 ### Upload Cover Art
@@ -593,7 +593,7 @@ All Tunewright endpoints are prefixed with `/api/v1/` unless specified otherwise
     "token": "invite-token-uuid",
     "created_by": "super-admin-uuid",
     "expires_at": "2026-05-27T14:20:00Z",
-    "link": "/register?token=invite-token-uuid"
+    "link": "/register#token=invite-token-uuid"
   }
   ```
 
@@ -609,7 +609,7 @@ All Tunewright endpoints are prefixed with `/api/v1/` unless specified otherwise
       "token": "invite-token-uuid",
       "created_by": "super-admin-uuid",
       "expires_at": "2026-05-27T14:20:00Z",
-      "link": "/register?token=invite-token-uuid"
+      "link": "/register#token=invite-token-uuid"
     }
   ]
   ```

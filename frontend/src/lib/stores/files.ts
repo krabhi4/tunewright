@@ -58,6 +58,7 @@ export async function loadDirectory(path: string) {
 		}
 
 		files.set(allFiles);
+		selectedIds.set(new Set());
 		totalCount.set(total);
 		directories.set(allDirs);
 	} catch (err) {

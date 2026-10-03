@@ -8,22 +8,27 @@ use tunewright_core::audio;
 use tunewright_core::scanner;
 use tunewright_core::types::{TunewrightError, WriteResult};
 
-use crate::error::{check_action_batch, join_error, AppError};
+use crate::error::{check_action_batch, join_error, AppError, MAX_PREVIEW_BYTES};
 use crate::state::AppState;
 
-/// Filter request entries to those resolving to a safe path, as `(id, rel_path, canonical_path)`.
+/// Split request entries into those resolving to a safe path, as
+/// `(id, rel_path, canonical_path)` with each file kept once, and the ids of
+/// those that do not.
 fn safe_file_entries(
     data_root: &std::path::Path,
     files: Vec<ActionFileEntry>,
-) -> Vec<(String, String, PathBuf)> {
-    files
-        .into_iter()
-        .filter_map(|f| {
-            scanner::resolve_safe_path(data_root, &f.path)
-                .ok()
-                .map(|safe_path| (f.id, f.path, safe_path))
-        })
-        .collect()
+) -> (Vec<(String, String, PathBuf)>, Vec<String>) {
+    let mut valid = Vec::new();
+    let mut rejected = Vec::new();
+    let mut seen = std::collections::HashSet::new();
+    for f in files {
+        match scanner::resolve_safe_path(data_root, &f.path) {
+            Ok(safe_path) if !seen.insert(safe_path.clone()) => {}
+            Ok(safe_path) => valid.push((f.id, f.path, safe_path)),
+            Err(_) => rejected.push(f.id),
+        }
+    }
+    (valid, rejected)
 }
 
 // ---------------------------------------------------------------------------
@@ -52,18 +57,18 @@ pub async fn execute(
     State(state): State<AppState>,
     Json(body): Json<ExecuteActionsRequest>,
 ) -> Result<Json<ExecuteActionsResponse>, AppError> {
-    check_action_batch(body.files.len(), body.actions.len())?;
+    check_action_batch(body.files.len(), &body.actions)?;
     let data_root = state.data_root.clone();
 
     let results = tokio::task::spawn_blocking(move || {
         let regexes = actions::compile_regexes(&body.actions)
             .map_err(TunewrightError::InvalidFormatString)?;
-        let valid_files = safe_file_entries(&data_root, body.files);
+        let (valid_files, rejected) = safe_file_entries(&data_root, body.files);
 
         // Each file's read → apply → write runs under that file's lock and
         // writes back only the fields the actions changed, so process files
         // in parallel.
-        let results: Vec<WriteResult> = valid_files
+        let mut results: Vec<WriteResult> = valid_files
             .par_iter()
             .enumerate()
             .map(|(i, (id, _rel_path, canonical_path))| {
@@ -74,11 +79,19 @@ pub async fn execute(
                     .to_string();
                 let ctx = ActionContext { index: i, filename };
 
+                let mut within_budget = true;
                 match audio::modify_tags(canonical_path, |tags| {
-                    for action in &body.actions {
-                        action.apply(tags, &ctx, &regexes);
+                    let original = tags.clone();
+                    within_budget = actions::apply_all(&body.actions, tags, &ctx, &regexes);
+                    if !within_budget {
+                        *tags = original;
                     }
                 }) {
+                    Ok(()) if !within_budget => WriteResult {
+                        id: id.clone(),
+                        status: "error".to_string(),
+                        error: Some("Actions grow the tags past the size limit".to_string()),
+                    },
                     Ok(()) => WriteResult {
                         id: id.clone(),
                         status: "ok".to_string(),
@@ -99,6 +112,11 @@ pub async fn execute(
                 }
             })
             .collect();
+        results.extend(rejected.into_iter().map(|id| WriteResult {
+            id,
+            status: "error".to_string(),
+            error: Some("File not found".to_string()),
+        }));
 
         Ok::<_, TunewrightError>(results)
     })
@@ -135,15 +153,16 @@ pub async fn preview(
     State(state): State<AppState>,
     Json(body): Json<ExecuteActionsRequest>,
 ) -> Result<Json<PreviewActionsResponse>, AppError> {
-    check_action_batch(body.files.len(), body.actions.len())?;
+    check_action_batch(body.files.len(), &body.actions)?;
     let data_root = state.data_root.clone();
 
     let previews = tokio::task::spawn_blocking(move || {
         let regexes = actions::compile_regexes(&body.actions)
             .map_err(TunewrightError::InvalidFormatString)?;
-        let valid_files = safe_file_entries(&data_root, body.files);
+        let (valid_files, _) = safe_file_entries(&data_root, body.files);
 
         let mut previews = Vec::new();
+        let mut preview_bytes = 0usize;
 
         for (i, (id, _rel_path, canonical_path)) in valid_files.iter().enumerate() {
             let filename = canonical_path
@@ -167,12 +186,21 @@ pub async fn preview(
                 index: i,
                 filename: stem,
             };
-            for action in &body.actions {
-                action.apply(&mut modified, &ctx, &regexes);
+            if !actions::apply_all(&body.actions, &mut modified, &ctx, &regexes) {
+                continue;
             }
 
             // Diff: find changed fields
             let changes = diff_tags(&original, &modified);
+            preview_bytes += changes
+                .iter()
+                .map(|c| c.field.len() + c.old_value.len() + c.new_value.len())
+                .sum::<usize>();
+            if preview_bytes > MAX_PREVIEW_BYTES {
+                return Err(TunewrightError::RequestTooLarge(
+                    "preview too large, select fewer files".to_string(),
+                ));
+            }
             if !changes.is_empty() {
                 previews.push(ActionPreview {
                     id: id.clone(),
@@ -272,5 +300,30 @@ mod tests {
         assert!(out.ends_with('…'));
         assert!(out.len() <= MAX_PREVIEW_VALUE_BYTES + '…'.len_utf8());
         assert!(out.trim_end_matches('…').chars().all(|c| c == 'é'));
+    }
+
+    #[test]
+    fn each_file_is_listed_once() {
+        let dir =
+            std::env::temp_dir().join(format!("tunewright_actions_once_{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let dir = dir.canonicalize().unwrap();
+        std::fs::write(dir.join("a.flac"), b"x").unwrap();
+        let entry = |id: &str, path: &str| ActionFileEntry {
+            id: id.to_string(),
+            path: path.to_string(),
+        };
+        let (valid, rejected) = safe_file_entries(
+            &dir,
+            vec![
+                entry("a", "a.flac"),
+                entry("a", "a.flac"),
+                entry("b", "./a.flac"),
+                entry("c", "gone.flac"),
+            ],
+        );
+        assert_eq!(valid.len(), 1);
+        assert_eq!(rejected, vec!["c".to_string()]);
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

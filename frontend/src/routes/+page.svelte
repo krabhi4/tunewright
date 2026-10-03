@@ -14,7 +14,6 @@
 	import UserManagementModal from '$lib/components/layout/UserManagementModal.svelte';
 	import {
 		files,
-		totalCount,
 		selectedCount,
 		loading,
 		loadDirectory,
@@ -28,16 +27,28 @@
 		fetchTagsForFiles,
 		hasPendingEdits,
 		saveAllEdits,
-		pendingEditCount
+		pendingEditCount,
+		loadedTags
 	} from '$lib/stores/tags';
 	import { selectedIds } from '$lib/stores/files';
 	import { toast } from '$lib/stores/toast';
-	import { onMount } from 'svelte';
+	import { flushSync, onMount } from 'svelte';
 	import { get } from 'svelte/store';
 	import { goto } from '$app/navigation';
 
 	let isNarrow = $state(false);
 	let filteredCount = $state(0);
+	let orderedIds = $state<string[]>([]);
+	let actionFiles = $state(get(selectedFiles));
+
+	function openActions() {
+		flushSync();
+		const rank = new Map(orderedIds.map((id, i) => [id, i]));
+		actionFiles = [...get(selectedFiles)].sort(
+			(a, b) => (rank.get(a.id) ?? rank.size) - (rank.get(b.id) ?? rank.size)
+		);
+		actionsModalOpen = true;
+	}
 
 	$effect(() => {
 		const mq = window.matchMedia('(max-width: 768px)');
@@ -136,7 +147,7 @@
 
 	onMount(() => {
 		const params = new URLSearchParams(window.location.search);
-		const urlPath = params.get('path') || '/';
+		const urlPath = params.get('path') || get(currentPath);
 		const urlFilter = params.get('filter') || '';
 		const urlSort = params.get('sort') || '';
 		const urlOrder = params.get('order') || 'asc';
@@ -251,12 +262,15 @@
 	// Single pass over the file list for both aggregates.
 	let totals = $derived.by(() => {
 		let duration = 0;
+		let durationKnown = true;
 		let size = 0;
 		for (const f of $files) {
-			duration += f.duration_secs ?? 0;
+			const d = $loadedTags.get(f.id)?.duration_secs ?? f.duration_secs;
+			if (d == null) durationKnown = false;
+			else duration += d;
 			size += f.size;
 		}
-		return { duration, size };
+		return { duration: durationKnown ? duration : 0, size };
 	});
 
 	function handleKeydown(e: KeyboardEvent) {
@@ -288,9 +302,10 @@
 	onSave={handleSave}
 	onRename={() => openModal(() => (renameModalOpen = true))}
 	onFilenameToTag={() => openModal(() => (filenameToTagOpen = true))}
-	onActions={() => openModal(() => (actionsModalOpen = true))}
+	onActions={() => openModal(openActions)}
 	onLookup={() => openModal(() => (lookupModalOpen = true))}
 	onManageUsers={() => { closeAllModals(); userManagementOpen = true; }}
+	guard={guardUnsaved}
 	hasPendingEdits={$hasPendingEdits && !saving}
 	hasSelection={$selectedCount > 0}
 />
@@ -334,12 +349,12 @@
 			</div>
 		{/if}
 
-		<FileGrid files={$files} onNavigate={navigateTo} bind:filteredCount />
+		<FileGrid files={$files} onNavigate={navigateTo} bind:filteredCount bind:orderedIds />
 	</div>
 </div>
 
 <StatusBar
-	fileCount={$totalCount}
+	fileCount={$files.length}
 	selectedCount={$selectedCount}
 	totalDuration={totals.duration}
 	totalSize={totals.size}
@@ -369,7 +384,7 @@
 <ActionsModal
 	open={actionsModalOpen}
 	onClose={() => (actionsModalOpen = false)}
-	files={$selectedFiles}
+	files={actionFiles}
 	onComplete={() => {}}
 />
 

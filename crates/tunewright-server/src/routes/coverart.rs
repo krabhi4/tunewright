@@ -78,12 +78,19 @@ pub async fn get_cover_art(
         return Ok(Response::builder()
             .status(StatusCode::NOT_MODIFIED)
             .header(header::ETAG, etag)
-            .header(header::CACHE_CONTROL, "private, max-age=3600")
+            .header(header::CACHE_CONTROL, "private, no-cache")
             .body(Body::empty())
             .unwrap());
     }
 
+    let permit = state
+        .thumbnail_limit
+        .clone()
+        .acquire_owned()
+        .await
+        .map_err(|e| AppError(TunewrightError::Io(std::io::Error::other(e.to_string()))))?;
     let result = tokio::task::spawn_blocking(move || {
+        let _permit = permit;
         picture::extract_cover_art_thumbnail(&safe_path, max_size)
     })
     .await
@@ -97,7 +104,7 @@ pub async fn get_cover_art(
             .header(header::X_CONTENT_TYPE_OPTIONS, "nosniff")
             .header(header::CONTENT_DISPOSITION, "inline")
             .header(header::ETAG, etag)
-            .header(header::CACHE_CONTROL, "private, max-age=3600")
+            .header(header::CACHE_CONTROL, "private, no-cache")
             .body(Body::from(data))
             .map_err(|e| AppError(TunewrightError::Io(std::io::Error::other(e.to_string())))),
         None => Response::builder()
@@ -150,15 +157,15 @@ pub async fn embed_cover_art_from_url(
     let client = &state.coverart_client;
 
     let mut response = client.get(&body.url).send().await.map_err(|e| {
-        AppError(TunewrightError::Io(std::io::Error::other(format!(
-            "failed to fetch cover art: {}",
-            e
-        ))))
+        AppError(TunewrightError::Upstream(format!(
+            "failed to fetch cover art: {e}"
+        )))
     })?;
 
     if !response.status().is_success() {
-        return Err(AppError(TunewrightError::Io(std::io::Error::other(
-            format!("cover art fetch returned {}", response.status()),
+        return Err(AppError(TunewrightError::Upstream(format!(
+            "cover art fetch returned {}",
+            response.status()
         ))));
     }
 
@@ -178,10 +185,9 @@ pub async fn embed_cover_art_from_url(
     // Stream with size limit to handle chunked responses without Content-Length
     let mut image_data = Vec::new();
     while let Some(chunk) = response.chunk().await.map_err(|e| {
-        AppError(TunewrightError::Io(std::io::Error::other(format!(
-            "failed to read cover art bytes: {}",
-            e
-        ))))
+        AppError(TunewrightError::Upstream(format!(
+            "failed to read cover art bytes: {e}"
+        )))
     })? {
         image_data.extend_from_slice(&chunk);
         if image_data.len() as u64 > MAX_IMAGE_SIZE {
@@ -200,23 +206,32 @@ pub async fn embed_cover_art_from_url(
     let data_root = state.data_root.clone();
     let paths = body.paths;
     let outcomes: Vec<Result<(), String>> = tokio::task::spawn_blocking(move || {
-        paths
-            .par_iter()
-            .enumerate()
+        let mut seen = std::collections::HashSet::new();
+        let targets: Vec<Option<Option<std::path::PathBuf>>> = paths
+            .iter()
             .map(
-                |(i, path_str)| match scanner::resolve_safe_path(&data_root, path_str) {
-                    Ok(safe_path) => {
-                        picture::embed_cover_art(&safe_path, &image_data).map_err(|e| {
-                            tracing::warn!("cover art embed failed for {:?}: {}", path_str, e);
-                            format!("file {}: embed failed", i)
-                        })
-                    }
+                |path_str| match scanner::resolve_safe_path(&data_root, path_str) {
+                    Ok(safe_path) => Some(seen.insert(safe_path.clone()).then_some(safe_path)),
                     Err(e) => {
                         tracing::warn!("path resolution failed for {:?}: {}", path_str, e);
-                        Err(format!("file {}: invalid path", i))
+                        None
                     }
                 },
             )
+            .collect();
+        targets
+            .par_iter()
+            .enumerate()
+            .map(|(i, target)| match target {
+                Some(Some(safe_path)) => {
+                    picture::embed_cover_art(safe_path, &image_data).map_err(|e| {
+                        tracing::warn!("cover art embed failed for {:?}: {}", safe_path, e);
+                        format!("file {}: embed failed", i)
+                    })
+                }
+                Some(None) => Ok(()),
+                None => Err(format!("file {}: invalid path", i)),
+            })
             .collect()
     })
     .await

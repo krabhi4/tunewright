@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 use tunewright_core::filename_to_tag::{self, FilenameTagPreview};
 use tunewright_core::scanner;
 
-use crate::error::{check_batch_size, join_error, AppError};
+use crate::error::{check_batch_size, check_format_len, join_error, AppError};
 use crate::state::AppState;
 
 #[derive(Deserialize)]
@@ -29,13 +29,17 @@ pub async fn preview(
     Json(body): Json<FilenameToTagRequest>,
 ) -> Result<Json<PreviewResponse>, AppError> {
     check_batch_size(body.files.len())?;
+    check_format_len(&body.pattern)?;
     let data_root = state.data_root.clone();
 
     let previews = tokio::task::spawn_blocking(move || {
+        let mut seen = std::collections::HashSet::new();
         let files: Vec<(String, String)> = body
             .files
             .into_iter()
-            .filter(|f| scanner::resolve_safe_path(&data_root, &f.path).is_ok())
+            .filter(|f| {
+                scanner::resolve_safe_path(&data_root, &f.path).is_ok_and(|p| seen.insert(p))
+            })
             .map(|f| {
                 let filename = std::path::Path::new(&f.path)
                     .file_name()

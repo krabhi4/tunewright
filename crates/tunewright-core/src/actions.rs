@@ -138,11 +138,27 @@ impl Action {
                     return;
                 }
                 let result = if *regex {
-                    match regexes.get(search) {
-                        Some(re) => re.replace_all(&val, replace.as_str()).to_string(),
-                        None => val,
+                    let Some(re) = regexes.get(search) else {
+                        return;
+                    };
+                    let refs = replace.matches('$').count();
+                    let (count, matched) = re
+                        .find_iter(&val)
+                        .fold((0usize, 0usize), |(c, l), m| (c + 1, l + m.len()));
+                    let max_len = (val.len() - matched)
+                        .saturating_add(count.saturating_mul(replace.len()))
+                        .saturating_add(refs.saturating_mul(matched));
+                    if exceeds_value_limit(&val, max_len) {
+                        return;
                     }
+                    re.replace_all(&val, replace.as_str()).to_string()
                 } else {
+                    let count = val.matches(search.as_str()).count();
+                    let new_len = (val.len() - count * search.len())
+                        .saturating_add(count.saturating_mul(replace.len()));
+                    if exceeds_value_limit(&val, new_len) {
+                        return;
+                    }
                     val.replace(search.as_str(), replace.as_str())
                 };
                 set_field(tags, field, &result);
@@ -179,8 +195,14 @@ impl Action {
                     "comment",
                     "composer",
                 ];
+                let canonical = |k: &str| match k.to_lowercase().as_str() {
+                    "albumartist" => "album_artist".to_string(),
+                    "track" => "track_number".to_string(),
+                    "disc" => "disc_number".to_string(),
+                    other => other.to_string(),
+                };
                 for f in &standard {
-                    if !fields.iter().any(|k| k.eq_ignore_ascii_case(f)) {
+                    if !fields.iter().any(|k| canonical(k) == *f) {
                         set_field(tags, f, "");
                     }
                 }
@@ -210,12 +232,12 @@ impl Action {
                 target,
             } => {
                 let val = get_field(tags, source);
-                let parts: Vec<&str> = if separator.is_empty() {
-                    val.split("").filter(|s| !s.is_empty()).collect()
+                let piece = if separator.is_empty() {
+                    val.split("").filter(|s| !s.is_empty()).nth(*part)
                 } else {
-                    val.split(separator.as_str()).collect()
+                    val.split(separator.as_str()).nth(*part)
                 };
-                let result = parts.get(*part).unwrap_or(&"").trim().to_string();
+                let result = piece.unwrap_or("").trim().to_string();
                 set_field(tags, target, &result);
             }
 
@@ -224,12 +246,23 @@ impl Action {
                 separator,
                 target,
             } => {
-                let values: Vec<String> = sources
-                    .iter()
-                    .map(|f| get_field(tags, f))
-                    .filter(|v| !v.is_empty())
-                    .collect();
-                set_field(tags, target, &values.join(separator));
+                let mut merged = String::new();
+                for value in sources.iter().map(|f| get_field(tags, f)) {
+                    if value.is_empty() {
+                        continue;
+                    }
+                    if merged.len() + separator.len() + value.len() > MAX_ACTION_VALUE_BYTES {
+                        tracing::warn!(
+                            "Merge result exceeds {MAX_ACTION_VALUE_BYTES} bytes, skipped"
+                        );
+                        return;
+                    }
+                    if !merged.is_empty() {
+                        merged.push_str(separator);
+                    }
+                    merged.push_str(&value);
+                }
+                set_field(tags, target, &merged);
             }
 
             Action::TrimField { field } => {
@@ -238,6 +271,41 @@ impl Action {
             }
         }
     }
+}
+
+pub fn apply_all(
+    actions: &[Action],
+    tags: &mut TagData,
+    ctx: &ActionContext,
+    regexes: &HashMap<String, Regex>,
+) -> bool {
+    let limit = text_bytes(tags).saturating_add(MAX_ACTION_VALUE_BYTES);
+    for action in actions {
+        action.apply(tags, ctx, regexes);
+        if text_bytes(tags) > limit {
+            return false;
+        }
+    }
+    true
+}
+
+fn text_bytes(t: &TagData) -> usize {
+    [
+        &t.title,
+        &t.artist,
+        &t.album,
+        &t.album_artist,
+        &t.genre,
+        &t.comment,
+        &t.composer,
+    ]
+    .iter()
+    .map(|v| v.as_ref().map_or(0, String::len))
+    .sum::<usize>()
+        + t.extra
+            .iter()
+            .map(|(k, v)| k.len() + v.len())
+            .sum::<usize>()
 }
 
 /// A named group of actions to execute in sequence.
@@ -286,6 +354,16 @@ fn get_field(tags: &TagData, field: &str) -> String {
         .get(&extra_key(tags, field))
         .cloned()
         .unwrap_or_default()
+}
+
+const MAX_ACTION_VALUE_BYTES: usize = expr::MAX_OUTPUT_BYTES;
+
+fn exceeds_value_limit(val: &str, new_len: usize) -> bool {
+    let over = new_len > MAX_ACTION_VALUE_BYTES.max(val.len());
+    if over {
+        tracing::warn!("Replace result exceeds {MAX_ACTION_VALUE_BYTES} bytes, skipped");
+    }
+    over
 }
 
 fn set_field(tags: &mut TagData, field: &str, value: &str) {
@@ -695,5 +773,78 @@ mod tests {
             regex: true,
         }];
         assert!(compile_regexes(&actions).is_err());
+    }
+
+    #[test]
+    fn replace_and_merge_growth_is_bounded() {
+        let mut tags = TagData {
+            title: Some("x".repeat(2000)),
+            ..Default::default()
+        };
+        let ctx = ActionContext {
+            index: 0,
+            filename: String::new(),
+        };
+        let actions = vec![
+            Action::Replace {
+                field: "title".to_string(),
+                search: "x?".to_string(),
+                replace: "R".repeat(100_000),
+                regex: true,
+            },
+            Action::Replace {
+                field: "title".to_string(),
+                search: "x".to_string(),
+                replace: "R".repeat(100_000),
+                regex: false,
+            },
+            Action::MergeFields {
+                sources: vec!["title".to_string(); 1000],
+                separator: String::new(),
+                target: "comment".to_string(),
+            },
+        ];
+        let regexes = compile_regexes(&actions).unwrap();
+        for action in &actions {
+            action.apply(&mut tags, &ctx, &regexes);
+        }
+        assert_eq!(tags.title.as_deref(), Some("x".repeat(2000).as_str()));
+        assert_eq!(tags.comment, None);
+
+        let mut tags = TagData {
+            title: Some("a b a".to_string()),
+            ..Default::default()
+        };
+        actions[1].apply(&mut tags, &ctx, &regexes);
+        Action::Replace {
+            field: "title".to_string(),
+            search: "a".to_string(),
+            replace: "zz".to_string(),
+            regex: false,
+        }
+        .apply(&mut tags, &ctx, &regexes);
+        assert_eq!(tags.title.as_deref(), Some("zz b zz"));
+    }
+
+    #[test]
+    fn a_chain_of_actions_cannot_grow_a_file_past_the_budget() {
+        let mut tags = TagData::default();
+        let ctx = ActionContext {
+            index: 0,
+            filename: String::new(),
+        };
+        let mut actions = vec![Action::SetField {
+            field: "f0".to_string(),
+            value: "x".repeat(40 * 1024),
+        }];
+        actions.push(Action::MergeFields {
+            sources: vec!["f0".to_string()],
+            separator: String::new(),
+            target: "f1".to_string(),
+        });
+        let regexes = compile_regexes(&actions).unwrap();
+        assert!(!apply_all(&actions, &mut tags, &ctx, &regexes));
+        let mut tags = TagData::default();
+        assert!(apply_all(&actions[..1], &mut tags, &ctx, &regexes));
     }
 }

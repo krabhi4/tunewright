@@ -167,11 +167,14 @@ pub async fn setup(State(state): State<AppState>, Json(body): Json<SetupRequest>
 
     match res {
         Ok(Ok(user)) => create_session_response(&state, &user.id, &user.username, user.role),
-        Ok(Err(msg)) => (
-            StatusCode::CONFLICT,
-            Json(serde_json::json!({ "error": msg })),
-        )
-            .into_response(),
+        Ok(Err(msg)) => {
+            let status = if msg == "Setup already completed" {
+                StatusCode::CONFLICT
+            } else {
+                StatusCode::INTERNAL_SERVER_ERROR
+            };
+            (status, Json(serde_json::json!({ "error": msg }))).into_response()
+        }
         Err(e) => {
             tracing::error!("Blocking task failed: {e}");
             (
@@ -223,6 +226,9 @@ fn record_failed_login(
         }
     }
     let entry = map.entry(key).or_insert((0, std::time::Instant::now()));
+    if entry.1.elapsed().as_secs() > FAILED_LOGIN_DECAY_SECS {
+        entry.0 = 0;
+    }
     entry.0 = entry.0.saturating_add(1);
     entry.1 = std::time::Instant::now();
 }
@@ -292,8 +298,8 @@ fn client_ip(
                 .iter()
                 .filter_map(|v| v.to_str().ok())
                 .flat_map(|v| v.split(','))
-                .rev()
-                .find_map(|s| s.trim().parse().ok())
+                .last()
+                .and_then(|s| s.trim().parse().ok())
         })
         .flatten();
     let ip = forwarded
@@ -504,8 +510,10 @@ pub async fn register(
         Ok(Err(msg)) => {
             let status = if msg.contains("taken") {
                 StatusCode::CONFLICT
-            } else {
+            } else if msg.contains("invite") {
                 StatusCode::BAD_REQUEST
+            } else {
+                StatusCode::INTERNAL_SERVER_ERROR
             };
             (status, Json(serde_json::json!({ "error": msg }))).into_response()
         }
@@ -689,6 +697,22 @@ pub async fn require_auth(
     next: Next,
 ) -> Response {
     let path = req.uri().path();
+
+    let unsafe_method = !matches!(
+        *req.method(),
+        axum::http::Method::GET | axum::http::Method::HEAD | axum::http::Method::OPTIONS
+    );
+    let cross_origin = req
+        .headers()
+        .get("sec-fetch-site")
+        .is_some_and(|v| v != "same-origin" && v != "none");
+    if unsafe_method && cross_origin {
+        return (
+            StatusCode::FORBIDDEN,
+            Json(serde_json::json!({ "error": "Cross-origin request refused" })),
+        )
+            .into_response();
+    }
 
     // Allow only the specific public auth endpoints and health unconditionally.
     // This provides defense-in-depth for private /auth/ endpoints.
@@ -897,7 +921,7 @@ mod tests {
             .route("/auth/users", get(|| async { "users" }))
             .route("/files", get(|| async { "files" }))
             .layer(from_fn_with_state(state.clone(), require_auth))
-            .with_state(state);
+            .with_state(state.clone());
 
         // 1. Check public endpoints (should pass and return OK)
         for public_path in &[
@@ -936,7 +960,109 @@ mod tests {
             );
         }
 
+        let session = |user_id: &str| Session {
+            user_id: user_id.to_string(),
+            username: "x".to_string(),
+            role: Role::SuperAdmin,
+            created_at: std::time::Instant::now(),
+        };
+        state.add_session("live".to_string(), session("admin-id"));
+        state.add_session("orphan".to_string(), session("deleted-id"));
+        let files = |token: &str| {
+            Request::builder()
+                .uri("/files")
+                .header("Cookie", format!("{SESSION_COOKIE}={token}"))
+                .body(Body::empty())
+                .unwrap()
+        };
+        assert_eq!(
+            app.clone().oneshot(files("live")).await.unwrap().status(),
+            StatusCode::OK
+        );
+        assert_eq!(
+            app.clone().oneshot(files("orphan")).await.unwrap().status(),
+            StatusCode::UNAUTHORIZED,
+            "a session for a deleted user must not authenticate"
+        );
+
+        for (site, expected) in [
+            ("same-site", StatusCode::FORBIDDEN),
+            ("cross-site", StatusCode::FORBIDDEN),
+            ("same-origin", StatusCode::METHOD_NOT_ALLOWED),
+        ] {
+            let req = Request::builder()
+                .method("POST")
+                .uri("/files")
+                .header("Cookie", format!("{SESSION_COOKIE}=live"))
+                .header("Sec-Fetch-Site", site)
+                .body(Body::empty())
+                .unwrap();
+            assert_eq!(
+                app.clone().oneshot(req).await.unwrap().status(),
+                expected,
+                "{site}"
+            );
+        }
+
         let _ = std::fs::remove_dir_all(&temp_dir);
+    }
+
+    #[test]
+    fn sessions_are_capped_per_user() {
+        let config = Config {
+            data_dir: std::env::temp_dir(),
+            state_dir: None,
+            static_dir: std::env::temp_dir(),
+            port: 8080,
+            host: "127.0.0.1".to_string(),
+            cookie_secure: false,
+            trust_proxy: false,
+            setup_token: None,
+        };
+        let users =
+            UserManager::load(std::env::temp_dir().join(format!("users_{}.json", rand_num())));
+        let state = AppState::new(config, users);
+        for i in 0..50 {
+            state.add_session(
+                format!("t{i}"),
+                Session {
+                    user_id: "u".to_string(),
+                    username: "u".to_string(),
+                    role: Role::Admin,
+                    created_at: std::time::Instant::now(),
+                },
+            );
+        }
+        let sessions = state.sessions.lock().unwrap();
+        assert_eq!(sessions.len(), 20);
+        assert!(sessions.contains_key("t49"));
+    }
+
+    #[tokio::test]
+    async fn setup_save_failure_is_a_server_error_not_a_conflict() {
+        let temp_dir = std::env::temp_dir().join(format!("tunewright_srv_test_{}", rand_num()));
+        let config = Config {
+            data_dir: temp_dir.clone(),
+            state_dir: None,
+            static_dir: temp_dir.clone(),
+            port: 8080,
+            host: "127.0.0.1".to_string(),
+            cookie_secure: false,
+            trust_proxy: false,
+            setup_token: None,
+        };
+        let users = UserManager::load(temp_dir.join("missing").join("users.json"));
+        let state = AppState::new(config, users);
+        let resp = setup(
+            State(state),
+            Json(SetupRequest {
+                username: "admin".to_string(),
+                password: "password123".to_string(),
+                setup_token: None,
+            }),
+        )
+        .await;
+        assert_eq!(resp.status(), StatusCode::INTERNAL_SERVER_ERROR);
     }
 
     #[tokio::test]
@@ -1335,11 +1461,17 @@ mod tests {
     fn forwarded_for_is_honored_only_when_proxy_trusted() {
         let mut headers = axum::http::HeaderMap::new();
         headers.append("x-forwarded-for", "1.1.1.1, 10.0.0.2".parse().unwrap());
-        headers.append("x-forwarded-for", "10.0.0.2, junk".parse().unwrap());
+        headers.append("x-forwarded-for", "9.9.9.9, 10.0.0.2".parse().unwrap());
         let peer = Some(IP_A);
 
         assert_eq!(client_ip(peer, &headers, false), IP_A);
         assert_eq!(client_ip(peer, &headers, true), IP_B);
+        headers.append("x-forwarded-for", "10.0.0.2, junk".parse().unwrap());
+        assert_eq!(
+            client_ip(peer, &headers, true),
+            IP_A,
+            "an unparseable proxy entry must not fall back to client-supplied ones"
+        );
         assert_eq!(client_ip(peer, &axum::http::HeaderMap::new(), true), IP_A);
         assert_eq!(
             client_ip(None, &headers, false),

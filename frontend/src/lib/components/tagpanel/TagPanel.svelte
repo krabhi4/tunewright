@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { selectedCount, selectedFiles, selectedIds } from '$lib/stores/files';
-	import { selectedTags, KEEP_VALUE, setPendingEdit, clearPendingEdit, pendingEdits } from '$lib/stores/tags';
+	import { selectedTags, KEEP_VALUE, setPendingEdit, clearPendingEdit, pendingEdits, selectedUnreadableCount } from '$lib/stores/tags';
 	import { getCoverArtUrl, uploadCoverArt } from '$lib/api/coverart';
 	import { coverArtVersion, bumpCoverArt } from '$lib/stores/ui';
 	import { toast } from '$lib/stores/toast';
@@ -9,24 +9,37 @@
 	let dragOver = $state(false);
 	let uploading = $state(false);
 	let fileInput = $state<HTMLInputElement>();
+	let focused = $state<{ key: string; value: string } | null>(null);
 
 	async function handleImageUpload(blob: Blob) {
 		const files = $selectedFiles;
 		if (files.length === 0) return;
 		uploading = true;
-		try {
-			for (const file of files) {
+		let failed = 0;
+		let reason = '';
+		for (const file of files) {
+			try {
 				await uploadCoverArt(file.relative_path, blob);
+			} catch (err) {
+				failed++;
+				reason ||= (err as Error).message;
+				console.error(`Failed to upload cover art for ${file.relative_path}:`, err);
+				const status = (err as { status?: number }).status;
+				if (status === 400 || status === 413) {
+					failed = files.length;
+					break;
+				}
 			}
+		}
+		if (failed < files.length) {
 			coverArtError = false;
 			// Force cover art refresh across components by bumping the global version
 			bumpCoverArt();
-		} catch (err) {
-			console.error('Failed to upload cover art:', err);
-			toast.error('Cover art upload failed. See console for details.');
-		} finally {
-			uploading = false;
 		}
+		if (failed > 0) {
+			toast.error(`Cover art upload failed for ${failed} of ${files.length} file(s): ${reason || 'unknown error'}.`);
+		}
+		uploading = false;
 	}
 
 	function onFileSelected(e: Event) {
@@ -145,7 +158,7 @@
 			}
 
 			// Otherwise, must be a clean integer
-			if (/^\d+$/.test(trimmed)) {
+			if (/^\d+$/.test(trimmed) && (key !== 'year' || parseInt(trimmed, 10) <= 9999)) {
 				let num = parseInt(trimmed, 10);
 				if (num < 0) num = 0;
 				if (num > 4294967295) num = 4294967295;
@@ -182,7 +195,16 @@
 			<div class="panel-empty">
 				<span class="empty-text">Select files to edit tags</span>
 			</div>
+		{:else if $selectedUnreadableCount === $selectedCount}
+			<div class="panel-empty">
+				<span class="empty-text">The tags of the selected file{$selectedCount !== 1 ? 's' : ''} can't be read</span>
+			</div>
 		{:else}
+			{#if $selectedUnreadableCount > 0}
+				<div class="field-group">
+					<span class="empty-text">{$selectedUnreadableCount} unreadable file{$selectedUnreadableCount !== 1 ? 's are' : ' is'} skipped</span>
+				</div>
+			{/if}
 			{#each fields as field (field.key)}
 				{@const st = fieldStates[field.key]}
 				<div class="field-group">
@@ -193,8 +215,10 @@
 						class:keep={st.keep}
 						class:edited={st.edited}
 						type="text"
-						value={st.keep ? '' : st.value}
+						value={focused?.key === field.key ? focused.value : st.keep ? '' : st.value}
 						placeholder={st.keep ? '‹ keep ›' : '—'}
+						onfocus={() => (focused = { key: field.key, value: st.keep ? '' : st.value })}
+						onblur={() => (focused = null)}
 						onchange={(e) => handleInput(field.key, e)}
 					/>
 				</div>

@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { untrack } from 'svelte';
 	import type { FileEntry, TagData } from '$lib/types/audio';
 	import { formatDuration, formatSize } from '$lib/utils/format';
 	import {
@@ -9,7 +10,7 @@
 		directories,
 		currentPath
 	} from '$lib/stores/files';
-	import { mergedTags, queueVisibleTagsFetch, pendingEdits } from '$lib/stores/tags';
+	import { mergedTags, queueVisibleTagsFetch, pendingEdits, fetchTagsForFiles, queuePropertiesFetch } from '$lib/stores/tags';
 	import { filterText, sortColumn, sortAsc } from '$lib/stores/ui';
 	import ContextMenu from '$lib/components/common/ContextMenu.svelte';
 	import { toast } from '$lib/stores/toast';
@@ -19,9 +20,10 @@
 		files: FileEntry[];
 		onNavigate: (path: string) => void;
 		filteredCount?: number;
+		orderedIds?: string[];
 	}
 
-	let { files, onNavigate, filteredCount = $bindable(0) }: Props = $props();
+	let { files, onNavigate, filteredCount = $bindable(0), orderedIds = $bindable([]) }: Props = $props();
 
 	// Virtual scrolling state
 	let containerEl: HTMLDivElement;
@@ -139,6 +141,8 @@
 	// Directories to show at the top of the grid
 	let dirEntries = $derived($directories);
 
+	const nameCollator = new Intl.Collator(undefined, { numeric: true, sensitivity: 'base' });
+
 	// Filtered + sorted files
 	let processedFiles = $derived.by(() => {
 		let result = files;
@@ -157,7 +161,9 @@
 			});
 		}
 
-		if ($sortColumn) {
+		if (!$sortColumn) {
+			result = [...result].sort((a, b) => nameCollator.compare(a.filename, b.filename));
+		} else {
 			const col = $sortColumn;
 			const dir = $sortAsc ? 1 : -1;
 			const usesTags = tagSortKeys.has(col);
@@ -170,6 +176,7 @@
 			result = [...result].sort((a, b) => {
 				const av = keyOf.get(a.id) ?? '';
 				const bv = keyOf.get(b.id) ?? '';
+				if (typeof av === 'string' && typeof bv === 'string') return nameCollator.compare(av, bv) * dir;
 				if (av < bv) return -1 * dir;
 				if (av > bv) return 1 * dir;
 				return 0;
@@ -181,6 +188,15 @@
 
 	// Expose filtered count to parent
 	$effect(() => { filteredCount = processedFiles.length; });
+	$effect(() => { orderedIds = processedFiles.map((f) => f.id); });
+	$effect(() => {
+		if (!$filterText.trim()) return;
+		const visible = new Set(processedFiles.map((f) => f.id));
+		const selected = untrack(() => $selectedIds);
+		if ([...selected].some((id) => !visible.has(id))) {
+			selectedIds.set(new Set([...selected].filter((id) => visible.has(id))));
+		}
+	});
 
 	// Total rows = directories + files
 	let visibleSelectedCount = $derived(processedFiles.filter((f) => $selectedIds.has(f.id)).length);
@@ -230,6 +246,15 @@
 		}
 	});
 
+	$effect(() => {
+		const col = $sortColumn;
+		if (!$filterText.trim() && !(col && tagSortKeys.has(col))) return;
+		const ids = files.map((f) => f.id);
+		fetchTagsForFiles(ids).then(() => {
+			if (col === 'duration') queuePropertiesFetch(ids);
+		});
+	});
+
 	let headerEl: HTMLDivElement;
 
 	function handleScroll() {
@@ -248,9 +273,14 @@
 		}
 	}
 
+	function rangeAnchor(): string | null {
+		return processedFiles.some((f) => f.id === lastClickedId) ? lastClickedId : null;
+	}
+
 	function handleRowClick(file: FileEntry, e: MouseEvent | KeyboardEvent) {
-		if (e.shiftKey && lastClickedId) {
-			selectRange(lastClickedId, file.id, processedFiles);
+		const anchor = rangeAnchor();
+		if (e.shiftKey && anchor) {
+			selectRange(anchor, file.id, processedFiles);
 		} else {
 			toggleSelection(file.id, e.ctrlKey || e.metaKey);
 		}
@@ -286,6 +316,12 @@
 		const focIdx = $focusedId
 			? processedFiles.findIndex((f) => f.id === $focusedId)
 			: -1;
+
+		if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'a') {
+			e.preventDefault();
+			selectedIds.set(new Set(processedFiles.map((f) => f.id)));
+			return;
+		}
 
 		let nextIdx: number | null = null;
 		const pageRows = Math.max(1, Math.floor(containerHeight / ROW_HEIGHT));
@@ -330,9 +366,10 @@
 			const file = processedFiles[nextIdx];
 			focusedId.set(file.id);
 
-			if (e.shiftKey && lastClickedId) {
-				selectRange(lastClickedId, file.id, processedFiles);
-			} else if (!e.shiftKey) {
+			const anchor = rangeAnchor();
+			if (e.shiftKey && anchor) {
+				selectRange(anchor, file.id, processedFiles);
+			} else {
 				// Select the focused row (replace selection)
 				selectedIds.set(new Set([file.id]));
 				lastClickedId = file.id;
@@ -426,7 +463,7 @@
 							tabindex="0"
 							style="height: {ROW_HEIGHT}px"
 							ondblclick={() => navigateToDir(row.name)}
-							onkeydown={(e) => { if (e.key === 'Enter') navigateToDir(row.name); }}
+							onkeydown={(e) => { if (e.key === 'Enter') { e.preventDefault(); navigateToDir(row.name); } }}
 						>
 							<div class="cell check-col" role="gridcell"></div>
 							<div class="cell dir-cell" role="gridcell" style="width: {columns[0].width}px">

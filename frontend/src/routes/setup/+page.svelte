@@ -39,6 +39,11 @@
 			}
 			goto('/');
 		} catch (err: any) {
+			if (err.status === 409) {
+				auth.update((s) => ({ ...s, setupRequired: false }));
+				goto('/login');
+				return;
+			}
 			error = err.message || 'Setup failed';
 		} finally {
 			loading = false;

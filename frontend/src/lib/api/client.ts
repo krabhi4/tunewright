@@ -3,6 +3,7 @@ import { auth } from '$lib/stores/auth';
 import { clearTags } from '$lib/stores/tags';
 
 const BASE = '/api/v1';
+const PUBLIC_AUTH_PATHS = ['/auth/login', '/auth/setup', '/auth/register', '/auth/logout', '/auth/check'];
 
 export class ApiError extends Error {
 	constructor(
@@ -26,7 +27,7 @@ export async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> 
 	});
 
 	if (!res.ok) {
-		if (res.status === 401 && !path.startsWith('/auth/')) {
+		if (res.status === 401 && !PUBLIC_AUTH_PATHS.includes(path)) {
 			auth.update((s) => ({ ...s, authenticated: false, user: null }));
 			clearTags(true);
 			goto('/login');

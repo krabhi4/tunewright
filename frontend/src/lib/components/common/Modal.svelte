@@ -1,3 +1,7 @@
+<script lang="ts" module>
+	const openModals: symbol[] = [];
+</script>
+
 <script lang="ts">
 	import type { Snippet } from 'svelte';
 
@@ -7,14 +11,30 @@
 		onClose: () => void;
 		children: Snippet;
 		wide?: boolean;
+		busy?: boolean;
 	}
 
-	let { title, open, onClose, children, wide = false }: Props = $props();
+	let { title, open, onClose, children, wide = false, busy = false }: Props = $props();
 
 	let backdropEl = $state<HTMLDivElement>();
+	const modalId = Symbol();
+
+	$effect(() => {
+		if (!open) return;
+		openModals.push(modalId);
+		return () => {
+			openModals.splice(openModals.indexOf(modalId), 1);
+		};
+	});
+
+	function handleWindowKeydown(e: KeyboardEvent) {
+		if (!open || busy || e.key !== 'Escape') return;
+		if (document.activeElement !== document.body || openModals.at(-1) !== modalId) return;
+		onClose();
+	}
 
 	function handleKeydown(e: KeyboardEvent) {
-		if (e.key === 'Escape') onClose();
+		if (e.key === 'Escape' && !busy) onClose();
 		if (e.key === 'Tab' && backdropEl) {
 			trapFocus(e);
 		}
@@ -43,16 +63,20 @@
 	}
 
 	function handleBackdrop(e: MouseEvent) {
-		if (e.target === e.currentTarget) onClose();
+		if (e.target === e.currentTarget && !busy) onClose();
 	}
 
 	$effect(() => {
 		if (open && backdropEl) {
 			const dialog = backdropEl;
 			const previouslyFocused = document.activeElement as HTMLElement | null;
-			const focusable = backdropEl.querySelector<HTMLElement>(
-				'input:not(:disabled):not([type="hidden"]), button:not(:disabled), select:not(:disabled), textarea:not(:disabled), [tabindex]:not([tabindex="-1"]):not(:disabled)'
-			);
+			const focusable =
+				backdropEl.querySelector<HTMLElement>(
+					'.modal-body input:not(:disabled):not([type="hidden"]):not([type="checkbox"]), .modal-body textarea:not(:disabled)'
+				) ??
+				backdropEl.querySelector<HTMLElement>(
+					'input:not(:disabled):not([type="hidden"]), button:not(:disabled), select:not(:disabled), textarea:not(:disabled), [tabindex]:not([tabindex="-1"]):not(:disabled)'
+				);
 			if (focusable) {
 				focusable.focus();
 			} else {
@@ -68,6 +92,8 @@
 	});
 </script>
 
+<svelte:window onkeydown={handleWindowKeydown} />
+
 {#if open}
 	<div
 		class="backdrop"
@@ -82,7 +108,7 @@
 		<div class="modal" class:modal-wide={wide}>
 			<div class="modal-header">
 				<h2 class="modal-title" id="modal-title">{title}</h2>
-				<button class="modal-close" onclick={onClose} aria-label="Close dialog">&times;</button>
+				<button class="modal-close" onclick={onClose} disabled={busy} aria-label="Close dialog">&times;</button>
 			</div>
 			<div class="modal-body">
 				{@render children()}
