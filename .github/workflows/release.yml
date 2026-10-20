@@ -18,6 +18,8 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
       - name: Verify version matches git tag
         env:
           TAG_VERSION: ${{ github.ref_name }}
@@ -57,7 +59,6 @@ jobs:
       set-meta-annotations: true
       sbom: true
       cache: true
-      cache-mode: max
     secrets:
       registry-auths: |
         - registry: ghcr.io
