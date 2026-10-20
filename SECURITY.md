@@ -77,7 +77,7 @@ MusicBrainz API calls are proxied through the server. This keeps API tokens serv
 
 | Version | Supported |
 |---------|-----------|
-| 1.0.x   | Yes       |
-| < 1.0   | No        |
+| 1.2.x   | Yes       |
+| < 1.2   | No        |
 
 Only the latest release receives security updates.

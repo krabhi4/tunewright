@@ -1,6 +1,9 @@
 mod auth;
 mod config;
 mod error;
+mod mcp;
+mod mcp_auth;
+mod persist;
 mod routes;
 mod state;
 mod users;
@@ -44,21 +47,21 @@ async fn main() {
         .state_dir
         .clone()
         .unwrap_or_else(|| config.data_dir.clone());
-    let legacy_users_path = config.data_dir.join("users.json");
-    if config.state_dir.is_some()
-        && !state_dir.join("users.json").exists()
-        && legacy_users_path.exists()
-    {
-        tracing::error!(
-            "TUNEWRIGHT_STATE_DIR is set to {:?} but it has no users.json, while {:?} exists. \
-             Move {:?} into {:?} (or unset TUNEWRIGHT_STATE_DIR) and restart; refusing to start \
-             because the existing accounts would be ignored and setup reopened.",
-            state_dir,
-            legacy_users_path,
-            legacy_users_path,
-            state_dir
-        );
-        std::process::exit(1);
+    for file in ["users.json", "mcp_auth.json"] {
+        let legacy_path = config.data_dir.join(file);
+        if config.state_dir.is_some() && !state_dir.join(file).exists() && legacy_path.exists() {
+            tracing::error!(
+                "TUNEWRIGHT_STATE_DIR is set to {:?} but it has no {}, while {:?} exists. \
+                 Move {:?} into {:?} (or unset TUNEWRIGHT_STATE_DIR) and restart; refusing to start \
+                 because the existing data would be ignored.",
+                state_dir,
+                file,
+                legacy_path,
+                legacy_path,
+                state_dir
+            );
+            std::process::exit(1);
+        }
     }
     std::fs::create_dir_all(&state_dir).expect("Failed to create state directory");
     let users_path = state_dir.join("users.json");

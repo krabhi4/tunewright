@@ -11,7 +11,7 @@ tunewright-lookup = { path = "../tunewright-lookup" }
 axum = { version = "0.8", features = ["multipart"] }
 axum-extra = { version = "0.12", features = ["typed-header"] }
 tokio = { workspace = true }
-tower-http = { version = "0.7", features = ["fs", "trace", "set-header"] }
+tower-http = { version = "0.7", features = ["fs", "trace", "set-header", "cors"] }
 serde = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }
@@ -25,6 +25,10 @@ hex = { workspace = true }
 argon2 = "0.6"
 uuid = { version = "1", features = ["v4"] }
 chrono = { version = "0.4", default-features = false, features = ["serde", "now", "std"] }
+sha2 = "0.11"
+base64 = "0.22"
+serde_urlencoded = "0.7"
+image = { version = ">=0.25.0, <0.25.11", default-features = false, features = ["jpeg", "png"] }
 
 [dev-dependencies]
 tower = { version = "0.5", features = ["util"] }

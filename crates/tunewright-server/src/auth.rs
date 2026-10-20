@@ -316,18 +316,31 @@ pub async fn login(
     ClientIp(ip): ClientIp,
     Json(body): Json<LoginRequest>,
 ) -> Response {
+    match verify_credentials(&state, ip, &body.username, &body.password).await {
+        Ok(user) => create_session_response(&state, &user.id, &user.username, user.role),
+        Err(response) => response,
+    }
+}
+
+#[allow(clippy::result_large_err)]
+pub async fn verify_credentials(
+    state: &AppState,
+    ip: std::net::IpAddr,
+    raw_username: &str,
+    password: &str,
+) -> Result<users::User, Response> {
     // Brute-force throttling, keyed per normalized username (matches the
     // normalization applied at account creation) and client address, so one
     // client's failures never throttle the same account for another client.
-    let username = body.username.trim().to_lowercase();
+    let username = raw_username.trim().to_lowercase();
 
     // The key is stored in a long-lived map, so bound it before it gets there.
     if username.len() > MAX_USERNAME_BYTES {
-        return (
+        return Err((
             StatusCode::BAD_REQUEST,
             Json(serde_json::json!({ "error": "Username too long" })),
         )
-            .into_response();
+            .into_response());
     }
     let throttle_key = format!("{ip} {username}");
 
@@ -339,7 +352,7 @@ pub async fn login(
         penalty_remaining(&guard, &throttle_key)
     };
     if let Some(wait) = remaining {
-        return too_many_requests(wait.as_millis().div_ceil(1000) as u64);
+        return Err(too_many_requests(wait.as_millis().div_ceil(1000) as u64));
     }
 
     // One verify per client address at a time, taken before the global Argon2
@@ -347,21 +360,21 @@ pub async fn login(
     // attempts are refused immediately rather than queued.
     let gate = state.login_gate(&ip.to_string());
     let Ok(gate_guard) = gate.try_lock() else {
-        return too_many_requests(1);
+        return Err(too_many_requests(1));
     };
 
     // Global bound on concurrent Argon2 work. Never queued: a saturated pool
     // answers 503 instead of stalling every login behind it.
     let Ok(_permit) = state.password_hash_limit.clone().try_acquire_owned() else {
-        return (
+        return Err((
             StatusCode::SERVICE_UNAVAILABLE,
             Json(serde_json::json!({ "error": "Server busy, try again" })),
         )
-            .into_response();
+            .into_response());
     };
 
-    let user = state.users.find_by_username(&body.username);
-    let password = body.password.clone();
+    let user = state.users.find_by_username(raw_username);
+    let password = password.to_string();
 
     // The password is always verified. Throttling must never be able to reject
     // valid credentials, or an attacker could lock the owner out of their own
@@ -390,8 +403,7 @@ pub async fn login(
             .unwrap_or_else(|e| e.into_inner());
         guard.remove(&throttle_key);
         drop(guard);
-        let user = user.unwrap();
-        return create_session_response(&state, &user.id, &user.username, user.role);
+        return Ok(user.unwrap());
     }
 
     // Wrong password: record it, then slow the response down. Further attempts
@@ -410,17 +422,17 @@ pub async fn login(
     drop(_permit);
     tokio::time::sleep(penalty).await;
 
-    (
+    Err((
         StatusCode::UNAUTHORIZED,
         Json(serde_json::json!({ "error": "Invalid credentials" })),
     )
-        .into_response()
+        .into_response())
 }
 
 // --- Logout ---
 
 pub async fn logout(State(state): State<AppState>, req: Request<Body>) -> Response {
-    if let Some(token) = extract_token(&req) {
+    if let Some(token) = extract_token(req.headers()) {
         state.remove_session(&token);
     }
     let cookie = if state.config.cookie_secure {
@@ -663,9 +675,18 @@ pub async fn delete_user(
     match res {
         Ok(Ok(true)) => {
             // Purge all sessions belonging to the deleted user
-            let mut sessions = state.sessions.lock().unwrap_or_else(|e| e.into_inner());
-            sessions.retain(|_, s| s.user_id != id);
-            drop(sessions);
+            state
+                .sessions
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .retain(|_, s| s.user_id != id);
+            let mcp_auth = state.mcp_auth.clone();
+            let user_id = id.clone();
+            match tokio::task::spawn_blocking(move || mcp_auth.revoke_user(&user_id)).await {
+                Ok(Ok(())) => {}
+                Ok(Err(e)) => tracing::error!("Failed to revoke MCP tokens of deleted user: {e}"),
+                Err(e) => tracing::error!("Failed to revoke MCP tokens of deleted user: {e}"),
+            }
             (StatusCode::OK, Json(serde_json::json!({ "status": "ok" }))).into_response()
         }
         Ok(Ok(false)) => (
@@ -749,8 +770,8 @@ pub async fn require_auth(
 
 // --- Helpers ---
 
-fn extract_token(req: &Request<Body>) -> Option<String> {
-    req.headers()
+fn extract_token(headers: &axum::http::HeaderMap) -> Option<String> {
+    headers
         .get("Cookie")
         .and_then(|v| v.to_str().ok())
         .and_then(|cookies| {
@@ -767,7 +788,11 @@ fn extract_token(req: &Request<Body>) -> Option<String> {
 }
 
 fn get_session(state: &AppState, req: &Request<Body>) -> Option<Session> {
-    extract_token(req).and_then(|token| state.get_session(&token))
+    session_from_headers(state, req.headers())
+}
+
+pub fn session_from_headers(state: &AppState, headers: &axum::http::HeaderMap) -> Option<Session> {
+    extract_token(headers).and_then(|token| state.get_session(&token))
 }
 
 #[allow(clippy::result_large_err)]
@@ -833,6 +858,7 @@ mod tests {
             cookie_secure: false,
             trust_proxy: false,
             setup_token: None,
+            public_url: None,
         };
         let state = AppState::new(config, user_manager);
 
@@ -906,6 +932,7 @@ mod tests {
             cookie_secure: false,
             trust_proxy: false,
             setup_token: None,
+            public_url: None,
         };
         let state = AppState::new(config, user_manager);
 
@@ -1018,6 +1045,7 @@ mod tests {
             cookie_secure: false,
             trust_proxy: false,
             setup_token: None,
+            public_url: None,
         };
         let users =
             UserManager::load(std::env::temp_dir().join(format!("users_{}.json", rand_num())));
@@ -1050,6 +1078,7 @@ mod tests {
             cookie_secure: false,
             trust_proxy: false,
             setup_token: None,
+            public_url: None,
         };
         let users = UserManager::load(temp_dir.join("missing").join("users.json"));
         let state = AppState::new(config, users);
@@ -1081,6 +1110,7 @@ mod tests {
             cookie_secure: false,
             trust_proxy: false,
             setup_token: Some("sekret123".to_string()),
+            public_url: None,
         };
         let state = AppState::new(config, user_manager);
 
@@ -1142,6 +1172,7 @@ mod tests {
             cookie_secure: false,
             trust_proxy: false,
             setup_token: Some("sekret123".to_string()),
+            public_url: None,
         };
         let state = AppState::new(config, user_manager);
 
@@ -1197,6 +1228,7 @@ mod tests {
             cookie_secure: false,
             trust_proxy: false,
             setup_token: None,
+            public_url: None,
         };
         let state = AppState::new(config, user_manager);
         let hash = users::hash_password("correct horse battery").unwrap();
@@ -1250,6 +1282,7 @@ mod tests {
             cookie_secure: false,
             trust_proxy: false,
             setup_token: None,
+            public_url: None,
         };
         let state = AppState::new(config, user_manager);
         let attempt = |name: &str| LoginRequest {
@@ -1296,6 +1329,7 @@ mod tests {
             cookie_secure: false,
             trust_proxy: false,
             setup_token: None,
+            public_url: None,
         };
         let state = AppState::new(config, user_manager);
 
@@ -1326,6 +1360,7 @@ mod tests {
             cookie_secure: false,
             trust_proxy: false,
             setup_token: None,
+            public_url: None,
         };
         let state = AppState::new(config, user_manager);
 
@@ -1367,6 +1402,7 @@ mod tests {
             cookie_secure: false,
             trust_proxy: false,
             setup_token: None,
+            public_url: None,
         };
         let state = AppState::new(config, user_manager);
 
@@ -1416,6 +1452,7 @@ mod tests {
             cookie_secure: false,
             trust_proxy: false,
             setup_token: None,
+            public_url: None,
         };
         let state = AppState::new(config, user_manager);
         let hash = users::hash_password("correct horse battery").unwrap();

@@ -12,6 +12,7 @@ pub struct Config {
     /// Optional token required by /auth/setup to claim the first admin
     /// account. Protects the setup window on network-exposed deployments.
     pub setup_token: Option<String>,
+    pub public_url: Option<String>,
 }
 
 impl Config {
@@ -52,6 +53,33 @@ impl Config {
                 .ok()
                 .map(|s| s.trim().to_string())
                 .filter(|s| !s.is_empty()),
+            public_url: public_url_from_env(),
+        }
+    }
+}
+
+fn public_url_from_env() -> Option<String> {
+    let raw = std::env::var("TUNEWRIGHT_PUBLIC_URL").ok()?;
+    let raw = raw.trim();
+    if raw.is_empty() {
+        return None;
+    }
+    match reqwest::Url::parse(raw) {
+        Ok(url)
+            if matches!(url.scheme(), "http" | "https")
+                && url.host_str().is_some()
+                && url.username().is_empty()
+                && url.path() == "/"
+                && url.query().is_none()
+                && url.fragment().is_none() =>
+        {
+            Some(url.origin().ascii_serialization())
+        }
+        _ => {
+            tracing::warn!(
+                "TUNEWRIGHT_PUBLIC_URL '{raw}' must be an http(s) origin such as https://music.example.com, ignoring it"
+            );
+            None
         }
     }
 }
@@ -131,5 +159,28 @@ mod tests {
 
         // Cleanup
         std::env::remove_var("TUNEWRIGHT_PORT");
+    }
+
+    #[test]
+    fn test_public_url_from_env() {
+        for (raw, expected) in [
+            (
+                "https://Music.Example.com/",
+                Some("https://music.example.com"),
+            ),
+            ("http://192.168.1.5:8080", Some("http://192.168.1.5:8080")),
+            (
+                "https://music.example.com:443",
+                Some("https://music.example.com"),
+            ),
+            ("https://music.example.com/tunewright", None),
+            ("ftp://music.example.com", None),
+            ("not a url", None),
+            ("  ", None),
+        ] {
+            std::env::set_var("TUNEWRIGHT_PUBLIC_URL", raw);
+            assert_eq!(public_url_from_env().as_deref(), expected, "{raw}");
+        }
+        std::env::remove_var("TUNEWRIGHT_PUBLIC_URL");
     }
 }

@@ -162,6 +162,7 @@ mod tests {
             cookie_secure: false,
             trust_proxy: false,
             setup_token: None,
+            public_url: None,
         };
         let state = AppState::new(config, user_manager);
 

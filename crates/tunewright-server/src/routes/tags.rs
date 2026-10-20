@@ -178,6 +178,7 @@ mod tests {
             cookie_secure: false,
             trust_proxy: false,
             setup_token: None,
+            public_url: None,
         };
         let state = AppState::new(
             config,
@@ -217,6 +218,7 @@ mod tests {
                 cookie_secure: false,
                 trust_proxy: false,
                 setup_token: None,
+                public_url: None,
             },
             crate::users::UserManager::load(dir.join("users.json")),
         );

@@ -13,12 +13,13 @@
 		onActions?: () => void;
 		onLookup?: () => void;
 		onManageUsers?: () => void;
+		onConnectMcp?: () => void;
 		guard?: (action: () => void) => void;
 		hasPendingEdits?: boolean;
 		hasSelection?: boolean;
 	}
 
-	let { onOpenFolder, onSave, onRename, onFilenameToTag, onActions, onLookup, onManageUsers, guard, hasPendingEdits = false, hasSelection = false }: Props = $props();
+	let { onOpenFolder, onSave, onRename, onFilenameToTag, onActions, onLookup, onManageUsers, onConnectMcp, guard, hasPendingEdits = false, hasSelection = false }: Props = $props();
 </script>
 
 <div class="toolbar">
@@ -63,9 +64,14 @@
 		<span>Tunewright</span>
 	</div>
 
+	<button class="toolbar-btn" onclick={onConnectMcp} title="Connect MCP (AI Assistants & Developer Tools)">
+		<Icon path={ICONS.command} size={15} />
+		<span>MCP</span>
+	</button>
+
 	<ThemeMenu />
 
-	<UserMenu {onManageUsers} {guard} />
+	<UserMenu {onManageUsers} {onConnectMcp} {guard} />
 </div>
 
 <style>

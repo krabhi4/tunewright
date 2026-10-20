@@ -78,6 +78,7 @@ pub struct AppState {
     pub http_client: reqwest::Client,
     /// Shared dedicated client for cover art requests, with restricted redirects.
     pub coverart_client: reqwest::Client,
+    pub mcp_auth: crate::mcp_auth::McpAuthManager,
 }
 
 impl AppState {
@@ -124,6 +125,12 @@ impl AppState {
             .build()
             .expect("failed to build HTTP client");
 
+        let state_dir = config
+            .state_dir
+            .clone()
+            .unwrap_or_else(|| config.data_dir.clone());
+        let mcp_auth = crate::mcp_auth::McpAuthManager::load(state_dir.join("mcp_auth.json"));
+
         Self {
             config,
             data_root,
@@ -136,6 +143,7 @@ impl AppState {
             login_gates: Arc::new(Mutex::new(HashMap::new())),
             http_client,
             coverart_client,
+            mcp_auth,
         }
     }
 
@@ -219,6 +227,7 @@ mod tests {
             cookie_secure: false,
             trust_proxy: false,
             setup_token: None,
+            public_url: None,
         };
         let users =
             UserManager::load(std::env::temp_dir().join(format!("users_{}.json", rand_num())));

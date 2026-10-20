@@ -95,7 +95,8 @@ All configuration is via environment variables.
 | `TUNEWRIGHT_DATA_DIR` | `/data` | Music directory inside the container |
 | `TUNEWRIGHT_PORT` | `8080` | HTTP port |
 | `TUNEWRIGHT_HOST` | `127.0.0.1` (`0.0.0.0` in the Docker image) | Bind address |
-| `TUNEWRIGHT_STATE_DIR` | data directory | Directory for `users.json`; set it to keep account data out of the music library (mount a writable volume there). An existing `users.json` is not moved automatically: if the data directory has one and the state directory does not, the server refuses to start until you move it |
+| `TUNEWRIGHT_STATE_DIR` | data directory | Directory for `users.json` and `mcp_auth.json`; set it to keep account data out of the music library (mount a writable volume there). An existing `users.json` or `mcp_auth.json` is not moved automatically: if the data directory has one and the state directory does not, the server refuses to start until you move it |
+| `TUNEWRIGHT_PUBLIC_URL` | unset | Public address of this server, such as `https://music.example.com`, used for MCP sign-in URLs and origin checks. When unset they come from the request's `Host` header (or the forwarded headers with `TUNEWRIGHT_TRUST_PROXY`) |
 | `TUNEWRIGHT_STATIC_DIR` | `/srv/static` | Frontend build directory (set by Docker) |
 | `TUNEWRIGHT_SETUP_TOKEN` | unset | Token required to claim the first admin account |
 | `TUNEWRIGHT_COOKIE_SECURE` | `false` | Set to `true` when serving over HTTPS so the session cookie gets the `Secure` flag |

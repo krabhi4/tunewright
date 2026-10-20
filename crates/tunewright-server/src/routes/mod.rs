@@ -42,6 +42,7 @@ fn content_security_policy(static_dir: &Path) -> HeaderValue {
 }
 
 use crate::auth;
+use crate::mcp::oauth;
 use crate::state::AppState;
 
 pub fn create_router(state: AppState) -> Router {
@@ -99,6 +100,12 @@ pub fn create_router(state: AppState) -> Router {
             "/lookup/applemusic/release/{id}",
             get(lookup::applemusic_release),
         )
+        .route(
+            "/mcp/tokens",
+            get(oauth::list_user_tokens).post(oauth::create_pat),
+        )
+        .route("/mcp/tokens/{id}", delete(oauth::revoke_token))
+        .route("/mcp/config", get(oauth::mcp_config))
         .layer(middleware::from_fn_with_state(
             state.clone(),
             auth::require_auth,
@@ -107,11 +114,38 @@ pub fn create_router(state: AppState) -> Router {
         // of falling through to the unauthenticated SPA fallback.
         .fallback(api_not_found);
 
+    let mcp_root = Router::new()
+        .route("/mcp", post(crate::mcp::mcp_post))
+        .route(
+            "/oauth/authorize",
+            get(oauth::authorize_get).post(oauth::authorize_post),
+        )
+        .merge(
+            Router::new()
+                .route("/oauth/register", post(oauth::register_client))
+                .route("/oauth/token", post(oauth::token_post))
+                .route(
+                    "/.well-known/oauth-protected-resource",
+                    get(oauth::protected_resource_metadata),
+                )
+                .route(
+                    "/.well-known/oauth-protected-resource/mcp",
+                    get(oauth::protected_resource_metadata),
+                )
+                .route(
+                    "/.well-known/oauth-authorization-server",
+                    get(oauth::authorization_server_metadata),
+                )
+                .route("/.well-known/{*rest}", get(api_not_found))
+                .layer(crate::mcp::cors_layer()),
+        );
+
     let static_dir = state.config.static_dir.clone();
     let index_file = static_dir.join("index.html");
     let csp = content_security_policy(&static_dir);
 
     Router::new()
+        .merge(mcp_root)
         .nest("/api/v1", api)
         .nest_service("/_app", ServeDir::new(static_dir.join("_app")))
         .fallback_service(ServeDir::new(&static_dir).fallback(ServeFile::new(index_file)))
@@ -197,6 +231,7 @@ mod tests {
             cookie_secure: false,
             trust_proxy: false,
             setup_token: None,
+            public_url: None,
         };
         let state = AppState::new(
             config,

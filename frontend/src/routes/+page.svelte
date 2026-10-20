@@ -12,6 +12,7 @@
 	import ActionsModal from '$lib/components/actions/ActionsModal.svelte';
 	import LookupModal from '$lib/components/lookup/LookupModal.svelte';
 	import UserManagementModal from '$lib/components/layout/UserManagementModal.svelte';
+	import ConnectMcpModal from '$lib/components/layout/ConnectMcpModal.svelte';
 	import {
 		files,
 		selectedCount,
@@ -64,6 +65,7 @@
 	let actionsModalOpen = $state(false);
 	let lookupModalOpen = $state(false);
 	let userManagementOpen = $state(false);
+	let connectMcpOpen = $state(false);
 
 	function closeAllModals() {
 		folderPickerOpen = false;
@@ -72,6 +74,7 @@
 		actionsModalOpen = false;
 		lookupModalOpen = false;
 		userManagementOpen = false;
+		connectMcpOpen = false;
 	}
 
 	// --- Unsaved edits guard ---
@@ -305,6 +308,7 @@
 	onActions={() => openModal(openActions)}
 	onLookup={() => openModal(() => (lookupModalOpen = true))}
 	onManageUsers={() => { closeAllModals(); userManagementOpen = true; }}
+	onConnectMcp={() => { closeAllModals(); connectMcpOpen = true; }}
 	guard={guardUnsaved}
 	hasPendingEdits={$hasPendingEdits && !saving}
 	hasSelection={$selectedCount > 0}
@@ -410,6 +414,11 @@
 <UserManagementModal
 	open={userManagementOpen}
 	onClose={() => (userManagementOpen = false)}
+/>
+
+<ConnectMcpModal
+	open={connectMcpOpen}
+	onClose={() => (connectMcpOpen = false)}
 />
 
 <style>

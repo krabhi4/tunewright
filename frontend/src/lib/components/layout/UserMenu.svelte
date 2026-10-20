@@ -6,10 +6,11 @@
 
 	interface Props {
 		onManageUsers?: () => void;
+		onConnectMcp?: () => void;
 		guard?: (action: () => void) => void;
 	}
 
-	let { onManageUsers, guard = (action) => action() }: Props = $props();
+	let { onManageUsers, onConnectMcp, guard = (action) => action() }: Props = $props();
 	let open = $state(false);
 	let dropdownEl = $state<HTMLDivElement>();
 
@@ -35,6 +36,11 @@
 	function handleManageUsers() {
 		open = false;
 		onManageUsers?.();
+	}
+
+	function handleConnectMcp() {
+		open = false;
+		onConnectMcp?.();
 	}
 
 	function handleClickOutside(e: MouseEvent) {
@@ -109,6 +115,9 @@
 						Manage Users
 					</button>
 				{/if}
+				<button class="dropdown-item" role="menuitem" onclick={handleConnectMcp}>
+					Connect MCP
+				</button>
 				<button class="dropdown-item dropdown-item--danger" role="menuitem" onclick={handleLogout}>
 					Sign Out
 				</button>
