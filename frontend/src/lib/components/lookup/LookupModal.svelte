@@ -1,14 +1,14 @@
 <script lang="ts">
-	import Modal from '$lib/components/common/Modal.svelte';
-	import type { FileEntry } from '$lib/types/audio';
-	import { searchMusicBrainz, getMusicBrainzRelease, searchAppleMusic, getAppleMusicRelease } from '$lib/api/lookup';
-	import type { ReleaseSearchResult, ReleaseDetail, TrackInfo } from '$lib/api/lookup';
-	import { mergedTags, KEEP_VALUE } from '$lib/stores/tags';
-	import { applyReleaseToFiles } from '$lib/services/applyRelease';
-	import { embedCoverArtFromUrl } from '$lib/api/coverart';
-	import { bumpCoverArt } from '$lib/stores/ui';
-	import { toast } from '$lib/stores/toast';
-	import { selectedIds, files } from '$lib/stores/files';
+	import Modal from '#lib/components/common/Modal.svelte';
+	import type { FileEntry } from '#lib/types/audio.ts';
+	import { searchMusicBrainz, getMusicBrainzRelease, searchAppleMusic, getAppleMusicRelease } from '#lib/api/lookup.ts';
+	import type { ReleaseSearchResult, ReleaseDetail, TrackInfo } from '#lib/api/lookup.ts';
+	import { mergedTags, KEEP_VALUE } from '#lib/stores/tags.ts';
+	import { applyReleaseToFiles } from '#lib/services/applyRelease.ts';
+	import { embedCoverArtFromUrl } from '#lib/api/coverart.ts';
+	import { bumpCoverArt } from '#lib/stores/ui.ts';
+	import { toast } from '#lib/stores/toast.ts';
+	import { selectedIds, files } from '#lib/stores/files.ts';
 	import { get } from 'svelte/store';
 
 	const COVER_HOSTS = ['coverartarchive.org', 'archive.org', 'mzstatic.com'];
@@ -25,8 +25,8 @@
 			return undefined;
 		}
 	}
-	import { selectedTags } from '$lib/stores/tags';
-	import { formatDuration } from '$lib/utils/format';
+	import { selectedTags } from '#lib/stores/tags.ts';
+	import { formatDuration } from '#lib/utils/format.ts';
 
 	interface Props {
 		open: boolean;

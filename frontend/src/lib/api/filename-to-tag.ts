@@ -1,5 +1,5 @@
 import { apiFetch } from './client';
-import type { TagData } from '$lib/types/audio';
+import type { TagData } from '#lib/types/audio.ts';
 
 interface FileEntry {
 	id: string;

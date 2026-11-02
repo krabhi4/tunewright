@@ -1,9 +1,9 @@
 <script lang="ts">
 	import { goto } from '$app/navigation';
 	import { page } from '$app/state';
-	import { register } from '$lib/api/auth';
-	import { auth } from '$lib/stores/auth';
-	import Logo from '$lib/icons/Logo.svelte';
+	import { register } from '#lib/api/auth.ts';
+	import { auth } from '#lib/stores/auth.ts';
+	import Logo from '#lib/icons/Logo.svelte';
 
 	function tokenFromUrl(): string {
 		const hash = page.url.hash.replace(/^#/, '');

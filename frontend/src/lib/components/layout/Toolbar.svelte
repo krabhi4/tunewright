@@ -1,9 +1,9 @@
 <script lang="ts">
 	import UserMenu from './UserMenu.svelte';
 	import ThemeMenu from './ThemeMenu.svelte';
-	import Icon from '$lib/icons/Icon.svelte';
-	import { ICONS } from '$lib/icons';
-	import Logo from '$lib/icons/Logo.svelte';
+	import Icon from '#lib/icons/Icon.svelte';
+	import { ICONS } from '#lib/icons/index.ts';
+	import Logo from '#lib/icons/Logo.svelte';
 
 	interface Props {
 		onOpenFolder: () => void;

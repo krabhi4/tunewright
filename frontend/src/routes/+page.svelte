@@ -1,18 +1,18 @@
 <script lang="ts">
-	import Toolbar from '$lib/components/layout/Toolbar.svelte';
-	import StatusBar from '$lib/components/layout/StatusBar.svelte';
-	import FilterBar from '$lib/components/layout/FilterBar.svelte';
-	import PathBar from '$lib/components/layout/PathBar.svelte';
-	import TagPanel from '$lib/components/tagpanel/TagPanel.svelte';
-	import FileGrid from '$lib/components/grid/FileGrid.svelte';
-	import FolderPicker from '$lib/components/common/FolderPicker.svelte';
-	import ConfirmModal from '$lib/components/common/ConfirmModal.svelte';
-	import RenameModal from '$lib/components/rename/RenameModal.svelte';
-	import FilenameToTagModal from '$lib/components/filename2tag/FilenameToTagModal.svelte';
-	import ActionsModal from '$lib/components/actions/ActionsModal.svelte';
-	import LookupModal from '$lib/components/lookup/LookupModal.svelte';
-	import UserManagementModal from '$lib/components/layout/UserManagementModal.svelte';
-	import ConnectMcpModal from '$lib/components/layout/ConnectMcpModal.svelte';
+	import Toolbar from '#lib/components/layout/Toolbar.svelte';
+	import StatusBar from '#lib/components/layout/StatusBar.svelte';
+	import FilterBar from '#lib/components/layout/FilterBar.svelte';
+	import PathBar from '#lib/components/layout/PathBar.svelte';
+	import TagPanel from '#lib/components/tagpanel/TagPanel.svelte';
+	import FileGrid from '#lib/components/grid/FileGrid.svelte';
+	import FolderPicker from '#lib/components/common/FolderPicker.svelte';
+	import ConfirmModal from '#lib/components/common/ConfirmModal.svelte';
+	import RenameModal from '#lib/components/rename/RenameModal.svelte';
+	import FilenameToTagModal from '#lib/components/filename2tag/FilenameToTagModal.svelte';
+	import ActionsModal from '#lib/components/actions/ActionsModal.svelte';
+	import LookupModal from '#lib/components/lookup/LookupModal.svelte';
+	import UserManagementModal from '#lib/components/layout/UserManagementModal.svelte';
+	import ConnectMcpModal from '#lib/components/layout/ConnectMcpModal.svelte';
 	import {
 		files,
 		selectedCount,
@@ -20,8 +20,8 @@
 		loadDirectory,
 		currentPath,
 		selectedFiles
-	} from '$lib/stores/files';
-	import { filterVisible, filterText, sidebarWidth, sidebarCollapsed, sortColumn, sortAsc } from '$lib/stores/ui';
+	} from '#lib/stores/files.ts';
+	import { filterVisible, filterText, sidebarWidth, sidebarCollapsed, sortColumn, sortAsc } from '#lib/stores/ui.ts';
 	import {
 		clearTags,
 		discardEdits,
@@ -30,9 +30,9 @@
 		saveAllEdits,
 		pendingEditCount,
 		loadedTags
-	} from '$lib/stores/tags';
-	import { selectedIds } from '$lib/stores/files';
-	import { toast } from '$lib/stores/toast';
+	} from '#lib/stores/tags.ts';
+	import { selectedIds } from '#lib/stores/files.ts';
+	import { toast } from '#lib/stores/toast.ts';
 	import { flushSync, onMount } from 'svelte';
 	import { get } from 'svelte/store';
 	import { goto } from '$app/navigation';

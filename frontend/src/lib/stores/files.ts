@@ -1,7 +1,7 @@
 import { writable, derived, get } from 'svelte/store';
-import type { FileEntry } from '$lib/types/audio';
-import type { ApiError } from '$lib/api/client';
-import { listFiles } from '$lib/api/files';
+import type { FileEntry } from '#lib/types/audio.ts';
+import type { ApiError } from '#lib/api/client.ts';
+import { listFiles } from '#lib/api/files.ts';
 import { toast } from './toast';
 
 export const currentPath = writable('/');

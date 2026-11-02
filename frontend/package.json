@@ -10,6 +10,9 @@
     "url": "https://github.com/krabhi4/tunewright.git"
   },
   "type": "module",
+  "imports": {
+    "#lib/*": "./src/lib/*"
+  },
   "scripts": {
     "dev": "vite dev",
     "build": "vite build",

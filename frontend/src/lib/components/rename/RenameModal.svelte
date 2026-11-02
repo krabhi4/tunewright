@@ -1,9 +1,9 @@
 <script lang="ts">
-	import Modal from '$lib/components/common/Modal.svelte';
-	import type { FileEntry } from '$lib/types/audio';
-	import { previewRenames, executeRenames } from '$lib/api/rename';
-	import type { RenamePreview } from '$lib/api/rename';
-	import { toast } from '$lib/stores/toast';
+	import Modal from '#lib/components/common/Modal.svelte';
+	import type { FileEntry } from '#lib/types/audio.ts';
+	import { previewRenames, executeRenames } from '#lib/api/rename.ts';
+	import type { RenamePreview } from '#lib/api/rename.ts';
+	import { toast } from '#lib/stores/toast.ts';
 	import { untrack } from 'svelte';
 
 	interface Props {

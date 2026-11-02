@@ -1,11 +1,11 @@
 <script lang="ts">
-	import Modal from '$lib/components/common/Modal.svelte';
-	import type { FileEntry, TagData } from '$lib/types/audio';
-	import { previewFilenameToTag } from '$lib/api/filename-to-tag';
-	import type { FilenameTagPreview } from '$lib/api/filename-to-tag';
-	import { writeTags } from '$lib/api/tags';
-	import { fetchTagsForFiles } from '$lib/stores/tags';
-	import { toast } from '$lib/stores/toast';
+	import Modal from '#lib/components/common/Modal.svelte';
+	import type { FileEntry, TagData } from '#lib/types/audio.ts';
+	import { previewFilenameToTag } from '#lib/api/filename-to-tag.ts';
+	import type { FilenameTagPreview } from '#lib/api/filename-to-tag.ts';
+	import { writeTags } from '#lib/api/tags.ts';
+	import { fetchTagsForFiles } from '#lib/stores/tags.ts';
+	import { toast } from '#lib/stores/toast.ts';
 	import { untrack } from 'svelte';
 
 	interface Props {

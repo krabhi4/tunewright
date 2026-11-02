@@ -4,10 +4,10 @@
 	import { onMount } from 'svelte';
 	import { goto } from '$app/navigation';
 	import { page } from '$app/state';
-	import { checkAuth } from '$lib/api/auth';
-	import { auth } from '$lib/stores/auth';
-	import { initTheme } from '$lib/stores/theme';
-	import Toasts from '$lib/components/common/Toasts.svelte';
+	import { checkAuth } from '#lib/api/auth.ts';
+	import { auth } from '#lib/stores/auth.ts';
+	import { initTheme } from '#lib/stores/theme.ts';
+	import Toasts from '#lib/components/common/Toasts.svelte';
 
 	let { children }: { children: Snippet } = $props();
 	let authChecked = $state(false);

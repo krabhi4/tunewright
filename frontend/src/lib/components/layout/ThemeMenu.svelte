@@ -1,8 +1,8 @@
 <script lang="ts">
-	import Icon from '$lib/icons/Icon.svelte';
-	import { ICONS } from '$lib/icons';
-	import { themeFamily, themeMode, setThemeFamily, setThemeMode } from '$lib/stores/theme';
-	import { THEME_FAMILIES, familySupportsLight, type ThemeFamily } from '$lib/theme/resolve';
+	import Icon from '#lib/icons/Icon.svelte';
+	import { ICONS } from '#lib/icons/index.ts';
+	import { themeFamily, themeMode, setThemeFamily, setThemeMode } from '#lib/stores/theme.ts';
+	import { THEME_FAMILIES, familySupportsLight, type ThemeFamily } from '#lib/theme/resolve.ts';
 
 	const FAMILY_META: Record<ThemeFamily, { label: string; swatch: string; hint: string }> = {
 		console: { label: 'Console', swatch: '#4d8dff', hint: 'Utility · default' },

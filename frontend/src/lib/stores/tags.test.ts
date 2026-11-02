@@ -16,17 +16,17 @@ import {
 import { files, selectedIds } from './files';
 import { auth } from './auth';
 import { toasts } from './toast';
-import * as tagsApi from '$lib/api/tags';
-import type { FileEntry, TagData } from '$lib/types/audio';
+import * as tagsApi from '#lib/api/tags.ts';
+import type { FileEntry, TagData } from '#lib/types/audio.ts';
 
 // Mock tag and file APIs
-vi.mock('$lib/api/tags', () => ({
+vi.mock('#lib/api/tags.ts', () => ({
 	readTags: vi.fn().mockResolvedValue({}),
 	readProperties: vi.fn().mockResolvedValue({}),
 	writeTags: vi.fn()
 }));
 
-vi.mock('$lib/api/files', () => ({
+vi.mock('#lib/api/files.ts', () => ({
 	listFiles: vi.fn()
 }));
 

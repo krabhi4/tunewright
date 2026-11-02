@@ -1,9 +1,9 @@
 <script lang="ts">
-	import { selectedCount, selectedFiles, selectedIds } from '$lib/stores/files';
-	import { selectedTags, KEEP_VALUE, setPendingEdit, clearPendingEdit, pendingEdits, selectedUnreadableCount } from '$lib/stores/tags';
-	import { getCoverArtUrl, uploadCoverArt } from '$lib/api/coverart';
-	import { coverArtVersion, bumpCoverArt } from '$lib/stores/ui';
-	import { toast } from '$lib/stores/toast';
+	import { selectedCount, selectedFiles, selectedIds } from '#lib/stores/files.ts';
+	import { selectedTags, KEEP_VALUE, setPendingEdit, clearPendingEdit, pendingEdits, selectedUnreadableCount } from '#lib/stores/tags.ts';
+	import { getCoverArtUrl, uploadCoverArt } from '#lib/api/coverart.ts';
+	import { coverArtVersion, bumpCoverArt } from '#lib/stores/ui.ts';
+	import { toast } from '#lib/stores/toast.ts';
 
 	let coverArtError = $state(false);
 	let dragOver = $state(false);
