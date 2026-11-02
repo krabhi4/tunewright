@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { get } from 'svelte/store';
 
-vi.mock('$app/environment', () => ({
+vi.mock('$app/env', () => ({
 	browser: true
 }));
 

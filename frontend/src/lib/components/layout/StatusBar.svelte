@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { formatTotalDuration, formatSize } from '$lib/utils/format';
+	import { formatTotalDuration, formatSize } from '#lib/utils/format.ts';
 
 	interface Props {
 		fileCount: number;

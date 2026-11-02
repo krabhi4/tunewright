@@ -1,5 +1,5 @@
 <script lang="ts">
-	import Modal from '$lib/components/common/Modal.svelte';
+	import Modal from '#lib/components/common/Modal.svelte';
 	import {
 		getMcpConfig,
 		listMcpTokens,
@@ -7,10 +7,10 @@
 		revokeMcpToken,
 		type McpToken,
 		type CreatedPatResponse
-	} from '$lib/api/mcp';
-	import { auth } from '$lib/stores/auth';
-	import { toast } from '$lib/stores/toast';
-	import { copyText } from '$lib/utils/clipboard';
+	} from '#lib/api/mcp.ts';
+	import { auth } from '#lib/stores/auth.ts';
+	import { toast } from '#lib/stores/toast.ts';
+	import { copyText } from '#lib/utils/clipboard.ts';
 
 	interface Props {
 		open: boolean;

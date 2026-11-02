@@ -1,13 +1,13 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { get } from 'svelte/store';
 import { applyReleaseToFiles } from './applyRelease';
-import { pendingEdits, saveAllEdits } from '$lib/stores/tags';
-import { executeRenames } from '$lib/api/rename';
-import type { ReleaseDetail } from '$lib/api/lookup';
-import type { FileEntry } from '$lib/types/audio';
+import { pendingEdits, saveAllEdits } from '#lib/stores/tags.ts';
+import { executeRenames } from '#lib/api/rename.ts';
+import type { ReleaseDetail } from '#lib/api/lookup.ts';
+import type { FileEntry } from '#lib/types/audio.ts';
 
 // Mock the dependencies using a custom store implementation to avoid import hoisting issues.
-vi.mock('$lib/stores/tags', () => {
+vi.mock('#lib/stores/tags.ts', () => {
 	let value = new Map<string, any>();
 	const subscribers = new Set<(val: any) => void>();
 	const pendingEditsMock = {
@@ -34,7 +34,7 @@ vi.mock('$lib/stores/tags', () => {
 	};
 });
 
-vi.mock('$lib/api/rename', () => ({
+vi.mock('#lib/api/rename.ts', () => ({
 	executeRenames: vi.fn()
 }));
 

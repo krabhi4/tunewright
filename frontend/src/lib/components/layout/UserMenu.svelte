@@ -1,8 +1,8 @@
 <script lang="ts">
 	import { goto } from '$app/navigation';
-	import { logout } from '$lib/api/auth';
-	import { auth } from '$lib/stores/auth';
-	import { clearTags } from '$lib/stores/tags';
+	import { logout } from '#lib/api/auth.ts';
+	import { auth } from '#lib/stores/auth.ts';
+	import { clearTags } from '#lib/stores/tags.ts';
 
 	interface Props {
 		onManageUsers?: () => void;

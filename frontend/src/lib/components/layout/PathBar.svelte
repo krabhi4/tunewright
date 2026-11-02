@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { currentPath } from '$lib/stores/files';
+	import { currentPath } from '#lib/stores/files.ts';
 
 	interface Props {
 		onNavigate: (path: string) => void;

@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { untrack } from 'svelte';
-	import { filterText, filterVisible } from '$lib/stores/ui';
+	import { filterText, filterVisible } from '#lib/stores/ui.ts';
 
 	interface Props {
 		matchCount?: number;

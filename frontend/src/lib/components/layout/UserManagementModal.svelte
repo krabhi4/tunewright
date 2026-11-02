@@ -1,6 +1,6 @@
 <script lang="ts">
-	import Modal from '$lib/components/common/Modal.svelte';
-	import ConfirmModal from '$lib/components/common/ConfirmModal.svelte';
+	import Modal from '#lib/components/common/Modal.svelte';
+	import ConfirmModal from '#lib/components/common/ConfirmModal.svelte';
 	import {
 		listUsers,
 		deleteUser,
@@ -9,10 +9,10 @@
 		deleteInvite,
 		type UserInfo,
 		type InviteInfo
-	} from '$lib/api/auth';
-	import { auth } from '$lib/stores/auth';
-	import { toast } from '$lib/stores/toast';
-	import { copyText } from '$lib/utils/clipboard';
+	} from '#lib/api/auth.ts';
+	import { auth } from '#lib/stores/auth.ts';
+	import { toast } from '#lib/stores/toast.ts';
+	import { copyText } from '#lib/utils/clipboard.ts';
 
 	interface Props {
 		open: boolean;

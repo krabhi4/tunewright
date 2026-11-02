@@ -1,11 +1,11 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { get } from 'svelte/store';
 import { files, selectedIds, selectRange, loadDirectory } from './files';
-import * as filesApi from '$lib/api/files';
-import type { FileEntry } from '$lib/types/audio';
+import * as filesApi from '#lib/api/files.ts';
+import type { FileEntry } from '#lib/types/audio.ts';
 
 // Mock the API layer
-vi.mock('$lib/api/files', () => ({
+vi.mock('#lib/api/files.ts', () => ({
 	listFiles: vi.fn()
 }));
 

@@ -1,7 +1,7 @@
-import { pendingEdits, saveAllEdits } from '$lib/stores/tags';
-import { executeRenames } from '$lib/api/rename';
-import type { ReleaseDetail } from '$lib/api/lookup';
-import type { FileEntry } from '$lib/types/audio';
+import { pendingEdits, saveAllEdits } from '#lib/stores/tags.ts';
+import { executeRenames } from '#lib/api/rename.ts';
+import type { ReleaseDetail } from '#lib/api/lookup.ts';
+import type { FileEntry } from '#lib/types/audio.ts';
 
 /** Filename formats used when renaming files to match a looked-up release. */
 const RENAME_FORMAT = '%track% - %title%';

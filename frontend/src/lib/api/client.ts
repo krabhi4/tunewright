@@ -1,6 +1,6 @@
 import { goto } from '$app/navigation';
-import { auth } from '$lib/stores/auth';
-import { clearTags } from '$lib/stores/tags';
+import { auth } from '#lib/stores/auth.ts';
+import { clearTags } from '#lib/stores/tags.ts';
 
 const BASE = '/api/v1';
 const PUBLIC_AUTH_PATHS = ['/auth/login', '/auth/setup', '/auth/register', '/auth/logout', '/auth/check'];

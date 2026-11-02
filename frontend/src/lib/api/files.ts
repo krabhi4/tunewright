@@ -1,5 +1,5 @@
 import { apiFetch } from './client';
-import type { FileListResult } from '$lib/types/audio';
+import type { FileListResult } from '#lib/types/audio.ts';
 
 export async function listFiles(
 	path: string = '/',

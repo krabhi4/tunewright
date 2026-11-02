@@ -1,5 +1,5 @@
 import { apiFetch } from './client';
-import type { TagData, TagEdits } from '$lib/types/audio';
+import type { TagData, TagEdits } from '#lib/types/audio.ts';
 
 interface ReadTagsResponse {
 	tags: Record<string, TagData>;

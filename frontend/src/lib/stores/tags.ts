@@ -1,7 +1,7 @@
 import { writable, derived, get } from 'svelte/store';
-import type { TagData, TagEdits } from '$lib/types/audio';
-import type { ApiError } from '$lib/api/client';
-import { readTags, readProperties, writeTags } from '$lib/api/tags';
+import type { TagData, TagEdits } from '#lib/types/audio.ts';
+import type { ApiError } from '#lib/api/client.ts';
+import { readTags, readProperties, writeTags } from '#lib/api/tags.ts';
 import { filesById, selectedIds } from './files';
 import { auth } from './auth';
 import { toast } from './toast';

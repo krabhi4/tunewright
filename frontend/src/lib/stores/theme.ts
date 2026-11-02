@@ -7,9 +7,9 @@ import {
 	type ThemeFamily,
 	type ThemeMode,
 	type StoredTheme
-} from '$lib/theme/resolve';
+} from '#lib/theme/resolve.ts';
 
-export type { ThemeFamily, ThemeMode } from '$lib/theme/resolve';
+export type { ThemeFamily, ThemeMode } from '#lib/theme/resolve.ts';
 
 const FAMILY_KEY = 'tunewright-theme-family';
 const MODE_KEY = 'tunewright-theme-mode';

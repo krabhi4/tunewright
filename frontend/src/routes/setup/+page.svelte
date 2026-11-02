@@ -1,8 +1,8 @@
 <script lang="ts">
 	import { goto } from '$app/navigation';
-	import { setup } from '$lib/api/auth';
-	import { auth } from '$lib/stores/auth';
-	import Logo from '$lib/icons/Logo.svelte';
+	import { setup } from '#lib/api/auth.ts';
+	import { auth } from '#lib/stores/auth.ts';
+	import Logo from '#lib/icons/Logo.svelte';
 
 	let username = $state('');
 	let password = $state('');

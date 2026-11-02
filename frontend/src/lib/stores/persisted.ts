@@ -1,5 +1,5 @@
 import { writable, type Writable } from 'svelte/store';
-import { browser } from '$app/environment';
+import { browser } from '$app/env';
 
 function typesMatch(val: any, initial: any): boolean {
 	if (initial === null || initial === undefined) return true;

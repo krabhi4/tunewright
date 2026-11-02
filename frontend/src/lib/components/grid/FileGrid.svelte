@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { untrack } from 'svelte';
-	import type { FileEntry, TagData } from '$lib/types/audio';
-	import { formatDuration, formatSize } from '$lib/utils/format';
+	import type { FileEntry, TagData } from '#lib/types/audio.ts';
+	import { formatDuration, formatSize } from '#lib/utils/format.ts';
 	import {
 		selectedIds,
 		focusedId,
@@ -9,12 +9,12 @@
 		selectRange,
 		directories,
 		currentPath
-	} from '$lib/stores/files';
-	import { mergedTags, queueVisibleTagsFetch, pendingEdits, fetchTagsForFiles, queuePropertiesFetch } from '$lib/stores/tags';
-	import { filterText, sortColumn, sortAsc } from '$lib/stores/ui';
-	import ContextMenu from '$lib/components/common/ContextMenu.svelte';
-	import { toast } from '$lib/stores/toast';
-	import { copyText } from '$lib/utils/clipboard';
+	} from '#lib/stores/files.ts';
+	import { mergedTags, queueVisibleTagsFetch, pendingEdits, fetchTagsForFiles, queuePropertiesFetch } from '#lib/stores/tags.ts';
+	import { filterText, sortColumn, sortAsc } from '#lib/stores/ui.ts';
+	import ContextMenu from '#lib/components/common/ContextMenu.svelte';
+	import { toast } from '#lib/stores/toast.ts';
+	import { copyText } from '#lib/utils/clipboard.ts';
 
 	interface Props {
 		files: FileEntry[];
@@ -33,7 +33,7 @@
 	const HEADER_HEIGHT = 30;
 	let containerHeight = $state(600);
 
-	// Sort state is in $lib/stores/ui (synced to URL)
+	// Sort state is in #lib/stores/ui (synced to URL)
 
 	// Last clicked row for shift-select
 	let lastClickedId = $state<string | null>(null);

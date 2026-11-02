@@ -1,10 +1,10 @@
 <script lang="ts">
-	import Modal from '$lib/components/common/Modal.svelte';
-	import type { FileEntry } from '$lib/types/audio';
-	import { previewActions, executeActions } from '$lib/api/actions';
-	import type { Action, ActionPreview } from '$lib/api/actions';
-	import { fetchTagsForFiles } from '$lib/stores/tags';
-	import { toast } from '$lib/stores/toast';
+	import Modal from '#lib/components/common/Modal.svelte';
+	import type { FileEntry } from '#lib/types/audio.ts';
+	import { previewActions, executeActions } from '#lib/api/actions.ts';
+	import type { Action, ActionPreview } from '#lib/api/actions.ts';
+	import { fetchTagsForFiles } from '#lib/stores/tags.ts';
+	import { toast } from '#lib/stores/toast.ts';
 
 	interface Props {
 		open: boolean;

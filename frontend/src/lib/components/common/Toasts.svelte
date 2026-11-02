@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { fly } from 'svelte/transition';
-	import { toasts, dismissToast, type ToastKind } from '$lib/stores/toast';
+	import { toasts, dismissToast, type ToastKind } from '#lib/stores/toast.ts';
 
 	const labels: Record<ToastKind, string> = {
 		success: 'OK',
