@@ -15,3 +15,5 @@ allowBuilds:
 minimumReleaseAge: 10080
 minimumReleaseAgeExclude:
   - esrap@2.4.0
+  # Renovate security update: vite@8.3.3
+  - vite@8.3.3
