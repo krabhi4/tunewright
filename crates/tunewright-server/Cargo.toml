@@ -8,27 +8,27 @@ rust-version.workspace = true
 [dependencies]
 tunewright-core = { path = "../tunewright-core" }
 tunewright-lookup = { path = "../tunewright-lookup" }
-axum = { version = "0.8", features = ["multipart"] }
-axum-extra = { version = "0.12", features = ["typed-header"] }
+axum = { version = "0.8.9", features = ["multipart"] }
+axum-extra = { version = "0.12.6", features = ["typed-header"] }
 tokio = { workspace = true }
-tower-http = { version = "0.7", features = ["fs", "trace", "set-header", "cors"] }
+tower-http = { version = "0.7.1", features = ["fs", "trace", "set-header", "cors"] }
 serde = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }
 reqwest = { workspace = true }
-rustls = { version = "0.23", default-features = false, features = ["ring"] }
+rustls = { version = "0.23.46", default-features = false, features = ["ring"] }
 tracing = { workspace = true }
-tracing-subscriber = { version = "0.3", features = ["env-filter"] }
-rand = "0.10"
+tracing-subscriber = { version = "0.3.23", features = ["env-filter"] }
+rand = "0.10.3"
 rayon = { workspace = true }
 hex = { workspace = true }
 argon2 = "0.6"
-uuid = { version = "1", features = ["v4"] }
-chrono = { version = "0.4", default-features = false, features = ["serde", "now", "std"] }
-sha2 = "0.11"
-base64 = "0.23"
-serde_urlencoded = "0.7"
-image = { version = ">=0.25.0, <0.25.11", default-features = false, features = ["jpeg", "png"] }
+uuid = { version = "1.29.1", features = ["v4"] }
+chrono = { version = "0.4.45", default-features = false, features = ["serde", "now", "std"] }
+sha2 = "0.11.1"
+base64 = "0.23.1"
+serde_urlencoded = "0.7.1"
+image = { version = ">=0.25.10, <0.25.11", default-features = false, features = ["jpeg", "png"] }
 
 [dev-dependencies]
-tower = { version = "0.5", features = ["util"] }
+tower = { version = "0.5.3", features = ["util"] }
