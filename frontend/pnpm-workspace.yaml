@@ -15,5 +15,10 @@ allowBuilds:
 minimumReleaseAge: 10080
 minimumReleaseAgeExclude:
   - esrap@2.4.0
+  - vite@8.3.6
+  - vitest@5.1.0
+  - '@vitest/mocker@5.1.0'
+  - '@vitest/spy@5.1.0'
+  - svelte-check@4.7.8
   # Renovate security update: vite@8.3.3
   - vite@8.3.3
