@@ -54,7 +54,7 @@ jobs:
 
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
-          node-version: 26.13.0
+          node-version: 26.13.1
           cache: pnpm
           cache-dependency-path: frontend/pnpm-lock.yaml
 
@@ -84,7 +84,7 @@ jobs:
 
       - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # master
         with:
-          toolchain: 1.99.1
+          toolchain: 1.100.0
 
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
         with:

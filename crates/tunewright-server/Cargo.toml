@@ -23,7 +23,7 @@ rand = "0.10.3"
 rayon = { workspace = true }
 hex = { workspace = true }
 argon2 = "0.6"
-uuid = { version = "1.29.1", features = ["v4"] }
+uuid = { version = "1.29.2", features = ["v4"] }
 chrono = { version = "0.4.45", default-features = false, features = ["serde", "now", "std"] }
 sha2 = "0.11.1"
 base64 = "0.23.1"
