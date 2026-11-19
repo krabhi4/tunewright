@@ -4,12 +4,14 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 rust-version.workspace = true
+description.workspace = true
+repository.workspace = true
+readme.workspace = true
 
 [dependencies]
 tunewright-core = { path = "../tunewright-core" }
 tunewright-lookup = { path = "../tunewright-lookup" }
 axum = { version = "0.8.9", features = ["multipart"] }
-axum-extra = { version = "0.12.6", features = ["typed-header"] }
 tokio = { workspace = true }
 tower-http = { version = "0.7.1", features = ["fs", "trace", "set-header", "cors"] }
 serde = { workspace = true }
@@ -24,7 +26,7 @@ rayon = { workspace = true }
 hex = { workspace = true }
 argon2 = "0.6"
 uuid = { version = "1.29.2", features = ["v4"] }
-chrono = { version = "0.4.45", default-features = false, features = ["serde", "now", "std"] }
+jiff = { version = "1.0.1", default-features = false, features = ["std", "serde"] }
 sha2 = "0.11.1"
 base64 = "0.23.1"
 serde_urlencoded = "0.7.1"
