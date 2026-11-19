@@ -2,7 +2,7 @@ use argon2::{
     password_hash::{PasswordHasher, PasswordVerifier},
     Argon2,
 };
-use chrono::{DateTime, Duration, Utc};
+use jiff::{SignedDuration, Timestamp};
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
@@ -21,7 +21,7 @@ pub struct User {
     pub username: String,
     pub password_hash: String,
     pub role: Role,
-    pub created_at: DateTime<Utc>,
+    pub created_at: Timestamp,
 }
 
 /// User info without password hash, for API responses.
@@ -30,7 +30,7 @@ pub struct UserPublic {
     pub id: String,
     pub username: String,
     pub role: Role,
-    pub created_at: DateTime<Utc>,
+    pub created_at: Timestamp,
 }
 
 impl From<&User> for UserPublic {
@@ -48,7 +48,7 @@ impl From<&User> for UserPublic {
 pub struct Invite {
     pub token: String,
     pub created_by: String,
-    pub expires_at: DateTime<Utc>,
+    pub expires_at: Timestamp,
     pub used: bool,
 }
 
@@ -107,7 +107,7 @@ impl UserManager {
     }
 
     fn save_store_data(&self, store: &mut UserStore) -> Result<(), &'static str> {
-        let now = Utc::now();
+        let now = Timestamp::now();
         store.invites.retain(|i| !i.used && i.expires_at >= now);
         let json = serde_json::to_string_pretty(store).map_err(|e| {
             tracing::error!("Failed to serialize users: {}", e);
@@ -162,7 +162,7 @@ impl UserManager {
             username: username.trim().to_lowercase(),
             password_hash,
             role: Role::SuperAdmin,
-            created_at: Utc::now(),
+            created_at: Timestamp::now(),
         };
         cloned_store.users.push(user.clone());
 
@@ -232,7 +232,7 @@ impl UserManager {
         let invite = Invite {
             token: Uuid::new_v4().to_string(),
             created_by: created_by.to_string(),
-            expires_at: Utc::now() + Duration::hours(48),
+            expires_at: Timestamp::now() + SignedDuration::from_hours(48),
             used: false,
         };
         cloned_store.invites.push(invite.clone());
@@ -254,7 +254,7 @@ impl UserManager {
         store
             .invites
             .iter()
-            .any(|i| i.token == token && !i.used && i.expires_at >= Utc::now())
+            .any(|i| i.token == token && !i.used && i.expires_at >= Timestamp::now())
     }
 
     pub fn register_with_invite(
@@ -282,7 +282,7 @@ impl UserManager {
             .position(|i| i.token == token)
             .ok_or("Invalid or expired invite")?;
         if cloned_store.invites[invite_idx].used
-            || cloned_store.invites[invite_idx].expires_at < Utc::now()
+            || cloned_store.invites[invite_idx].expires_at < Timestamp::now()
         {
             return Err("Invalid or expired invite");
         }
@@ -293,7 +293,7 @@ impl UserManager {
             username: normalized,
             password_hash,
             role: Role::Admin,
-            created_at: Utc::now(),
+            created_at: Timestamp::now(),
         };
         cloned_store.users.push(user.clone());
 
@@ -310,7 +310,7 @@ impl UserManager {
 
     pub fn list_invites(&self) -> Vec<Invite> {
         let store = self.store.lock().unwrap_or_else(|e| e.into_inner());
-        let now = Utc::now();
+        let now = Timestamp::now();
         store
             .invites
             .iter()
@@ -448,7 +448,7 @@ mod tests {
             store.invites.push(Invite {
                 token: "expired".to_string(),
                 created_by: "admin".to_string(),
-                expires_at: Utc::now() - Duration::hours(1),
+                expires_at: Timestamp::now() - SignedDuration::from_hours(1),
                 used: false,
             });
         }

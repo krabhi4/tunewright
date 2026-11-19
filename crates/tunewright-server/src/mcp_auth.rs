@@ -1,7 +1,7 @@
 use axum::http::HeaderMap;
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use base64::Engine;
-use chrono::{DateTime, Duration, Utc};
+use jiff::{SignedDuration, Timestamp};
 use reqwest::Url;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -46,7 +46,7 @@ pub struct OAuthClient {
     pub response_types: Vec<String>,
     pub token_endpoint_auth_method: String,
     pub client_id_issued_at: i64,
-    pub created_at: DateTime<Utc>,
+    pub created_at: Timestamp,
 }
 
 impl OAuthClient {
@@ -58,7 +58,7 @@ impl OAuthClient {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct AccessToken {
     hash: String,
-    expires_at: DateTime<Utc>,
+    expires_at: Timestamp,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -67,15 +67,15 @@ pub struct Grant {
     pub user_id: String,
     pub client_id: String,
     pub scope: String,
-    pub created_at: DateTime<Utc>,
+    pub created_at: Timestamp,
     refresh_hash: String,
-    pub refresh_expires_at: DateTime<Utc>,
+    pub refresh_expires_at: Timestamp,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     retired_refresh_hashes: Vec<String>,
     #[serde(default)]
     access_tokens: Vec<AccessToken>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub last_used_at: Option<DateTime<Utc>>,
+    pub last_used_at: Option<Timestamp>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -85,9 +85,9 @@ pub struct Pat {
     pub name: String,
     hash: String,
     pub scope: String,
-    pub created_at: DateTime<Utc>,
+    pub created_at: Timestamp,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub last_used_at: Option<DateTime<Utc>>,
+    pub last_used_at: Option<Timestamp>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -103,11 +103,11 @@ pub struct McpTokenPublic {
     pub name: Option<String>,
     pub token_type: String,
     pub scope: String,
-    pub created_at: DateTime<Utc>,
+    pub created_at: Timestamp,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub expires_at: Option<DateTime<Utc>>,
+    pub expires_at: Option<Timestamp>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub last_used_at: Option<DateTime<Utc>>,
+    pub last_used_at: Option<Timestamp>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -165,8 +165,8 @@ pub enum RefreshError {
 
 #[derive(Debug, Clone, Copy)]
 struct Usage {
-    seen: DateTime<Utc>,
-    saved: Option<DateTime<Utc>>,
+    seen: Timestamp,
+    saved: Option<Timestamp>,
 }
 
 struct RecentRefresh {
@@ -203,11 +203,11 @@ fn hash_token(raw: &str) -> String {
     hex::encode(Sha256::digest(raw.as_bytes()))
 }
 
-fn new_access_token(now: DateTime<Utc>) -> (String, AccessToken) {
+fn new_access_token(now: Timestamp) -> (String, AccessToken) {
     let raw = format!("tw_mcp_at_{}", random_hex::<32>());
     let token = AccessToken {
         hash: hash_token(&raw),
-        expires_at: now + Duration::seconds(ACCESS_TOKEN_TTL_SECS),
+        expires_at: now + SignedDuration::from_secs(ACCESS_TOKEN_TTL_SECS),
     };
     (raw, token)
 }
@@ -242,7 +242,7 @@ fn refuse_to_start(path: &std::path::Path, reason: &str) -> ! {
 fn quarantine(path: &std::path::Path, reason: &str) {
     let aside = path.with_extension(format!(
         "json.invalid-{}",
-        Utc::now().format("%Y%m%dT%H%M%S%3f")
+        Timestamp::now().strftime("%Y%m%dT%H%M%S%3f")
     ));
     match std::fs::rename(path, &aside) {
         Ok(()) => tracing::error!(
@@ -306,7 +306,7 @@ impl McpAuthManager {
     fn snapshot(&self) -> McpAuthStore {
         let mut store = self.store.lock().unwrap_or_else(|e| e.into_inner()).clone();
         let usage = self.usage.lock().unwrap_or_else(|e| e.into_inner());
-        let merge = |id: &str, stored: &mut Option<DateTime<Utc>>| {
+        let merge = |id: &str, stored: &mut Option<Timestamp>| {
             if let Some(u) = usage.get(id) {
                 *stored = Some(stored.map_or(u.seen, |s| s.max(u.seen)));
             }
@@ -337,13 +337,13 @@ impl McpAuthManager {
         if !changed {
             return Ok(result);
         }
-        let now = Utc::now();
+        let now = Timestamp::now();
         next.grants.retain(|g| g.refresh_expires_at > now);
         for g in &mut next.grants {
             g.access_tokens.retain(|t| t.expires_at > now);
         }
         let in_use: HashSet<&str> = next.grants.iter().map(|g| g.client_id.as_str()).collect();
-        let idle_cutoff = now - Duration::days(IDLE_CLIENT_PRUNE_DAYS);
+        let idle_cutoff = now - SignedDuration::from_hours(IDLE_CLIENT_PRUNE_DAYS * 24);
         next.clients
             .retain(|c| in_use.contains(c.client_id.as_str()) || c.created_at > idle_cutoff);
         let json = serde_json::to_string_pretty(&next).map_err(|e| {
@@ -413,7 +413,7 @@ impl McpAuthManager {
         redirect_uris: Vec<String>,
         grant_types: Vec<String>,
     ) -> OAuthClient {
-        let now = Utc::now();
+        let now = Timestamp::now();
         let client = OAuthClient {
             client_id: format!("tw_client_{}", random_hex::<16>()),
             client_name,
@@ -421,7 +421,7 @@ impl McpAuthManager {
             grant_types,
             response_types: vec!["code".to_string()],
             token_endpoint_auth_method: "none".to_string(),
-            client_id_issued_at: now.timestamp(),
+            client_id_issued_at: now.as_second(),
             created_at: now,
         };
         let mut pending = self
@@ -486,12 +486,12 @@ impl McpAuthManager {
             if !store.clients.iter().any(|c| c.client_id == client_id) {
                 store.clients.push(client.clone());
             }
-            let now = Utc::now();
+            let now = Timestamp::now();
             let id = format!("grant_{}", random_hex::<16>());
             let (access, access_token) = new_access_token(now);
             let refresh = new_refresh_token(&id);
             let refresh_expires_at = if client.allows_refresh() {
-                now + Duration::days(REFRESH_TOKEN_TTL_DAYS)
+                now + SignedDuration::from_hours(REFRESH_TOKEN_TTL_DAYS * 24)
             } else {
                 access_token.expires_at
             };
@@ -547,7 +547,7 @@ impl McpAuthManager {
             return Err(RefreshError::Invalid);
         }
         self.update_if_changed(|store| {
-            let now = Utc::now();
+            let now = Timestamp::now();
             let Some(idx) = store.grants.iter().position(|g| {
                 g.id == grant_id && g.client_id == client_id && g.refresh_expires_at > now
             }) else {
@@ -576,7 +576,8 @@ impl McpAuthManager {
                 .len()
                 .saturating_sub(RETIRED_REFRESH_TOKENS);
             grant.retired_refresh_hashes.drain(..excess);
-            grant.refresh_expires_at = now + Duration::days(REFRESH_TOKEN_TTL_DAYS);
+            grant.refresh_expires_at =
+                now + SignedDuration::from_hours(REFRESH_TOKEN_TTL_DAYS * 24);
             grant.access_tokens = vec![access_token];
             let issued = IssuedTokens {
                 user_id: grant.user_id.clone(),
@@ -615,7 +616,7 @@ impl McpAuthManager {
             name: name.to_string(),
             hash: hash_token(&raw),
             scope: scope.to_string(),
-            created_at: Utc::now(),
+            created_at: Timestamp::now(),
             last_used_at: None,
         };
         self.update(|store| {
@@ -627,7 +628,7 @@ impl McpAuthManager {
 
     pub fn validate_bearer_token(&self, raw_token: &str) -> Option<Principal> {
         let hash = hash_token(raw_token);
-        let now = Utc::now();
+        let now = Timestamp::now();
         let (id, principal) = {
             let store = self.store.lock().unwrap_or_else(|e| e.into_inner());
             if let Some(g) = store.grants.iter().find(|g| {
@@ -656,9 +657,9 @@ impl McpAuthManager {
                 saved: None,
             });
             entry.seen = now;
-            let due = entry
-                .saved
-                .is_none_or(|saved| now - saved > Duration::minutes(USAGE_PERSIST_MINUTES));
+            let due = entry.saved.is_none_or(|saved| {
+                now.duration_since(saved) > SignedDuration::from_mins(USAGE_PERSIST_MINUTES)
+            });
             if due {
                 entry.saved = Some(now);
             }
@@ -1295,7 +1296,10 @@ mod tests {
         assert!(refresh.is_none());
         assert!(manager.validate_bearer_token(&access).is_some());
         let grant = &manager.grants_and_pats().1[0];
-        assert!(grant.refresh_expires_at <= Utc::now() + Duration::seconds(ACCESS_TOKEN_TTL_SECS));
+        assert!(
+            grant.refresh_expires_at
+                <= Timestamp::now() + SignedDuration::from_secs(ACCESS_TOKEN_TTL_SECS)
+        );
         let _ = std::fs::remove_dir_all(&temp_dir);
     }
 
@@ -1347,7 +1351,7 @@ mod tests {
             .unwrap()
             .get_mut(&pat.id)
             .unwrap()
-            .saved = Some(Utc::now() - Duration::minutes(USAGE_PERSIST_MINUTES + 1));
+            .saved = Some(Timestamp::now() - SignedDuration::from_mins(USAGE_PERSIST_MINUTES + 1));
         let before = std::fs::metadata(temp_dir.join("mcp_auth.json"))
             .unwrap()
             .modified()
