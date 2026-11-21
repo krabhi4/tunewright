@@ -1,5 +1,5 @@
 # Stage 1: Build frontend
-FROM --platform=$BUILDPLATFORM node:26.13.0-slim@sha256:5adad64f9a1fca2d51972caa65983634c8a774eb300d72b20f7f2a0f60368072 AS frontend-builder
+FROM --platform=$BUILDPLATFORM node:26.13.1-slim@sha256:e6bedef217677b276c591795e169840edd9096dbf13f29df8ef8d1856b8820bc AS frontend-builder
 WORKDIR /app/frontend
 COPY frontend/package.json frontend/pnpm-lock.yaml* frontend/pnpm-workspace.yaml* ./
 RUN npm install -g --allow-scripts=pnpm "$(node -p "require('./package.json').packageManager")"
@@ -11,7 +11,7 @@ RUN pnpm run build
 # Stage 2: Build Rust backend (cargo-chef splits dependency compilation into
 # its own cacheable layer).
 # Stable Rust, digest-pinned; Dependabot proposes digest bumps.
-FROM rust:1-bookworm@sha256:e6f2cff35d0f309acf8433b4f05878ed77092602c5065cc81801177da0bb3a9c AS chef
+FROM rust:1-bookworm@sha256:ade39a710ef85f3506cffcfec3e8a24ba090badef1dff2fb798f71d878833fea AS chef
 RUN cargo install cargo-chef --version 0.1.78 --locked
 WORKDIR /app
 
