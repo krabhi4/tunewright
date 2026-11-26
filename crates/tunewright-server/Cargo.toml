@@ -21,11 +21,11 @@ reqwest = { workspace = true }
 rustls = { version = "0.23.46", default-features = false, features = ["ring"] }
 tracing = { workspace = true }
 tracing-subscriber = { version = "0.3.23", features = ["env-filter"] }
-rand = "0.10.3"
+rand = "0.10.4"
 rayon = { workspace = true }
 hex = { workspace = true }
 argon2 = "0.6"
-uuid = { version = "1.29.2", features = ["v4"] }
+uuid = { version = "1.29.3", features = ["v4"] }
 jiff = { version = "1.0.1", default-features = false, features = ["std", "serde"] }
 sha2 = "0.11.1"
 base64 = "0.23.1"
