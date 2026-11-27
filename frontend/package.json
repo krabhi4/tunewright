@@ -24,7 +24,7 @@
   "devDependencies": {
     "@sveltejs/adapter-static": "^4.0.1",
     "@sveltejs/kit": "^3.4.0",
-    "@sveltejs/vite-plugin-svelte": "^7.3.2",
+    "@sveltejs/vite-plugin-svelte": "^7.3.1",
     "@types/node": "^26.6.6",
     "svelte": "^5.59.1",
     "svelte-check": "^4.7.8",
