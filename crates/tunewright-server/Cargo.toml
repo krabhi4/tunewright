@@ -26,7 +26,7 @@ rayon = { workspace = true }
 hex = { workspace = true }
 argon2 = "0.6"
 uuid = { version = "1.29.3", features = ["v4"] }
-jiff = { version = "1.0.1", default-features = false, features = ["std", "serde"] }
+jiff = { version = "1.0.2", default-features = false, features = ["std", "serde"] }
 sha2 = "0.11.1"
 base64 = "0.23.1"
 serde_urlencoded = "0.7.1"
